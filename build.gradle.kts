@@ -11,7 +11,7 @@ plugins {
 }
 
 allprojects {
-    group = "io.github.huang0yan4.platypus"
+    group = "io.github.huang404yan.platypus"
     version = "0.8.0-preview.1"
 }
 

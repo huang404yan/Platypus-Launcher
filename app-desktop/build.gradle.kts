@@ -21,7 +21,7 @@ dependencies {
 
 compose.desktop {
     application {
-        mainClass = "io.github.huang0yan4.platypus.desktop.MainKt"
+        mainClass = "io.github.huang404yan.platypus.desktop.MainKt"
 
         // 原生包用 jpackage 打，图标与应用名跟孵化版对齐。
         // 产物在 app-desktop/build/compose/binaries/main/ 下。

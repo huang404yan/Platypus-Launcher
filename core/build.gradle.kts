@@ -25,11 +25,11 @@ val generateBuildInfo = tasks.register("generateBuildInfo") {
     inputs.property("group", groupValue)
     outputs.dir(buildInfoDir)
     doLast {
-        val file = buildInfoDir.get().file("io/github/huang0yan4/platypus/core/BuildInfo.kt").asFile
+        val file = buildInfoDir.get().file("io/github/huang404yan/platypus/core/BuildInfo.kt").asFile
         file.parentFile.mkdirs()
         file.writeText(
             """
-            package io.github.huang0yan4.platypus.core
+            package io.github.huang404yan.platypus.core
 
             /** 由 Gradle 生成，请勿手改；改版本只改根 build.gradle.kts 的 version。 */
             object BuildInfo {

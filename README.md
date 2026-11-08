@@ -19,7 +19,7 @@
 | 中文名 | 鸭嘴兽启动器 | 鸭嘴兽·孵化版 |
 | 英文名 | Platypus Launcher | Platypus Preview |
 | 版本号 | `1.0.0` 起进位 | `0.x-preview.N` |
-| Android applicationId | `io.github.huang0yan4.platypus.android` | 同上 + `.preview` |
+| Android applicationId | `io.github.huang404yan.platypus.launcher` | `io.github.huang404yan.platypus.launcher.preview` |
 | 命令行 | `platypus-launcher` | `platypus-launcher-preview` |
 
 口号：**把好东西，缝在一起。** 孵化版的关于页另可写「自然界早就缝合好了。」
