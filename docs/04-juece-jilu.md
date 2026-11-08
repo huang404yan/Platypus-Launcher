@@ -8,16 +8,24 @@
 
 - 决定：取代 D8，产品定名中文「鸭嘴兽启动器」/ 英文 Platypus Launcher，口号「把好东西，缝在一起。」（关于页可用「自然界早就缝合好了。」）。
 - 理由：原名「科学怪人 / Frankenstein」与「缝合各家优点」的立意同构，但不是可注册、可长期运营的品牌词；鸭嘴兽同为「缝合怪」——鸭嘴、海狸尾、产卵哺乳，正好对上产品立意，且取名温和、不易撞名。
-- 影响：仓库目录 `platypus`、根包 `io.github.huang0yan4.platypus`、Android `io.github.huang0yan4.platypus.android`。
+- 影响：仓库目录 `platypus`、根包 `io.github.huang404yan.platypus`、Android 正式版 `io.github.huang404yan.platypus.launcher`、孵化版 `.launcher.preview`。
 - 已执行：目录与包迁完、全局替换完成，待重新编译验证。
 
 ### D10 单一公开测试通道：鸭嘴兽·孵化版（Platypus Preview）
 
 - 决定：只保留两条线——正式版「鸭嘴兽启动器」与唯一公开测试版「鸭嘴兽·孵化版」。不另起内测/公测/灰度之类渠道名，测试版只靠 `preview.N` 进位。
 - 理由：渠道越多，版本矩阵与用户反馈越混乱；「孵化」既对应鸭嘴兽的卵生设定，也点明这是未定型的预览线。
-- 标识：Android applicationId 在正式包名后加 `.preview`；桌面命令行 `platypus-launcher` / `platypus-launcher-preview`；Linux 桌面文件 `platypus.desktop` / `platypus-preview.desktop`；安装包命名如 `Platypus-Launcher-0.8.0-preview.1-win-x64.exe`。
+- 标识：Android applicationId 两条线各用独立包名（正式版 `.launcher`、孵化版 `.launcher.preview`）——理由见下方 D11；桌面命令行 `platypus-launcher` / `platypus-launcher-preview`；Linux 桌面文件 `platypus.desktop` / `platypus-preview.desktop`；安装包命名如 `Platypus-Launcher-0.8.0-preview.1-win-x64.exe`。
 - 版本号：正式版从 1.0.0 起按语义化进位；孵化版为 `0.x-preview.N`。
 - 当前落点：仓库现处 0.8.0-preview.1（孵化线），正式版 1.0.0 待启动链路跑通后再立。
+
+### D11 Android 两条线各用独立包名（2026-11-08）
+
+- 决定：正式版 `io.github.huang404yan.platypus.launcher`，孵化版 `io.github.huang404yan.platypus.launcher.preview`（品牌表最初写法，最终确认采用）。
+- 理由：孵化版是「可以随便炸」的实验线，正式版是「装了就指望它稳定」的发布线。两个包名意味着同一台设备可同时装、互不影响，测试出问题不会污染正式版数据目录；也符合「孵化版不占正式版版本号」的双号段规则。
+- 代价：孵化版的改动迁到正式线时要换包名重出一次（不能覆盖安装），且孵化版的用户数据不会自动带过去。在尚未有真实用户的阶段，这不构成负担。
+- 已落地：`androidApp/build.gradle.kts` 里 namespace 与 applicationId 都是 `.launcher.preview`，源码在 `androidApp/src/main/kotlin/io/github/huang404yan/platypus/launcher/preview/MainActivity.kt`；构建脚本加了 `check()`，版本号不含 `-preview` 却仍用孵化包名时直接失败，防止发错线。
+- 放弃：两条线共用一个包名——两版不能并存，且正式版与孵化版共用同一份用户数据，实验性改动会动到正式环境。
 
 ### D1 从零写，不 fork 任何现有启动器
 
