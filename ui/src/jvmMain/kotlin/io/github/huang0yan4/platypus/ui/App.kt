@@ -34,6 +34,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import io.github.huang0yan4.platypus.core.Brand
 import io.github.huang0yan4.platypus.core.instance.Instance
 import io.github.huang0yan4.platypus.core.instance.InstanceScanner
 import io.github.huang0yan4.platypus.core.instance.LoaderKind
@@ -46,6 +47,7 @@ enum class Page(val label: String) {
     DOWNLOAD("下载"),
     LINK("联机"),
     MORE("更多"),
+    ABOUT("关于"),
 }
 
 /** 桌面默认的 .minecraft 位置：优先用 %APPDATA%\\.minecraft。 */
@@ -67,6 +69,7 @@ fun App(initialGameRoot: String? = null) {
             ) {
                 when (page) {
                     Page.INSTANCE -> InstancePage(initialGameRoot)
+                    Page.ABOUT -> AboutPage()
                     else -> PlaceholderPage(page)
                 }
             }
@@ -80,10 +83,10 @@ private fun SideBar(current: Page, onSelect: (Page) -> Unit) {
         modifier = Modifier.width(220.dp).fillMaxHeight(),
         color = MaterialTheme.colorScheme.surfaceVariant,
     ) {
-        Column(Modifier.padding(16.dp)) {
-            Text("鸭嘴兽启动器", style = MaterialTheme.typography.titleLarge)
+        Column(Modifier.fillMaxHeight().padding(16.dp)) {
+            Text(Brand.NAME_ZH, style = MaterialTheme.typography.titleLarge)
             Text(
-                "Platypus Preview",
+                if (Brand.isPreview) Brand.PREVIEW_NAME_EN else Brand.NAME_EN,
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -110,6 +113,17 @@ private fun SideBar(current: Page, onSelect: (Page) -> Unit) {
                     )
                 }
             }
+            Spacer(Modifier.weight(1f))
+            Text(
+                "v" + Brand.version,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Text(
+                Brand.DISCLAIMER_SHORT,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
     }
 }

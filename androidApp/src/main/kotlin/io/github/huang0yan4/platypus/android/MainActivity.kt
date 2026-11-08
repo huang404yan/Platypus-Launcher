@@ -52,6 +52,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
+import io.github.huang0yan4.platypus.core.Brand
 import io.github.huang0yan4.platypus.core.instance.Instance
 import io.github.huang0yan4.platypus.core.instance.InstanceScanner
 import io.github.huang0yan4.platypus.core.instance.LoaderKind
@@ -80,6 +81,7 @@ private enum class Tab(val label: String) {
     DOWNLOAD("下载"),
     LAUNCH("启动"),
     MORE("更多"),
+    ABOUT("关于"),
 }
 
 @Composable
@@ -99,6 +101,7 @@ private fun AppRoot() {
         ) {
             when (tab) {
                 Tab.INSTANCE -> InstancePage()
+                Tab.ABOUT -> AboutPage()
                 else -> Placeholder(tab)
             }
         }
@@ -116,13 +119,13 @@ private fun SideBar(current: Tab, onSelect: (Tab) -> Unit) {
         verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
         Text(
-            text = "鸭嘴兽 · 孵化版",
+            text = if (Brand.isPreview) Brand.PREVIEW_NAME_ZH else Brand.NAME_ZH,
             style = MaterialTheme.typography.titleLarge,
             fontWeight = FontWeight.Bold,
             modifier = Modifier.padding(start = 8.dp),
         )
         Text(
-            text = "Platypus Preview",
+            text = if (Brand.isPreview) Brand.PREVIEW_NAME_EN else Brand.NAME_EN,
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(start = 8.dp),
@@ -150,6 +153,19 @@ private fun SideBar(current: Tab, onSelect: (Tab) -> Unit) {
                 )
             }
         }
+        Spacer(Modifier.weight(1f))
+        Text(
+            text = "v" + Brand.version,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(start = 8.dp),
+        )
+        Text(
+            text = Brand.DISCLAIMER_SHORT,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(start = 8.dp),
+        )
     }
 }
 
@@ -300,6 +316,55 @@ private fun LoaderBadge(loader: LoaderKind) {
     }
     Surface(color = color, shape = RoundedCornerShape(6.dp)) {
         Text(label, Modifier.padding(horizontal = 8.dp, vertical = 3.dp), style = MaterialTheme.typography.labelSmall)
+    }
+}
+
+@Composable
+private fun AboutPage() {
+    Column(
+        Modifier.fillMaxSize(),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Text("关于", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
+
+        Text(Brand.NAME_ZH, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+        Text(
+            if (Brand.isPreview) Brand.PREVIEW_SLOGAN else Brand.SLOGAN,
+            style = MaterialTheme.typography.bodyMedium,
+        )
+
+        Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
+            Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                InfoRow("版本", Brand.version)
+                InfoRow("通道", if (Brand.isPreview) "孵化版（Platypus Preview）" else "正式版（Platypus Launcher）")
+                InfoRow("协议", "Apache-2.0")
+                InfoRow("仓库", Brand.HOMEPAGE)
+            }
+        }
+
+        Text("免责声明", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+        Text(
+            Brand.DISCLAIMER_ZH,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Text(
+            Brand.DISCLAIMER_EN,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
+@Composable
+private fun InfoRow(label: String, value: String) {
+    Column(Modifier.fillMaxWidth()) {
+        Text(
+            label,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Text(value, style = MaterialTheme.typography.bodySmall)
     }
 }
 

@@ -1,6 +1,16 @@
+<p align="center">
+  <img src="branding/source-baby-1024.png" width="128" alt="鸭嘴兽·孵化版图标">
+</p>
+
 # 鸭嘴兽启动器（Platypus Launcher）
 
 从零编写的 Minecraft 启动器。目标：三端（Android 优先、Windows、Linux）、开源、启动快、界面不卡。
+
+> **免责声明**
+>
+> 鸭嘴兽启动器（Platypus Launcher）是一个由第三方开发者制作的非官方 Minecraft 启动器。本项目与 Mojang Studios 及 Microsoft 无任何关联，未获得其授权、认可或赞助。Minecraft 是 Mojang Studios 的注册商标。请支持购买正版游戏。
+>
+> Platypus Launcher is an unofficial third-party Minecraft launcher. This project is not affiliated with, endorsed by, or sponsored by Mojang Studios or Microsoft. Minecraft is a registered trademark of Mojang Studios. Please support the official game by purchasing it.
 
 ## 品牌
 
@@ -14,7 +24,7 @@
 
 口号：**把好东西，缝在一起。** 孵化版的关于页另可写「自然界早就缝合好了。」
 
-> 非官方 Minecraft 启动器，与 Mojang / Microsoft 无关联。
+图标：孵化版用幼体半壳版，正式版用成年全身版。各平台成品在 `branding/` 下，源码里已经接好（Android 自适应图标、桌面窗口图标、jpackage 安装包图标）。
 
 > 不是 PCL / HMCL / Prism 的分支。这些项目只作为产品设计参考，代码一行不抄（见 `CONTRIBUTING.md`）。
 
@@ -73,4 +83,6 @@ releases/preview/{android,windows,linux}/   Platypus Preview 孵化版
 
 ## 状态
 
-M0（骨架）+ M1（实例扫描）已完成，当前版本 **0.8.0-preview.1**（孵化线）。下载器、Java 运行时、启动链路尚未开始。
+M0（骨架）+ M1（实例扫描）+ 下载器已完成，当前版本 **0.8.0-preview.1**（孵化线）。Java 运行时探测、启动链路尚未开始。
+
+已实现：实例扫描（`core/instance`）、HTTP 下载器（多源镜像、sha1 校验、`.part` 断点、并发限流）、Mojang 版本清单与版本 json 解析（容错缺字段）、下载计划生成（客户端 jar / libraries / assets 索引 / 资源对象，含 BMCLAPI 镜像备选）。单测 29 个全过。
