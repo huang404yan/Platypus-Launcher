@@ -1,10 +1,14 @@
 package io.github.huang0yan4.platypus.desktop
 
+import androidx.compose.ui.graphics.painter.BitmapPainter
+import androidx.compose.ui.graphics.toComposeImageBitmap
 import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.application
+import io.github.huang0yan4.platypus.core.Brand
 import io.github.huang0yan4.platypus.core.instance.InstanceScanner
 import io.github.huang0yan4.platypus.ui.App
 import io.github.huang0yan4.platypus.ui.defaultGameRoot
+import org.jetbrains.skia.Image
 import java.io.File
 
 fun main(args: Array<String>) {
@@ -19,9 +23,24 @@ fun main(args: Array<String>) {
         result.warnings.forEach { println("[scan] warning: $it") }
     }
 
+    val title = if (Brand.isPreview) "${Brand.PREVIEW_NAME_ZH} ${Brand.version}" else Brand.NAME_ZH
+
     application {
-        Window(onCloseRequest = ::exitApplication, title = "鸭嘴兽启动器") {
+        Window(
+            onCloseRequest = ::exitApplication,
+            title = title,
+            icon = loadWindowIcon(),
+        ) {
             App(initialGameRoot = root.ifBlank { null })
         }
     }
+}
+
+/** 窗口图标从 jar 内的 icon/platypus.png 读取；读不到就不带图标，不阻断启动。 */
+private fun loadWindowIcon(): BitmapPainter? {
+    val bytes = Thread.currentThread().contextClassLoader
+        ?.getResourceAsStream("icon/platypus.png")
+        ?.use { it.readBytes() }
+        ?: return null
+    return runCatching { BitmapPainter(Image.makeFromEncoded(bytes).toComposeImageBitmap()) }.getOrNull()
 }
