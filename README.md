@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="branding/source-baby-1024.png" width="128" alt="鸭嘴兽·孵化版图标">
+  <img src="docs/logo.png" width="128" alt="鸭嘴兽启动器图标">
 </p>
 
 # 鸭嘴兽启动器（Platypus Launcher）
@@ -24,7 +24,7 @@
 
 口号：**把好东西，缝在一起。** 孵化版的关于页另可写「自然界早就缝合好了。」
 
-图标：孵化版用幼体半壳版，正式版用成年全身版。各平台成品在 `branding/` 下，源码里已经接好（Android 自适应图标、桌面窗口图标、jpackage 安装包图标）。
+图标：正式版用成年全身版，孵化版用幼体半壳版。仓库里只留一张总图（`docs/logo.png`），各平台成品已接进源码（Android 自适应图标、桌面窗口图标、jpackage 安装包图标）。
 
 > 不是 PCL / HMCL / Prism 的分支。这些项目只作为产品设计参考，代码一行不抄（见 `CONTRIBUTING.md`）。
 
@@ -70,14 +70,16 @@ Windows 下也可以用 `gradlew.bat`。首次构建会下载约 300 MB 依赖�
 
 ## 下载
 
-编译好的包在 `releases/` 下，按正式版 / 孵化版分目录，各自再分平台：
+编译好的包**不在仓库里**，走 GitHub Releases 的附件。仓库历史只放源码与构建必需的文件，二进制进去就删不掉，只会把仓库撑大。
+
+本地出包后先按通道/平台放到 `releases/` 下（已 gitignore，只在本机）：
 
 ```
 releases/stable/{android,windows,linux}/    Platypus Launcher 正式版
 releases/preview/{android,windows,linux}/   Platypus Preview 孵化版
 ```
 
-每个平台最多留 5 个，规则见 `releases/README.md`。
+每个平台最多留 5 个，命名与留存规则见 `releases/README.md`。
 
 > 目前只有 Android 的孵化版包。桌面端还没有可分发的 exe（缺 jpackage 打包配置）。
 
