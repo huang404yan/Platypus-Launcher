@@ -19,3 +19,12 @@ keystore.properties
 releases/**/*-debug.apk
 releases/**/*-debug.exe
 releases/**/*.aab
+
+# 仓库只收源码与构建必需文件。下面这些只留在本机，不进 Git：
+#   发布包    —— 走 GitHub Release 附件
+#   品牌源图  —— 图标已接进各模块资源，源图没必要跟仓库
+#   截图      —— 占体积且随时过期
+releases/*
+!releases/README.md
+branding/
+docs/screenshots/
