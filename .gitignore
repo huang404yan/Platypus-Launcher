@@ -1,0 +1,21 @@
+.gradle/
+build/
+out/
+*.iml
+.idea/
+local.properties
+.DS_Store
+*.log
+
+# 本地临时构建输出
+dist/
+
+# 签名材料永远不进仓库
+*.jks
+*.keystore
+keystore.properties
+
+# 发布目录里只收对外可安装的包，调试版不收
+releases/**/*-debug.apk
+releases/**/*-debug.exe
+releases/**/*.aab

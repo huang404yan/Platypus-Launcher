@@ -1,0 +1,5 @@
+鸭嘴兽启动器 (Platypus Launcher)
+Copyright 2026 Platypus contributors
+
+This product includes software developed by third parties.
+第三方组件清单在依赖确定后补充；当前 M0 阶段仅使用 Kotlin、Compose Multiplatform、kotlinx 系列（均为 Apache-2.0）。
