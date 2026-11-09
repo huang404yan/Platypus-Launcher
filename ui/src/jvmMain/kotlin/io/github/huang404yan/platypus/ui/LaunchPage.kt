@@ -50,6 +50,7 @@ import io.github.huang404yan.platypus.core.launch.LaunchRequest
 import io.github.huang404yan.platypus.core.runtime.GameJavaRules
 import io.github.huang404yan.platypus.core.runtime.JavaRuntime
 import io.github.huang404yan.platypus.core.runtime.findExactMajor
+import io.github.huang404yan.platypus.core.settings.normalizeOfflineUsername
 import io.github.huang404yan.platypus.core.version.parseVersionJson
 import java.io.File
 import kotlinx.coroutines.delay
@@ -94,6 +95,8 @@ fun LaunchPage(backend: LauncherBackend?, initialGameRoot: String?) {
     var memoryNotice by remember { mutableStateOf("") }
 
     var username by remember { mutableStateOf("Dev") }
+    // 上次从设置文件里读到的名字；启动时只有在用户改过名的情况下才回写，避免每次启动都写盘
+    var savedUsername by remember { mutableStateOf("") }
     var phase by remember { mutableStateOf<LaunchPhase>(LaunchPhase.Idle) }
     var stageText by remember { mutableStateOf("") }
 
@@ -200,6 +203,23 @@ fun LaunchPage(backend: LauncherBackend?, initialGameRoot: String?) {
             )
             return
         }
+        // 名字改过就顺手记住，下次打开还是这个名字；没改就不重复写盘
+        val cleanedName = normalizeOfflineUsername(username)
+        username = cleanedName
+        if (cleanedName != savedUsername) {
+            val repository = backend.settings
+            if (repository != null) {
+                savedUsername = cleanedName
+                scope.launch {
+                    runCatching {
+                        val stored = withContext(Dispatchers.IO) { repository.load() }
+                        withContext(Dispatchers.IO) {
+                            repository.save(stored.copy(offlineUsername = cleanedName))
+                        }
+                    }.onFailure { savedUsername = "" }
+                }
+            }
+        }
         logs.clear()
         buffer.clear()
         menuReached = false
@@ -256,6 +276,19 @@ fun LaunchPage(backend: LauncherBackend?, initialGameRoot: String?) {
     }
 
     LaunchedEffect(Unit) {
+        // 设置先读：默认游戏目录与离线用户名都要在首次扫描、首次启动前就位。
+        val repository = backend.settings
+        if (repository != null) {
+            val stored = withContext(Dispatchers.IO) { runCatching { repository.load() }.getOrNull() }
+            if (stored != null) {
+                username = stored.offlineUsername
+                savedUsername = stored.offlineUsername
+                if (rootText.isBlank() && stored.defaultGameRoot.isNotBlank()) {
+                    rootText = stored.defaultGameRoot
+                }
+                if (selected == null) memoryText = stored.defaultMemoryMb.toString()
+            }
+        }
         if (rootText.isNotBlank()) rescan()
         detectJava()
     }
@@ -420,6 +453,7 @@ fun LaunchPage(backend: LauncherBackend?, initialGameRoot: String?) {
                 label = { Text("离线用户名") },
                 singleLine = true,
                 enabled = !busy,
+                supportingText = { Text("点「启动」会记住这个名字，下次自动填回来。") },
             )
             Button(onClick = { launchGame() }, enabled = !busy && selected != null && selectedJava != null) {
                 Text("启动")

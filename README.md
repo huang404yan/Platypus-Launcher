@@ -75,6 +75,7 @@ Windows 下也可以用 `gradlew.bat`。首次构建会下载约 300 MB 依赖�
 - `docs/10-android-ceshi-buzhou.md`：**Android 预览版测试步骤**（给用户的手册）
 - `docs/11-android-s1-shiyan.md`：**S1 真机实验清单**（用户可执行，含回报表格）
 - `docs/12-win-oneclick-loop.md`：**一键装闭环**（选版本 → 下载 → 补 Java → 建实例 → 启动）
+- `docs/13-settings-persistence.md`：**启动器设置持久化**（离线用户名 / 默认游戏目录 / 默认内存）
 
 ## 下载
 
@@ -99,6 +100,8 @@ M0（骨架）+ M1（实例扫描）+ M2（下载器）+ M3（**Windows 一键�
 
 **Android 端还差得远**：下载页与诊断页已写但**从未在真机上跑过**；「应用内起 JVM + 图形转译」这条路（`docs/09`）目前只有纸面推算，没有一份真机数字。这一条成立与否决定手机优先是不是宣传语。
 
-单测 **105 例全过**（12 个测试类，`./gradlew :core:test`）。
+设置已经能存住：离线用户名、默认游戏目录、新实例默认内存，落在 `<游戏目录>/platypus/settings.json`，关掉再打开还在（`docs/13`）。
 
-尚未实现：正版/微软登录（`core/auth` 只有接口）、Forge/Fabric 安装器、下载续传、LINK（联机）与 MORE 两个页面。
+单测 **115 例全过**（14 个测试类，`./gradlew :core:test`）。
+
+尚未实现：正版/微软登录（`core/auth` 只有接口）、Forge/Fabric 安装器、下载续传、LINK（联机）页面。
