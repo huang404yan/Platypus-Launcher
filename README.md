@@ -77,6 +77,7 @@ Windows 下也可以用 `gradlew.bat`。首次构建会下载约 300 MB 依赖�
 - `docs/12-win-oneclick-loop.md`：**一键装闭环**（选版本 → 下载 → 补 Java → 建实例 → 启动）
 - `docs/13-settings-persistence.md`：**启动器设置持久化**（离线用户名 / 默认游戏目录 / 默认内存）
 - `docs/14-resume-and-instance-create.md`：**下载断点续传与实例页新建入口**（`.part` + Range、本地版本直接认养、登记与移除登记）
+- `docs/15-fabric-installer.md`：**Fabric 一键安装**（meta.fabricmc.net 元数据、maven 补 url、`1.20.1-fabric-0.20.1` 版本号、真实联网 e2e 数字）
 
 ## 下载
 
@@ -109,6 +110,8 @@ M0（骨架）+ M1（实例扫描）+ M2（下载器）+ M3（**Windows 一键�
 
 **下载断点续传**：先写 `<文件>.part`，校验通过才转正；`.part` 有内容就发 `Range` 接着下，断网不清半成品，下次自动接上。进度条会额外显示「其中 N 个接着上次下（省了 M MB）」（`docs/14`）。
 
-单测 **138 例全过**（16 个测试类，`./gradlew :core:test`）。另有五个无头冒烟任务（`e2eInstall` / `settingsSmoke` / `instanceFlowSmoke` / `resumeSmoke` / `deleteSmoke`），走的是界面按钮同一批函数；`resumeSmoke` 需要联网，用 Mojang 官方 CDN 上不可变的文件验证断点续传；`deleteSmoke` 在 `dist/_delete-smoke` 里全程造假数据，不碰真实 `.minecraft`。
+单测 **160 例全过**（17 个测试类，`./gradlew :core:test`）。另有六个无头冒烟任务（`e2eInstall` / `settingsSmoke` / `instanceFlowSmoke` / `resumeSmoke` / `deleteSmoke` / `fabricE2e`），走的是界面按钮同一批函数；`resumeSmoke` 与 `fabricE2e` 需要联网，前者用 Mojang 官方 CDN 上不可变的文件验证断点续传，后者在空目录真装 1.20.1 + Fabric 并启动进主菜单；`deleteSmoke` 在 `dist/_delete-smoke` 里全程造假数据，不碰真实 `.minecraft`。
 
-尚未实现：正版/微软登录（`core/auth` 只有接口）、Forge/Fabric 安装器、LINK（联机）页面。
+**能装 Fabric 了**：下载页勾「顺带装 Fabric」→ 拉 meta.fabricmc.net 的 loader 列表（默认落在最新 stable）→ 装 profile json（只改 `id`，保留 `inheritsFrom`）→ 按 maven 坐标补全 8 个库的地址并下载 → 登记成 `1.20.1-fabric-0.20.1` 这样的实例。实测空目录全流程 4 分 29 秒进主菜单，日志首行 `Loading Minecraft 1.20.1 with Fabric Loader 0.20.1`（`docs/15`）。
+
+尚未实现：正版/微软登录（`core/auth` 只有接口）、Forge/NeoForge 安装器（`LoaderChoice` 已留分支位）、LINK（联机）页面。
