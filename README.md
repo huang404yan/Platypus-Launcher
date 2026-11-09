@@ -78,6 +78,9 @@ Windows 下也可以用 `gradlew.bat`。首次构建会下载约 300 MB 依赖�
 - `docs/13-settings-persistence.md`：**启动器设置持久化**（离线用户名 / 默认游戏目录 / 默认内存）
 - `docs/14-resume-and-instance-create.md`：**下载断点续传与实例页新建入口**（`.part` + Range、本地版本直接认养、登记与移除登记）
 - `docs/15-fabric-installer.md`：**Fabric 一键安装**（meta.fabricmc.net 元数据、maven 补 url、`1.20.1-fabric-0.20.1` 版本号、真实联网 e2e 数字）
+- `docs/16-instance-delete.md`：**实例删除与版本目录清理**（改名 → 递归删 → 失败回滚，三种拒绝，存档保留）
+- `docs/17-forge-installer.md`：**Forge 一键安装**（官方 installer CLI、`launcher_profiles.json` 前置、补齐 client jar 才不撞模块）
+- `docs/18-mods-page.md`：**模组页**（本地 `mods/` 扫描、Modrinth 搜索安装、为什么不是 CurseForge）
 
 ## 下载
 
@@ -110,8 +113,12 @@ M0（骨架）+ M1（实例扫描）+ M2（下载器）+ M3（**Windows 一键�
 
 **下载断点续传**：先写 `<文件>.part`，校验通过才转正；`.part` 有内容就发 `Range` 接着下，断网不清半成品，下次自动接上。进度条会额外显示「其中 N 个接着上次下（省了 M MB）」（`docs/14`）。
 
-单测 **160 例全过**（17 个测试类，`./gradlew :core:test`）。另有六个无头冒烟任务（`e2eInstall` / `settingsSmoke` / `instanceFlowSmoke` / `resumeSmoke` / `deleteSmoke` / `fabricE2e`），走的是界面按钮同一批函数；`resumeSmoke` 与 `fabricE2e` 需要联网，前者用 Mojang 官方 CDN 上不可变的文件验证断点续传，后者在空目录真装 1.20.1 + Fabric 并启动进主菜单；`deleteSmoke` 在 `dist/_delete-smoke` 里全程造假数据，不碰真实 `.minecraft`。
+单测 **204 例全过**（21 个测试类，`./gradlew :core:test`）。另有八个无头冒烟任务（`e2eInstall` / `settingsSmoke` / `instanceFlowSmoke` / `resumeSmoke` / `deleteSmoke` / `fabricE2e` / `forgeE2e` / `modsE2e`），走的是界面按钮同一批函数；`resumeSmoke` / `fabricE2e` / `forgeE2e` / `modsE2e` 需要联网，分别在空目录真装 Fabric、真跑 Forge 官方安装器、真从 Modrinth 下一个模组；`deleteSmoke` 在 `dist/_delete-smoke` 里全程造假数据，不碰真实 `.minecraft`。
 
 **能装 Fabric 了**：下载页勾「顺带装 Fabric」→ 拉 meta.fabricmc.net 的 loader 列表（默认落在最新 stable）→ 装 profile json（只改 `id`，保留 `inheritsFrom`）→ 按 maven 坐标补全 8 个库的地址并下载 → 登记成 `1.20.1-fabric-0.20.1` 这样的实例。实测空目录全流程 4 分 29 秒进主菜单，日志首行 `Loading Minecraft 1.20.1 with Fabric Loader 0.20.1`（`docs/15`）。
 
-尚未实现：正版/微软登录（`core/auth` 只有接口）、Forge/NeoForge 安装器（`LoaderChoice` 已留分支位）、LINK（联机）页面。
+**能装 Forge 了**：下载页勾「顺带装 Forge」→ 拉 `promotions_slim.json`（默认 recommended）→ 下载官方 installer（8.8 MB，装过一次就复用）→ 备好 `launcher_profiles.json` → 跑 `--installClient` 逐行透传日志 → 校验 version json → **把原版 client jar 复制成 `<forgeId>.jar`**（不 copy 会撞模块，报 `ResolutionException: Module minecraft contains package net.minecraft.server`）→ 登记成 `1.20.1-forge-47.4.28`。实测空目录全流程 7 分 55 秒（含下载 3641 个原版文件与自动补 Java 17）、已装目录 7 秒，进主菜单 11.0 秒（`docs/17`）。
+
+**有模组页了**：左侧列出 `mods/` 里已装的（读 `fabric.mod.json` / `mods.toml` / `neoforge.mods.toml` 拿 id、名字、版本、加载器，坏 jar 标出来但不崩），右侧从 Modrinth 搜、选一个装进去，下载沿用 `.part` 续传 + sha1 强校验。实测装 Sodium 971 552 字节、33 秒（`docs/18`）。
+
+尚未实现：正版/微软登录（`core/auth` 只有接口）、NeoForge 安装器（本机到 `maven.neoforged.net` 不通，无验证）、模组依赖求解与更新检查、LINK（联机）页面。
