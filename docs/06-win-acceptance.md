@@ -108,13 +108,19 @@ MSYS_NO_PATHCONV=1 cmd.exe /c "D:\ruanjian\kaifa\qidongqigongju\gradle-9.9.0\bin
 - 产物：`app-desktop/build/compose/binaries/main/msi/Platypus Preview-0.8.0.msi`
   - **64,712,812 字节**
   - **sha256 = `2d3e8fc9d44d3690620464f66ee0b68e89de5929120430e91d291be3a334d3f2`**
-- 归档副本 `releases/preview/windows/Platypus-Launcher-0.8.0-preview.1-win-x64.msi`：64,565,356 B，sha256 `0c234da25a8f3bb17c1aa635367e5381e4afd6712b51d9c65e7bde1f53b1731b`，与 `docs/06-wix-msi-build.md` 表格「首次」一致。
+  - 这是**一键装闭环之前那一版**的构建产物（本次验收当时的记录，保留不删）。15:06 换新后的 msi 是 64,815,212 B，见下条归档副本。
+- 归档副本（**2026-11-09 15:06 已换新**）：`releases/preview/windows/Platypus-Launcher-0.8.0-preview.1-win-x64.msi`：64,815,212 B，sha256 `ed466ab324d693efe4ff9f60a89f3a7521b99287dbc5505c944ea4ce5fe92a1a`。
+  - 旧副本 64,565,356 B / sha256 `0c234da25a8f3bb17c1aa635367e5381e4afd6712b51d9c65e7bde1f53b1731b` 早于「一键装闭环」代码（`0fdd97c`），包内不含 `OneClickInstaller.class` 与 `MojangJavaRuntimeInstaller.class`，已移到 `dist/_old-releases/win-0909/`。
+  - 换包后的解包复核（`msiexec /a`，见下）：解出 `Platypus Preview.exe` 597,504 B，sha256 `7f2ba938c55661e4bb98da02f6e85c936d78fded763931d08d5c217ed730a7ed`，与 app-image、免安装 zip 三处一致。
 
 **msi 不可重现**：同一份源码连打两次，字节数与 sha256 都不同（内含时间戳与 CAB 排布）。**校验 msi 请比解包后 exe 的 sha256，不要比 msi 本身**。
 
-**未做**：本次**没有**对新 msi 跑 `msiexec /a ... /qn TARGETDIR=...` 解包复核（`docs/06-wix-msi-build.md` 里记过更早一次解包成功、exe 597,504 B 与 app-image 一致，但那是历史记录，不是本次实测）。也没有双击安装实测。
+**解包复核（2026-11-09 15:01 补做）**：`msiexec /a "<msi>" /qn TARGETDIR=<dir> /L*v <log>` 走 `dist/_unpack-msi.cmd` 后台执行，`msiexec_exit=0`、`wrapper_exit=0`，解出 `dist/_msi-unpack/Platypus Preview/Platypus Preview.exe` 597,504 B，sha256 `7f2ba938c55661e4bb98da02f6e85c936d78fded763931d08d5c217ed730a7ed`。
+  - 注意：直接在 `run_code` 里调 `msiexec /a` 会顶到 120 s 超时，必须写成 cmd 脚本后台跑。
 
-**结论**：通过（构建层面）；解包/安装验证本次未做。
+**未做**：没有双击安装实测（`msiexec /i`）、没有在干净机器上验证「安装 → 开始菜单 → 启动」。
+
+**结论**：通过（构建 + 解包层面）；安装交互未实测。
 
 ## 5. 下载产物核对
 

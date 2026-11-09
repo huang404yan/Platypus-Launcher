@@ -12,11 +12,14 @@
 
 | 出处 | 字节 | sha256 |
 |---|---|---|
-| 首次（captain 打，已归档） | 64,565,356 | `0c234da25a8f3bb17c1aa635367e5381e4afd6712b51d9c65e7bde1f53b1731b` |
+| 首次（captain 打，已归档，**已换出**） | 64,565,356 | `0c234da25a8f3bb17c1aa635367e5381e4afd6712b51d9c65e7bde1f53b1731b` |
 | 二次（自动铺 WiX 后重打） | 64,573,548 | `5f0b16b8c94f5c4fb74f36030fc28aad2dd46ba347f5745126a35cf7011a2891` |
+| 三次（验收时，一键装前） | 64,712,812 | `2d3e8fc9d44d3690620464f66ee0b68e89de5929120430e91d291be3a334d3f2` |
+| **四次（2026-11-09 14:57，含一键装闭环）** | **64,815,212** | `ed466ab324d693efe4ff9f60a89f3a7521b99287dbc5505c944ea4ce5fe92a1a` |
 
-- 归档副本：`releases/preview/windows/Platypus-Launcher-0.8.0-preview.1-win-x64.msi`（= 上表「首次」那份，64,565,356 字节）
-- 「二次」那份解包后 exe 597,504 字节、sha256 `7f2ba938c55661e4bb98da02f6e85c936d78fded763931d08d5c217ed730a7ed`，与 app-image 里的 exe 是同一个（已实测）。归档那份（首次）只验到解包成功、exe 597,504 字节，**其 exe 的 sha256 未单独比对**。
+- 归档副本（**现行 = 上表「四次」**）：`releases/preview/windows/Platypus-Launcher-0.8.0-preview.1-win-x64.msi`，64,815,212 字节。此前那三份都早于「一键装闭环」代码，包内没有 `OneClickInstaller.class` / `MojangJavaRuntimeInstaller.class`，已移到 `dist/_old-releases/win-0909/`。
+- 「二次」那份解包后 exe 597,504 字节、sha256 `7f2ba938c55661e4bb98da02f6e85c936d78fded763931d08d5c217ed730a7ed`，与 app-image 里的 exe 是同一个（已实测）。
+- 「四次」（现行归档）也做过解包复核：2026-11-09 15:01 `msiexec /a` 解出 `Platypus Preview.exe` 597,504 字节，sha256 同上 `7f2ba938...0a7ed` —— 与 app-image、免安装 zip 三处一致（**已实测**）。
 - **校验 msi 请比解包出来的 exe 的 sha256，不要比 msi 文件本身的 sha256**——后者每次都变。
 
 ## 为什么需要这个组合
@@ -129,5 +132,7 @@ exe 字节数与 `createDistributable` 产出的 app-image 一致（597,504）�
 
 | 产物 | 路径 | 用途 |
 |---|---|---|
-| app-image zip | `releases/preview/windows/Platypus-Launcher-0.8.0-preview.1-win-x64.zip`（62,912,258 字节） | 免安装、解压即用；用户双击 exe |
-| msi | `releases/preview/windows/Platypus-Launcher-0.8.0-preview.1-win-x64.msi`（64,565,356 字节） | 正式安装、进「应用和功能」、可静默升级 |
+| app-image zip | `releases/preview/windows/Platypus-Launcher-0.8.0-preview.1-win-x64.zip`（**64,078,265 字节**，2026-11-09 15:06 换新） | 免安装、解压即用；用户双击 exe |
+| msi | `releases/preview/windows/Platypus-Launcher-0.8.0-preview.1-win-x64.msi`（**64,815,212 字节**，2026-11-09 15:06 换新） | 正式安装、进「应用和功能」、可静默升级 |
+
+两份都含「一键装闭环」代码（`OneClickInstaller.class`、`MojangJavaRuntimeInstaller.class` 已在包内，zip 用 `zipfile` 嵌套读 jar 证实）。归档 sha256：zip `284c1841c63c7c03695303d67f3b90aa218da3fc3b55655c70f96b881d301226`、msi `ed466ab324d693efe4ff9f60a89f3a7521b99287dbc5505c944ea4ce5fe92a1a`。
