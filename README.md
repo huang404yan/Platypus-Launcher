@@ -107,6 +107,6 @@ M0（骨架）+ M1（实例扫描）+ M2（下载器）+ M3（**Windows 一键�
 
 **下载断点续传**：先写 `<文件>.part`，校验通过才转正；`.part` 有内容就发 `Range` 接着下，断网不清半成品，下次自动接上。进度条会额外显示「其中 N 个接着上次下（省了 M MB）」（`docs/14`）。
 
-单测 **127 例全过**（15 个测试类，`./gradlew :core:test`）。另有三个无头冒烟任务（`e2eInstall` / `settingsSmoke` / `instanceFlowSmoke`），走的是界面按钮同一批函数。
+单测 **127 例全过**（15 个测试类，`./gradlew :core:test`）。另有四个无头冒烟任务（`e2eInstall` / `settingsSmoke` / `instanceFlowSmoke` / `resumeSmoke`），走的是界面按钮同一批函数；`resumeSmoke` 需要联网，用 Mojang 官方 CDN 上不可变的文件验证断点续传。
 
 尚未实现：正版/微软登录（`core/auth` 只有接口）、Forge/Fabric 安装器、LINK（联机）页面、实例删除（只有移除登记）。
