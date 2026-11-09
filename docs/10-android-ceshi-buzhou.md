@@ -3,7 +3,7 @@
 本文是操作手册。**跟着做就行，出问题按 §5 对照表把指定文本发回来。**
 
 - 包名（用来在系统设置里找它）：`io.github.huang404yan.platypus.launcher.preview`
-- 版本：`0.8.0-preview.1`（`versionCode 80001`）
+- 版本：`0.8.0-preview.2`（`versionCode 80002`）
 - 当前能力：**能列版本、能下载游戏文件、能建实例、能自检环境。不能启动游戏**（S1 还没做完）。
 - 2026-11-09 17:19 换过包：新版换上了下载断点续传（`.part` + `Range`），与 Windows 端同一套 `HttpDownloader`。旧包 `12,772,675 B` / sha256 `5b18650f...b37aa7` 已移到 `dist/_old-releases/android-1417/`。
 - **2026-11-09 19:25 再换一次包（现行）**：含 Fabric 一键装代码（dex 里已命中 `meta.fabricmc.net` / `FabricMeta` / `KnotClient`）。上一版 `12,660,566 B` / sha256 `92c8843d...b657b5` 已换出。
@@ -14,7 +14,7 @@
 
 | | |
 |---|---|
-| 文件 | `releases/preview/android/Platypus-Launcher-0.8.0-preview.1-android.apk` |
+| 文件 | `releases/preview/android/Platypus-Launcher-0.8.0-preview.2-android.apk` |
 | 大小 | 12,741,502 B（约 12.2 MB） |
 | sha256 | `18c3d1908cc574367bf94ea7f90e979155316fefe723af993f79228c3fda37aa` |
 

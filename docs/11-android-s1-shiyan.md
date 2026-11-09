@@ -58,7 +58,7 @@
 **目的**：拿到这台机器的硬条件。所有后续实验的解释都依赖它。
 
 **怎么做**
-1. 装我们的 APK：`releases/preview/android/Platypus-Launcher-0.8.0-preview.1-android.apk`
+1. 装我们的 APK：`releases/preview/android/Platypus-Launcher-0.8.0-preview.2-android.apk`
 2. 给「所有文件访问权限」（见 10 号文档 §2.1）。
 3. 点左侧「诊断」→ 等进度条走完 → 点「复制诊断信息」。
 4. 粘贴存档。
