@@ -38,6 +38,7 @@ import androidx.compose.ui.unit.dp
 import io.github.huang404yan.platypus.core.instance.Instance
 import io.github.huang404yan.platypus.core.loader.FabricLoaderVersion
 import io.github.huang404yan.platypus.core.loader.ForgeVersion
+import io.github.huang404yan.platypus.core.loader.NeoForgeVersion
 import io.github.huang404yan.platypus.core.version.VersionManifest
 import io.github.huang404yan.platypus.ui.download.FabricInstaller
 import io.github.huang404yan.platypus.ui.download.ForgeInstaller
@@ -45,6 +46,7 @@ import io.github.huang404yan.platypus.ui.download.InstallOutcome
 import io.github.huang404yan.platypus.ui.download.InstallStep
 import io.github.huang404yan.platypus.ui.download.InstallStepException
 import io.github.huang404yan.platypus.ui.download.LoaderChoice
+import io.github.huang404yan.platypus.ui.download.NeoForgeInstaller
 import io.github.huang404yan.platypus.ui.download.OneClickInstaller
 import io.github.huang404yan.platypus.ui.download.StepProgress
 import io.github.huang404yan.platypus.ui.download.VanillaInstaller
@@ -228,6 +230,47 @@ private fun ForgeRow(
     )
 }
 
+/**
+ * NeoForge 那一行。
+ *
+ * 与 Forge 长得一样，但选项来源不同：Forge 只有 recommended / latest 两条「频道」，
+ * 而 NeoForge 是 maven 里一长串真实版本号（21.1.265 这种），每个版本都能选。
+ * 数量可能上千，所以只列当前游戏版本能用的那几十个。
+ */
+@Composable
+private fun NeoForgeRow(
+    enabled: Boolean,
+    installNeoForge: Boolean,
+    onInstallNeoForgeChange: (Boolean) -> Unit,
+    gameVersion: String,
+    versions: List<NeoForgeVersion>,
+    selected: String,
+    onSelectedChange: (String) -> Unit,
+    loading: Boolean,
+    error: String?,
+) {
+    LoaderPickerRow(
+        enabled = enabled,
+        checked = installNeoForge,
+        onCheckedChange = onInstallNeoForgeChange,
+        title = "顺带装 NeoForge",
+        status = when {
+            gameVersion.isBlank() -> "先选一个原版版本"
+            loading -> "正在查 NeoForge 版本…"
+            error != null -> "NeoForge 版本拉取失败"
+            versions.isEmpty() -> "这个版本没有 NeoForge"
+            selected.isBlank() -> "选一个 NeoForge 版本"
+            else -> selected + "（" + versions.size + " 个可选）"
+        },
+        options = versions.map {
+            LoaderOption(version = it.version, tag = it.label, selected = it.version == selected)
+        },
+        onPick = onSelectedChange,
+        errorPrefix = "NeoForge",
+        error = error,
+    )
+}
+
 /** 单个安装步骤在界面上的状态。 */
 private sealed interface StepState {
     data object Pending : StepState
@@ -286,6 +329,13 @@ fun DownloadsPage(
     var forgeError by remember { mutableStateOf<String?>(null) }
     var loadingForge by remember { mutableStateOf(false) }
 
+    // NeoForge：一次能列出几十个真实版本号，同样与上面两个互斥。
+    var installNeoForge by remember { mutableStateOf(false) }
+    var neoforgeVersions by remember { mutableStateOf<List<NeoForgeVersion>>(emptyList()) }
+    var neoforgeVersion by remember { mutableStateOf("") }
+    var neoforgeError by remember { mutableStateOf<String?>(null) }
+    var loadingNeoForge by remember { mutableStateOf(false) }
+
     var manifest by remember { mutableStateOf<VersionManifest?>(null) }
     var manifestError by remember { mutableStateOf<String?>(null) }
     var loadingManifest by remember { mutableStateOf(false) }
@@ -338,6 +388,10 @@ fun DownloadsPage(
             message = "还没选 Forge 版本：等下面的版本列表拉出来，或者取消「装 Forge」。"
             return
         }
+        if (installNeoForge && neoforgeVersion.isBlank()) {
+            message = "还没选 NeoForge 版本：等下面的版本列表拉出来，或者取消「装 NeoForge」。"
+            return
+        }
         val dir = File(dirText)
         job?.cancel()
         meter.reset()
@@ -355,6 +409,7 @@ fun DownloadsPage(
                 val choice = when {
                     installFabric -> LoaderChoice.Fabric(loaderVersion)
                     installForge -> LoaderChoice.Forge(forgeVersion)
+                    installNeoForge -> LoaderChoice.NeoForge(neoforgeVersion)
                     else -> LoaderChoice.Vanilla
                 }
                 val outcome = OneClickInstaller.install(
@@ -408,6 +463,15 @@ fun DownloadsPage(
                     outcome.forge?.let {
                         append("（Forge ")
                         append(it.forgeVersion)
+                        append("，官方安装器退出码 ")
+                        append(it.installerExitCode)
+                        append("，日志 ")
+                        append(it.logFile.name)
+                        append("）")
+                    }
+                    outcome.neoforge?.let {
+                        append("（NeoForge ")
+                        append(it.neoforgeVersion)
                         append("，官方安装器退出码 ")
                         append(it.installerExitCode)
                         append("，日志 ")
@@ -495,6 +559,35 @@ fun DownloadsPage(
         }
     }
 
+    /** 拉某个原版版本的 NeoForge 版本列表；失败只记原因，不弹错。 */
+    suspend fun refreshNeoForgeVersions(gameVersion: String) {
+        if (gameVersion.isBlank()) {
+            neoforgeVersions = emptyList()
+            neoforgeVersion = ""
+            return
+        }
+        loadingNeoForge = true
+        neoforgeError = null
+        try {
+            withContext(Dispatchers.IO) {
+                val versions = NeoForgeInstaller.listVersions(gameVersion)
+                neoforgeVersions = versions
+                // 默认落在清单里最新的稳定版：与 Fabric 一样，用户大多数时候要的是「能跑的最新」。
+                val preferred = versions.lastOrNull { it.stable } ?: versions.lastOrNull()
+                neoforgeVersion = preferred?.version.orEmpty()
+            }
+        } catch (e: CancellationException) {
+            // 与 Fabric / Forge 同理：换版本号会重启 LaunchedEffect，取消不是失败
+            throw e
+        } catch (e: Exception) {
+            neoforgeVersions = emptyList()
+            neoforgeVersion = ""
+            neoforgeError = e.message ?: (e::class.simpleName ?: "拉取 NeoForge 版本失败")
+        } finally {
+            loadingNeoForge = false
+        }
+    }
+
     fun cancelInstall() {
         job?.cancel()
         job = null
@@ -513,6 +606,8 @@ fun DownloadsPage(
         // Forge 的 promotions_slim.json 只有 4 KB，拉一次就有全部可选项；
         // 失败也不影响只装原版，所以和 Fabric 一样只记原因不弹错。
         refreshForgeVersions(versionText.trim())
+        // NeoForge 的 maven-metadata.xml 有 68 KB（1856 个版本），拉一次也只要几百毫秒。
+        refreshNeoForgeVersions(versionText.trim())
     }
 
     LaunchedEffect(Unit) {
@@ -582,6 +677,7 @@ fun DownloadsPage(
                     when {
                         installFabric -> "安装 Fabric"
                         installForge -> "安装 Forge"
+                        installNeoForge -> "安装 NeoForge"
                         else -> "一键安装"
                     },
                 )
@@ -596,7 +692,10 @@ fun DownloadsPage(
             installFabric = installFabric,
             onInstallFabricChange = {
                 installFabric = it
-                if (it) installForge = false
+                if (it) {
+                    installForge = false
+                    installNeoForge = false
+                }
             },
             gameVersion = versionText.trim(),
             versions = loaderVersions,
@@ -611,7 +710,10 @@ fun DownloadsPage(
             installForge = installForge,
             onInstallForgeChange = {
                 installForge = it
-                if (it) installFabric = false
+                if (it) {
+                    installFabric = false
+                    installNeoForge = false
+                }
             },
             gameVersion = versionText.trim(),
             versions = forgeVersions,
@@ -619,6 +721,24 @@ fun DownloadsPage(
             onSelectedChange = { forgeVersion = it },
             loading = loadingForge,
             error = forgeError,
+        )
+
+        NeoForgeRow(
+            enabled = !busy,
+            installNeoForge = installNeoForge,
+            onInstallNeoForgeChange = {
+                installNeoForge = it
+                if (it) {
+                    installFabric = false
+                    installForge = false
+                }
+            },
+            gameVersion = versionText.trim(),
+            versions = neoforgeVersions,
+            selected = neoforgeVersion,
+            onSelectedChange = { neoforgeVersion = it },
+            loading = loadingNeoForge,
+            error = neoforgeError,
         )
 
         Row(

@@ -241,6 +241,40 @@ tasks.register<JavaExec>("forgeE2e") {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// 开发期 NeoForge 验收（需要联网，安装器来自 BMCLAPI 镜像）
+//
+//   gradle :app-desktop:neoForgeE2e -PnfDir=dist/_neoforge-e2e [-Pgv=1.21.1]
+//          [-PneoforgeVersion=21.1.265] [-PskipOrig=true]
+//
+// skipOrig=true 时假定该目录里原版已经装好，只走 NeoForgeInstaller 那一段。
+// 日志落在 dist/_e2e-logs/neoforge-e2e-*.log（安装器自己的日志在 <游戏目录>/neoforge-installers/）。
+// ─────────────────────────────────────────────────────────────────────────────
+tasks.register<JavaExec>("neoForgeE2e") {
+    group = "verification"
+    description = "无头验收：干净目录装 1.21.1 + NeoForge 并启动进主菜单（开发期用，需联网）"
+    dependsOn(tasks.named("testClasses"))
+    mainClass.set("io.github.huang404yan.platypus.desktop.NeoForgeE2eKt")
+    classpath = sourceSets["test"].runtimeClasspath
+    workingDir = rootProject.projectDir
+    jvmArgs("-Dfile.encoding=UTF-8")
+
+    argumentProviders.add(
+        CommandLineArgumentProvider {
+            val dir = providers.gradleProperty("nfDir").orNull
+                ?: error("缺少 -PnfDir=<游戏目录>（建议 dist/_neoforge-e2e）")
+            listOf(
+                rootProject.file(dir).absolutePath,
+                providers.gradleProperty("gv").orElse("1.21.1").get(),
+                providers.gradleProperty("neoforgeVersion").orElse("").get(),
+                providers.gradleProperty("e2eUser").orElse("Dev").get(),
+                providers.gradleProperty("e2eTimeoutMs").orElse("300000").get(),
+                providers.gradleProperty("skipOrig").orElse("false").get(),
+            )
+        },
+    )
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // 开发期 模组 验收（需要联网，走 Modrinth 公共 API）
 //
 //   gradle :app-desktop:modsE2e -PmodsDir=dist/_mods-e2e [-PmodQuery=sodium]
