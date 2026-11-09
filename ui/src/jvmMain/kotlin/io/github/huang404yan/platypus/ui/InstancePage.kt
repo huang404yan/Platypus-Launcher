@@ -14,14 +14,17 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -34,11 +37,14 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import io.github.huang404yan.platypus.core.download.DownloadReport
+import io.github.huang404yan.platypus.core.instance.DeletionPlan
 import io.github.huang404yan.platypus.core.instance.Instance
+import io.github.huang404yan.platypus.core.instance.InstanceDeleter
 import io.github.huang404yan.platypus.core.instance.InstanceScanner
 import io.github.huang404yan.platypus.core.instance.LoaderKind
 import io.github.huang404yan.platypus.core.instance.LocalInstance
 import io.github.huang404yan.platypus.core.instance.ScanResult
+import io.github.huang404yan.platypus.core.instance.formatBytes
 import io.github.huang404yan.platypus.core.instance.instanceKey
 import io.github.huang404yan.platypus.core.instance.mergeInstances
 import io.github.huang404yan.platypus.core.runtime.GameJavaRules
@@ -101,6 +107,14 @@ fun InstancePage(
 
     var editingKey by remember { mutableStateOf<String?>(null) }
     var editNotice by remember { mutableStateOf("") }
+
+    /** 正在确认删除的实例（null = 没有弹窗）。 */
+    var deleteTarget by remember { mutableStateOf<Instance?>(null) }
+    /** 弹窗里算出来的删除计划：路径、文件数、字节数、能不能删。 */
+    var deletePlan by remember { mutableStateOf<DeletionPlan?>(null) }
+    /** 「连存档一起删」勾选框；默认不勾，存档是唯一重新下载不回来的东西。 */
+    var deleteSavesToo by remember { mutableStateOf(false) }
+    var deleting by remember { mutableStateOf(false) }
 
     val scope = rememberCoroutineScope()
 
@@ -196,6 +210,81 @@ fun InstancePage(
                 return@launch
             }
             message = "已移除 " + instance.name + " 的登记。文件没删，随时可以再登记回来。"
+            rescan()
+        }
+    }
+
+    /** 点「删除文件…」：只算计划、弹确认框，不动磁盘。 */
+    fun prepareDelete(instance: Instance) {
+        val dirText = rootText.trim()
+        if (dirText.isEmpty()) {
+            message = "先在上面填游戏目录，才知道要删的是哪个路径。"
+            return
+        }
+        val gameRoot = File(dirText)
+        val known = registered
+        // 统计文件数要遍历目录，放 IO 线程；算完才弹窗，弹窗里显示的数字就是真实数字。
+        scope.launch {
+            val plan = withContext(Dispatchers.IO) {
+                InstanceDeleter.inspect(
+                    gameRoot = gameRoot,
+                    instanceId = instance.id,
+                    knownInstances = known,
+                )
+            }
+            deleteTarget = instance
+            deletePlan = plan
+            deleteSavesToo = false
+        }
+    }
+
+    fun dismissDelete() {
+        deleteTarget = null
+        deletePlan = null
+        deleteSavesToo = false
+    }
+
+    /** 确认框里点「删除」。删完把 instances.json 里的那条登记一并移除。 */
+    fun confirmDelete() {
+        val plan = deletePlan ?: return
+        val instance = deleteTarget ?: return
+        if (!plan.deletable) {
+            message = plan.refusalReason
+            dismissDelete()
+            return
+        }
+        deleting = true
+        scope.launch {
+            val outcome = withContext(Dispatchers.IO) {
+                InstanceDeleter.delete(plan, includeSaves = deleteSavesToo)
+            }
+            deleting = false
+            if (!outcome.ok) {
+                // 失败时保留弹窗里的关键信息，但先关掉弹窗把原因写进页面提示。
+                message = outcome.summary
+                dismissDelete()
+                return@launch
+            }
+            // 文件没了，登记也必须跟着没：否则下次扫描会把「已登记却指向不存在的目录」留在列表里。
+            val backendRef = backend
+            if (backendRef != null) {
+                val error = withContext(Dispatchers.IO) {
+                    runCatching { backendRef.instances.remove(instance.id) }.exceptionOrNull()
+                }
+                if (error != null) {
+                    message = outcome.summary + " 但移除登记失败：" + describe(error)
+                    dismissDelete()
+                    rescan()
+                    return@launch
+                }
+            }
+            message = outcome.summary +
+                if (outcome.savesKept && outcome.savesMovedTo != null) {
+                    " 存档保留在 " + outcome.savesMovedTo!!.absolutePath
+                } else {
+                    ""
+                }
+            dismissDelete()
             rescan()
         }
     }
@@ -407,7 +496,8 @@ fun InstancePage(
                                 onRegister = { register(instance) },
                                 onLaunch = { onLaunch(instance) },
                                 onRemove = { removeRegistration(instance) },
-                                enabled = !busy,
+                                onDelete = { prepareDelete(instance) },
+                                enabled = !busy && !deleting,
                             )
                         }
                     }
@@ -415,6 +505,92 @@ fun InstancePage(
             }
         }
     }
+
+    val pendingDelete = deletePlan
+    val pendingTarget = deleteTarget
+    if (pendingDelete != null && pendingTarget != null) {
+        DeleteConfirmDialog(
+            instance = pendingTarget,
+            plan = pendingDelete,
+            savesToo = deleteSavesToo,
+            onSavesTooChange = { deleteSavesToo = it },
+            deleting = deleting,
+            onDismiss = { if (!deleting) dismissDelete() },
+            onConfirm = { confirmDelete() },
+        )
+    }
+}
+
+/**
+ * 删除确认框。
+ *
+ * 三条信息必须在动手之前摆出来：删的是哪个**绝对路径**、多少文件多大、
+ * 存档留不留。前两条让用户确认「没删错地方」，第三条是因为存档是唯一
+ * 重新下载不回来的东西，默认不删。
+ */
+@Composable
+private fun DeleteConfirmDialog(
+    instance: Instance,
+    plan: DeletionPlan,
+    savesToo: Boolean,
+    onSavesTooChange: (Boolean) -> Unit,
+    deleting: Boolean,
+    onDismiss: () -> Unit,
+    onConfirm: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = { if (!deleting) onDismiss() },
+        title = { Text("删除实例文件？") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text(instance.name.ifBlank { instance.id }, fontWeight = FontWeight.SemiBold)
+                Text(
+                    plan.versionDir.absolutePath,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                if (!plan.deletable) {
+                    // 拒绝理由直接照抄 core 的文案：这里是「为什么不能删」的唯一出口，不再改写一遍。
+                    Text(plan.refusalReason, color = MaterialTheme.colorScheme.error)
+                } else {
+                    Text(plan.fileCount.toString() + " 个文件，" + formatBytes(plan.totalBytes))
+                    if (plan.hasSaves) {
+                        Text(
+                            "存档 " + plan.savesFileCount + " 个文件，" + formatBytes(plan.savesBytes) +
+                                if (savesToo) "，会一起删掉。" else "，会搬到 platypus/saves-backup/ 保留。",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Checkbox(
+                                checked = savesToo,
+                                onCheckedChange = { onSavesTooChange(it) },
+                                enabled = !deleting,
+                            )
+                            Text("连存档一起删（不可恢复）")
+                        }
+                    }
+                    if (plan.hasMods) {
+                        Text("目录里有 mods/。", style = MaterialTheme.typography.bodySmall)
+                    }
+                    Text(
+                        "文件会先改名为 " + plan.versionDir.name + ".deleting-<时间戳> 再逐个删除；" +
+                            "中途失败会自动改回原名。",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onConfirm, enabled = plan.deletable && !deleting) {
+                Text(if (deleting) "删除中…" else "删除")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss, enabled = !deleting) { Text("取消") }
+        },
+    )
 }
 
 /** 新建实例的内联表单：版本号 + 实例名 + 内存，都在这一页完成。 */
@@ -534,6 +710,7 @@ private fun InstanceCard(
     onRegister: () -> Unit,
     onLaunch: () -> Unit,
     onRemove: () -> Unit,
+    onDelete: () -> Unit,
     enabled: Boolean,
 ) {
     var memoryText by remember(instance.memoryMb, editing) { mutableStateOf(instance.memoryMb.toString()) }
@@ -606,6 +783,11 @@ private fun InstanceCard(
                         OutlinedButton(onClick = onStartEdit, enabled = enabled) { Text("改内存") }
                         OutlinedButton(onClick = onRemove, enabled = enabled) { Text("移除登记") }
                     } else {
+                        OutlinedButton(onClick = onStartEdit, enabled = enabled) { Text("改内存") }
+                    }
+                    // 删除文件对「已登记」和「仅扫描到」都开放：用户清理磁盘时不关心当初是谁登记的。
+                    OutlinedButton(onClick = onDelete, enabled = enabled) { Text("删除文件…") }
+                    if (!instance.registered) {
                         OutlinedButton(onClick = onRegister, enabled = enabled) { Text("登记成实例") }
                     }
                 }

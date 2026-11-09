@@ -113,6 +113,32 @@ tasks.register<JavaExec>("instanceFlowSmoke") {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// 开发期实例删除冒烟
+//
+// 实例页的「删除文件…」背后只有 inspect（算计划）与 delete（动盘）两步。这个任务在
+// 临时目录里造版本目录，把两条路径都跑一遍：正常删除（存档搬家）、目录不存在、
+// 多实例共用拒绝、../ 越界拒绝、连存档一起删、只改名不递归删。
+//
+//   gradle :app-desktop:deleteSmoke -PdeleteDir=dist/_delete-smoke
+// ─────────────────────────────────────────────────────────────────────────────
+tasks.register<JavaExec>("deleteSmoke") {
+    group = "verification"
+    description = "无头冒烟：实例删除的 inspect/delete 与三种拒绝（开发期用）"
+    dependsOn(tasks.named("testClasses"))
+    mainClass.set("io.github.huang404yan.platypus.desktop.InstanceDeleteSmokeKt")
+    classpath = sourceSets["test"].runtimeClasspath
+    workingDir = rootProject.projectDir
+    jvmArgs("-Dfile.encoding=UTF-8")
+
+    argumentProviders.add(
+        CommandLineArgumentProvider {
+            val dir = providers.gradleProperty("deleteDir").orElse("dist/_delete-smoke").get()
+            listOf(rootProject.file(dir).absolutePath)
+        },
+    )
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // 开发期真实网络续传冒烟（需要联网）
 //
 // 单测里的续传跑的是本地 HttpServer，伪造得了 206 / 200 / 416 / 提前 EOF，
