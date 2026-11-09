@@ -76,12 +76,20 @@ class MainActivity : ComponentActivity() {
     }
 }
 
+/**
+ * 侧边栏的顺序与桌面端对齐：实例 / 下载 / 模组 / 联机 / 启动 / 设置 / 诊断 / 关于。
+ *
+ * 「诊断」是安卓独有的（桌面没有 EGL、也没有「所有文件访问权限」这类要查的东西）；
+ * 「更多」这个名字原来挂着一个永远「还没做」的占位，现在被模组、联机、设置三个真页面取代。
+ */
 private enum class Tab(val label: String) {
     INSTANCE("实例"),
     DOWNLOAD("下载"),
+    MODS("模组"),
+    LINK("联机"),
     LAUNCH("启动"),
+    SETTINGS("设置"),
     DIAGNOSTIC("诊断"),
-    MORE("更多"),
     ABOUT("关于"),
 }
 
@@ -103,9 +111,14 @@ private fun AppRoot() {
             when (tab) {
                 Tab.INSTANCE -> InstancePage()
                 Tab.DOWNLOAD -> DownloadPage()
+                Tab.MODS -> ModsPage()
+                Tab.LINK -> LinkPage()
+                Tab.SETTINGS -> SettingsPage()
                 Tab.DIAGNOSTIC -> DiagnosticPage()
                 Tab.ABOUT -> AboutPage()
-                else -> Placeholder(tab)
+                // 启动是唯一还没做的：它要的应用内 JVM 与图形转译属于 runtime-android，
+                // 现在整个模块还不存在（见 docs/03-luxian-yu-youxianji.md 第 3 节的 S1 spike）。
+                Tab.LAUNCH -> LaunchPlaceholder()
             }
         }
     }
@@ -380,11 +393,28 @@ private fun InfoRow(label: String, value: String) {
     }
 }
 
+/**
+ * 启动页的占位，但不是一句「还没做」。
+ *
+ * 手机上进游戏需要「应用内起 JVM + OpenGL 转译」，那是 runtime-android 模块的全部内容，
+ * 与桌面端起 java 进程完全是两件事（见 docs/03-luxian-yu-youxianji.md 第 3 节）。
+ * 把它讲清楚，比放一个哑按钮有用：用户能知道现在能干什么、缺的是什么。
+ */
 @Composable
-private fun Placeholder(tab: Tab) {
-    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        Text(tab.label, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
-        Text("还没做。", color = MaterialTheme.colorScheme.onSurfaceVariant)
+private fun LaunchPlaceholder() {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text("启动", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
+        Text(
+            "手机上进游戏要先在应用内起 JVM，再把 OpenGL 转译成手机的图形接口——" +
+                "这是独立的 runtime-android 模块，现在还不存在。",
+            style = MaterialTheme.typography.bodyMedium,
+        )
+        Text(
+            "这一版能做的：把游戏文件下全（下载页）、认出已有的实例（实例页）、装模组（模组页）、" +
+                "找局域网世界（联机页）。",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
     }
 }
 

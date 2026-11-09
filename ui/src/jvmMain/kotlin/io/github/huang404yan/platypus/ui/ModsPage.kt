@@ -1,6 +1,7 @@
 package io.github.huang404yan.platypus.ui
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -19,6 +20,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -29,13 +31,14 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import io.github.huang404yan.platypus.core.instance.InstanceScanner
 import io.github.huang404yan.platypus.core.instance.LoaderKind
 import io.github.huang404yan.platypus.core.mods.ModEntry
 import io.github.huang404yan.platypus.core.mods.ModScanResult
 import io.github.huang404yan.platypus.core.mods.ModScanner
+import io.github.huang404yan.platypus.core.mods.ModInstallProgress
+import io.github.huang404yan.platypus.core.mods.ModInstaller
 import io.github.huang404yan.platypus.core.mods.ModProject
-import io.github.huang404yan.platypus.ui.download.ModInstallProgress
-import io.github.huang404yan.platypus.ui.download.ModInstaller
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -54,6 +57,10 @@ fun ModsPage(initialGameRoot: String? = null, backend: LauncherBackend? = null) 
 
     var rootText by remember { mutableStateOf(initialGameRoot ?: defaultGameRoot()) }
     var gameVersion by remember { mutableStateOf("") }
+    // 游戏目录里扫出来的版本（同一个游戏目录下可能有 1.20.1、1.20.1-forge-47.4.28 等多个）。
+    // 用来给「游戏版本」填空：留空去搜会把最新版模组装进来（实测装进了 mc26.3 的 Sodium，
+    // 而启动的是 1.20.1），所以这里主动把可用版本列出来，能填就自动填。
+    var knownVersions by remember { mutableStateOf<List<String>>(emptyList()) }
     // 过滤用的加载器：null 表示不限。
     var loader by remember { mutableStateOf<LoaderKind?>(LoaderKind.FABRIC) }
     var query by remember { mutableStateOf("") }
@@ -83,12 +90,29 @@ fun ModsPage(initialGameRoot: String? = null, backend: LauncherBackend? = null) 
         } finally {
             scanning = false
         }
+        knownVersions = withContext(Dispatchers.IO) {
+            runCatching { instanceGameVersions(gameDir) }.getOrDefault(emptyList())
+        }
+        // 只在自己还空着的时候自动带出，不覆盖用户手填的值。
+        if (gameVersion.isBlank()) {
+            knownVersions.firstOrNull()?.let { gameVersion = it }
+        }
     }
 
     suspend fun search() {
         val text = query.trim()
         if (text.isBlank()) {
             searchError = "先输入要搜的模组名（如 sodium、jei）。"
+            return
+        }
+        if (gameVersion.isBlank()) {
+            // 留空会让 Modrinth 的 versions facet 被省略，pickBest 取到最新版模组（例如 mc26.3 的
+            // Sodium）——装进去要等启动崩溃才发现。宁可拦住。
+            searchError = if (knownVersions.isEmpty()) {
+                "先填游戏版本（如 1.20.1），或者把游戏目录指到一个装过版本的 .minecraft。留空会搜到最新版模组，跟你的游戏对不上。"
+            } else {
+                "先选游戏版本：这个目录下有 " + knownVersions.take(4).joinToString("、") + "。"
+            }
             return
         }
         searching = true
@@ -112,6 +136,10 @@ fun ModsPage(initialGameRoot: String? = null, backend: LauncherBackend? = null) 
     suspend fun install(project: ModProject) {
         if (rootText.isBlank()) {
             notice = "先填游戏目录。"
+            return
+        }
+        if (gameVersion.isBlank()) {
+            notice = "先填游戏版本，否则装进来的模组跟你的游戏对不上。"
             return
         }
         val kind = loader ?: LoaderKind.FABRIC
@@ -196,7 +224,7 @@ fun ModsPage(initialGameRoot: String? = null, backend: LauncherBackend? = null) 
                 value = gameVersion,
                 onValueChange = { gameVersion = it },
                 modifier = Modifier.width(180.dp),
-                label = { Text("游戏版本（可空）") },
+                label = { Text("游戏版本（必填）") },
                 singleLine = true,
             )
             OutlinedButton(onClick = { loader = nextLoader(loader) }) {
@@ -204,6 +232,27 @@ fun ModsPage(initialGameRoot: String? = null, backend: LauncherBackend? = null) 
             }
             Button(onClick = { scope.launch { search() } }, enabled = !searching) {
                 Text(if (searching) "搜索中…" else "搜索")
+            }
+        }
+
+        // 游戏目录里已经有的版本，点一下直接填进「游戏版本」。
+        // 模组版本强绑定 MC 版本，让用户手打容易打错或干脆留空。
+        if (knownVersions.isNotEmpty()) {
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                Text(
+                    "目录里的版本：",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                knownVersions.take(6).forEach { version ->
+                    TextButton(
+                        onClick = { gameVersion = version },
+                        contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp),
+                    ) { Text(version, style = MaterialTheme.typography.labelSmall) }
+                }
             }
         }
 
@@ -278,6 +327,24 @@ fun ModsPage(initialGameRoot: String? = null, backend: LauncherBackend? = null) 
             }
         }
     }
+}
+
+/**
+ * 从游戏目录的 versions/ 里取出所有版本对应的 Minecraft 版本号（去重、原版在前）。
+ *
+ * 用 InstanceScanner 而不是自己读 json：它已经处理了 inheritsFrom、加载器版本 id 解析，
+ * 扫不出东西（目录不存在 / 没有 versions/）就返回空列表，不抛错。
+ */
+private fun instanceGameVersions(gameDir: File): List<String> {
+    if (!gameDir.isDirectory) return emptyList()
+    val scanned = InstanceScanner.scan(gameDir)
+    if (!scanned.isGameDirectory) return emptyList()
+    // 原版实例排前面：mods 的兼容性以 MC 版本为准，加载器不影响。
+    return scanned.instances
+        .sortedBy { it.loader != LoaderKind.VANILLA }
+        .map { it.gameVersion }
+        .filter { it.isNotBlank() }
+        .distinct()
 }
 
 private fun nextLoader(current: LoaderKind?): LoaderKind? = when (current) {
