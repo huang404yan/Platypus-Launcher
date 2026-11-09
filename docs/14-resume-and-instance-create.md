@@ -212,9 +212,33 @@ MSYS_NO_PATHCONV=1 cmd.exe /c "D:\ruanjian\kaifa\qidongqigongju\gradle-9.9.0\bin
 
 ---
 
+## 五之三、真实网络续传冒烟（实测）
+
+单测里的续传跑的是本地 `HttpServer`，伪造得了 206 / 200 / 416 / 提前 EOF，但**证明不了真实 CDN 真的配合 Range**。为此加了一个需要联网的无头任务：
+
+```
+gradle --no-daemon :app-desktop:resumeSmoke -PskipWix -PresumeDir=dist/_resume-smoke2
+```
+
+`BUILD SUCCESSFUL in 36s`，exit 0，**16 项断言全部 PASS，末行 `RESUME SMOKE OK`**。三个用例都用 Mojang 官方 CDN 上**不可变**的文件（版本 json 里写死的 sha1），所以断言可以写死，不会因上游更新假红。
+
+| 用例 | 文件 | 实测 |
+| --- | --- | --- |
+| 1 全新下载 | `piston-data.mojang.com` 的 `client.jar`（sha1 `0c3ec587af28e5a785c0b4a7b8a30f9a8f78f838`） | 大小 23,028,853 B 与 sha1 均正确，无残留 `.part` |
+| 2 预置 10 MB 再下 | 同一个 client.jar | `resumedFiles=1`、`resumedBytes=10485760`、耗时 **3,697 ms**（只下了剩下 13 MB；若 CDN 忽略 Range 会把 23 MB 全下，耗时不会这么短）、最终 sha1 一致、无残留 `.part` |
+| 3 坏半成品自愈 | `piston-meta.mojang.com` 的 `5.json`（413,067 B，sha1 `ada52cc6...141ed664`） | 预置 20,000 字节全 `0x07` 垃圾，下载后大小与 sha1 都正确、无残留 `.part` |
+
+用例 2 的前置断言还顺手证明了 CDN 支持 Range：`HTTP 206`，取到正好 10,485,760 字节。
+
+**用例 3 第一版写错了，值得记下来。** 最初只传 `size = -1L`、不传 sha1，断言也只看「文件大于 1000 字节」——结果通过了，但通过得毫无意义：续传会把 20 KB 垃圾当成好数据接着往后拼，长度对得上、内容却是坏的。这不是测试，是给自己发合格证。改成传真实 sha1 + 真实 size 后，才真正验证了「sha1 不符 → 删掉半成品 → 重下」这条路径。
+
+另外，四个真实下载源对 Range 的支持此前已单独探过（Python `urllib` 发 `Range: bytes=0-1023` + `Accept-Encoding: identity`）：piston-meta、piston-data、libraries.minecraft.net、resources.download.minecraft.net、bmclapi2.bangbang93.com **全部返回 206**。
+
+---
+
 ## 六、还没做到的
 
-1. **续传没在真实断网上验证过**。6 个单测用的都是本地 `HttpServer`，覆盖了 206 / 200 / 416 / 提前 EOF / 连接异常五类响应；但「下 600 MB 时拔网线」这种真实场景没跑过。真实服务器的 CDN 是否稳定支持 `Range` 也未逐个验证——piston-meta 与 bmclapi2 都支持（实测 206），但 assets 与 libraries 走的域名不同。
+1. **续传没在真实断网过程中验证过**。6 个单测覆盖了 206 / 200 / 416 / 提前 EOF / 连接异常五类响应，真实 CDN 的支持情况也已用 `resumeSmoke` 实测（见五之三，四类域名全部 206）；但「下到一半网线真的断了」这件事没法自动化——现在验证的是「半成品在盘上时能接着下」，不是「下载途中断开时程序反应正确」。后者仍需要手工拔网线或限速工具跑一次。
 2. **没有「上次下到 40%」这类具体续传提示**。`DownloadsPage` 的 `cancelInstall()` 文案是「已下好的文件不会丢，再点一次会跳过校验通过的部分」，这句话在改造前其实**不完全成立**（只有校验通过并转正的文件会跳过，`.part` 会被删）。本轮修了底层，这句话才真的对，但界面只在进度条下面显示「其中 N 个接着上次下」。
 3. **实例页没有「删除实例」**。只有「移除登记」。真要删版本文件得手动去目录里删。
 4. **不能从实例页改 Java 路径**。换 Java 还是只能去启动页。

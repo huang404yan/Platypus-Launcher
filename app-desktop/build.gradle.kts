@@ -113,6 +113,34 @@ tasks.register<JavaExec>("instanceFlowSmoke") {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// 开发期真实网络续传冒烟（需要联网）
+//
+// 单测里的续传跑的是本地 HttpServer，伪造得了 206 / 200 / 416 / 提前 EOF，
+// 但证明不了**真实 CDN 真的配合 Range**。这个任务拿 Mojang 官方 CDN 上不可变的
+// 文件跑三件事：全新下载对 sha1、预置 10 MB 半成品后只下剩下的、坏半成品自愈。
+//
+//   gradle :app-desktop:resumeSmoke -PresumeDir=dist/_resume-smoke
+//
+// 断网时不跑它就行；它不在 test 依赖链上，不会拖慢常规构建。
+// ─────────────────────────────────────────────────────────────────────────────
+tasks.register<JavaExec>("resumeSmoke") {
+    group = "verification"
+    description = "无头冒烟：真实 CDN 上的断点续传（开发期用，需联网）"
+    dependsOn(tasks.named("testClasses"))
+    mainClass.set("io.github.huang404yan.platypus.desktop.ResumeSmokeKt")
+    classpath = sourceSets["test"].runtimeClasspath
+    workingDir = rootProject.projectDir
+    jvmArgs("-Dfile.encoding=UTF-8")
+
+    argumentProviders.add(
+        CommandLineArgumentProvider {
+            val dir = providers.gradleProperty("resumeDir").orElse("dist/_resume-smoke").get()
+            listOf(rootProject.file(dir).absolutePath)
+        },
+    )
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // 品牌与打包参数
 //
 // 版本号唯一真源是根 build.gradle.kts 的 allprojects.version；这里只按「版本号里
