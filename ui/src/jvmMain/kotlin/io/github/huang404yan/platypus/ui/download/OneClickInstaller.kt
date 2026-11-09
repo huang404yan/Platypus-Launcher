@@ -6,6 +6,7 @@ import io.github.huang404yan.platypus.core.instance.InstanceRepository
 import io.github.huang404yan.platypus.core.instance.LoaderKind
 import io.github.huang404yan.platypus.core.loader.FabricMeta
 import io.github.huang404yan.platypus.core.loader.ForgeMeta
+import io.github.huang404yan.platypus.core.loader.NeoForgeMeta
 import io.github.huang404yan.platypus.core.runtime.JavaRuntime
 import io.github.huang404yan.platypus.core.runtime.JavaRuntimeService
 import io.github.huang404yan.platypus.core.runtime.findExactMajor
@@ -65,6 +66,8 @@ data class InstallOutcome(
     val fabric: FabricInstallResult? = null,
     /** 装了加载器时的 Forge 安装结果；原版安装为 null。 */
     val forge: ForgeInstallResult? = null,
+    /** 装了加载器时的 NeoForge 安装结果；原版安装为 null。 */
+    val neoforge: NeoForgeInstallResult? = null,
 )
 
 /**
@@ -83,6 +86,15 @@ sealed interface LoaderChoice {
 
     /** Forge；forgeVersion 留空表示装 recommended（没有推荐就取 latest）。 */
     data class Forge(val forgeVersion: String? = null) : LoaderChoice
+
+    /**
+     * NeoForge；neoforgeVersion 留空表示按游戏版本从清单里挑（优先稳定版）。
+     *
+     * NeoForge 是 Forge 分家后的新线，安装方式与 Forge 一样跑官方 installer，
+     * 但版本号体系完全不同（没有 1.20.1-47.4.0 这种带原版号的坐标），
+     * 细节见 [NeoForgeInstaller] 的类注释。
+     */
+    data class NeoForge(val neoforgeVersion: String? = null) : LoaderChoice
 }
 
 /**
@@ -285,19 +297,64 @@ object OneClickInstaller {
             }
             effectiveVersionId = forge.versionId
         }
+        var neoforge: NeoForgeInstallResult? = null
+        if (loader is LoaderChoice.NeoForge) {
+            val wanted = loader.neoforgeVersion?.trim().orEmpty()
+            onProgress(
+                StepProgress(
+                    InstallStep.LOADER_INSTALL,
+                    if (wanted.isEmpty()) "查询 " + plan.gameVersion + " 对应的 NeoForge 版本" else "安装 NeoForge " + wanted,
+                ),
+            )
+            try {
+                // 与 Forge 同理，用这个游戏版本要求的精确主版本来跑安装器。
+                // NeoForge 的 installer 会在跑之前复核 jar 内 inheritsFrom，装错版本会被拦下。
+                neoforge = NeoForgeInstaller.install(
+                    gameRoot = gameDir,
+                    vanillaVersion = plan.versionId,
+                    javaPath = java.path,
+                    neoforgeVersion = wanted.takeIf { it.isNotEmpty() },
+                ) { p ->
+                    onProgress(
+                        StepProgress(
+                            InstallStep.LOADER_INSTALL,
+                            p.step.label + if (p.detail.isBlank()) "" else "：" + p.detail,
+                            done = p.done,
+                            total = p.total,
+                        ),
+                    )
+                }
+            } catch (e: NeoForgeInstallException) {
+                throw InstallStepException(
+                    InstallStep.LOADER_INSTALL,
+                    "NeoForge " + e.step.label + "失败：" + describe(e),
+                    e,
+                )
+            } catch (e: Exception) {
+                throw InstallStepException(
+                    InstallStep.LOADER_INSTALL,
+                    "装 NeoForge 失败：" + describe(e),
+                    e,
+                )
+            }
+            effectiveVersionId = neoforge.versionId
+        }
 
         // ⑤ 登记实例
         onProgress(StepProgress(InstallStep.REGISTERING, "写入实例登记"))
-        val loaderVersion = fabric?.loaderVersion ?: forge?.forgeVersion
+        val loaderVersion = fabric?.loaderVersion ?: forge?.forgeVersion ?: neoforge?.neoforgeVersion
         val loaderKind = when {
             fabric != null -> LoaderKind.FABRIC
             forge != null -> LoaderKind.FORGE
+            neoforge != null -> LoaderKind.NEOFORGE
             else -> LoaderKind.VANILLA
         }
         val displayName = instanceName?.trim()?.takeIf { it.isNotEmpty() }
             ?: when {
                 fabric != null -> FabricMeta.displayName(plan.gameVersion, fabric.loaderVersion)
                 forge != null -> ForgeMeta.displayName(plan.gameVersion, forge.forgeVersion)
+                // NeoForge 的版本号自身就带着 MC 版本语义，不再重复原版号
+                neoforge != null -> NeoForgeMeta.displayName(neoforge.neoforgeVersion)
                 else -> plan.versionId
             }
         val instance = Instance(
@@ -327,6 +384,7 @@ object OneClickInstaller {
             elapsedMs = System.currentTimeMillis() - startedAt,
             fabric = fabric,
             forge = forge,
+            neoforge = neoforge,
         )
     }
 
