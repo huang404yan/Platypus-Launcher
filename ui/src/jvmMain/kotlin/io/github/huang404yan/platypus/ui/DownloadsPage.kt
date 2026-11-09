@@ -37,8 +37,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import io.github.huang404yan.platypus.core.instance.Instance
 import io.github.huang404yan.platypus.core.loader.FabricLoaderVersion
+import io.github.huang404yan.platypus.core.loader.ForgeVersion
 import io.github.huang404yan.platypus.core.version.VersionManifest
 import io.github.huang404yan.platypus.ui.download.FabricInstaller
+import io.github.huang404yan.platypus.ui.download.ForgeInstaller
 import io.github.huang404yan.platypus.ui.download.InstallOutcome
 import io.github.huang404yan.platypus.ui.download.InstallStep
 import io.github.huang404yan.platypus.ui.download.InstallStepException
@@ -49,17 +51,114 @@ import io.github.huang404yan.platypus.ui.download.VanillaInstaller
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.util.Locale
 
+/** 下拉里的一项：版本号 + 右侧标签（stable/beta、推荐/最新）。 */
+private data class LoaderOption(val version: String, val tag: String, val selected: Boolean)
+
 /**
- * 「装 Fabric」一行：勾选框 + loader 下拉 + 当前选择说明。
+ * 「顺带装某个加载器」的一行：勾选框 + 状态说明 + 版本下拉。
+ *
+ * Fabric 与 Forge 共用这一份 UI，只把「状态文案」「选项」「错误前缀」交给调用方决定：
+ * 两边拉列表的机制完全不同（Fabric 一次几十个 stable/beta，Forge 只有推荐与最新两条），
+ * 但用户看到的那一行应该长得一模一样。
  *
  * 下拉用展开式列表而不是 ExposedDropdownMenu——Compose MP 桌面端的 Menu 组件
  * 在弹层里对点击的响应不稳，直接铺一个可滚动的 Card 更省事。
  */
+@Composable
+private fun LoaderPickerRow(
+    enabled: Boolean,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+    title: String,
+    status: String,
+    options: List<LoaderOption>,
+    onPick: (String) -> Unit,
+    errorPrefix: String,
+    error: String?,
+) {
+    var expanded by remember { mutableStateOf(false) }
+
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Row(
+            Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Checkbox(
+                checked = checked,
+                onCheckedChange = { onCheckedChange(it) },
+                enabled = enabled,
+            )
+            Text(title, style = MaterialTheme.typography.bodyMedium)
+            Text(
+                status,
+                Modifier.weight(1f),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            OutlinedButton(
+                onClick = { expanded = !expanded },
+                enabled = enabled && options.isNotEmpty(),
+            ) {
+                Text(if (expanded) "收起" else "选 loader 版本")
+            }
+        }
+
+        if (expanded && options.isNotEmpty()) {
+            Card(
+                Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+            ) {
+                LazyColumn(Modifier.fillMaxWidth().heightIn(max = 120.dp).padding(4.dp)) {
+                    items(options, key = { it.version }) { entry ->
+                        Row(
+                            Modifier
+                                .fillMaxWidth()
+                                .background(
+                                    if (entry.selected) MaterialTheme.colorScheme.primary.copy(alpha = 0.16f)
+                                    else Color.Transparent,
+                                    MaterialTheme.shapes.small,
+                                )
+                                .clickable(enabled = enabled) {
+                                    onPick(entry.version)
+                                    // 选了版本就等于要吃这个加载器，顺手把勾选框勾上：
+                                    // 用户点的是「这个版本」，不该再回头看那个勾选框。
+                                    onCheckedChange(true)
+                                    expanded = false
+                                }
+                                .padding(horizontal = 10.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                entry.version,
+                                Modifier.weight(1f),
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = if (entry.selected) FontWeight.SemiBold else FontWeight.Normal,
+                            )
+                            Text(
+                                entry.tag,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        if (error != null) {
+            DownloadHint(errorPrefix + "：" + error, error = true)
+        }
+    }
+}
+
+/** Fabric 那一行：把 loader 列表映射成通用行需要的文案与选项。 */
 @Composable
 private fun FabricRow(
     enabled: Boolean,
@@ -72,86 +171,61 @@ private fun FabricRow(
     loading: Boolean,
     error: String?,
 ) {
-    var expanded by remember { mutableStateOf(false) }
+    LoaderPickerRow(
+        enabled = enabled,
+        checked = installFabric,
+        onCheckedChange = onInstallFabricChange,
+        title = "顺带装 Fabric",
+        status = when {
+            gameVersion.isBlank() -> "先选一个原版版本"
+            loading -> "正在查 loader 列表…"
+            error != null -> "loader 列表拉取失败"
+            versions.isEmpty() -> "这个版本没有可用的 Fabric"
+            selected.isBlank() -> "选一个 loader 版本"
+            else -> selected + "（" + versions.size + " 个可选）"
+        },
+        options = versions.map {
+            LoaderOption(version = it.version, tag = if (it.stable) "stable" else "beta", selected = it.version == selected)
+        },
+        onPick = onSelectedChange,
+        errorPrefix = "Fabric",
+        error = error,
+    )
+}
 
-    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        Row(
-            Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
-        ) {
-            Checkbox(
-                checked = installFabric,
-                onCheckedChange = { onInstallFabricChange(it) },
-                enabled = enabled,
-            )
-            Text("顺带装 Fabric", style = MaterialTheme.typography.bodyMedium)
-            Text(
-                when {
-                    gameVersion.isBlank() -> "先选一个原版版本"
-                    loading -> "正在查 loader 列表…"
-                    error != null -> "loader 列表拉取失败"
-                    versions.isEmpty() -> "这个版本没有可用的 Fabric"
-                    selected.isBlank() -> "选一个 loader 版本"
-                    else -> selected + "（" + versions.size + " 个可选）"
-                },
-                Modifier.weight(1f),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            OutlinedButton(
-                onClick = { expanded = !expanded },
-                enabled = enabled && versions.isNotEmpty(),
-            ) {
-                Text(if (expanded) "收起" else "选 loader 版本")
-            }
-        }
-
-        if (expanded && versions.isNotEmpty()) {
-            Card(
-                Modifier.fillMaxWidth(),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
-            ) {
-                LazyColumn(Modifier.fillMaxWidth().heightIn(max = 120.dp).padding(4.dp)) {
-                    items(versions, key = { it.version }) { entry ->
-                        val isSelected = entry.version == selected
-                        Row(
-                            Modifier
-                                .fillMaxWidth()
-                                .background(
-                                    if (isSelected) MaterialTheme.colorScheme.primary.copy(alpha = 0.16f)
-                                    else Color.Transparent,
-                                    MaterialTheme.shapes.small,
-                                )
-                                .clickable(enabled = enabled) {
-                                    onSelectedChange(entry.version)
-                                    onInstallFabricChange(true)
-                                    expanded = false
-                                }
-                                .padding(horizontal = 10.dp, vertical = 6.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Text(
-                                entry.version,
-                                Modifier.weight(1f),
-                                style = MaterialTheme.typography.bodyMedium,
-                                fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal,
-                            )
-                            Text(
-                                if (entry.stable) "stable" else "beta",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                    }
-                }
-            }
-        }
-
-        if (error != null) {
-            DownloadHint("Fabric：" + error, error = true)
-        }
-    }
+/** Forge 那一行：官方只给 recommended 与 latest 两个频道，所以选项最多两条。 */
+@Composable
+private fun ForgeRow(
+    enabled: Boolean,
+    installForge: Boolean,
+    onInstallForgeChange: (Boolean) -> Unit,
+    gameVersion: String,
+    versions: List<ForgeVersion>,
+    selected: String,
+    onSelectedChange: (String) -> Unit,
+    loading: Boolean,
+    error: String?,
+) {
+    LoaderPickerRow(
+        enabled = enabled,
+        checked = installForge,
+        onCheckedChange = onInstallForgeChange,
+        title = "顺带装 Forge",
+        status = when {
+            gameVersion.isBlank() -> "先选一个原版版本"
+            loading -> "正在查 Forge 版本…"
+            error != null -> "Forge 版本拉取失败"
+            versions.isEmpty() -> "这个版本没有 Forge"
+            selected.isBlank() -> "选一个 Forge 版本"
+            else -> selected + "（官方安装器，约 3 分钟）"
+        },
+        options = versions.map {
+            LoaderOption(version = it.version, tag = it.label, selected = it.version == selected)
+        },
+        onPick = onSelectedChange,
+        errorPrefix = "Forge",
+        error = error,
+    )
 }
 
 /** 单个安装步骤在界面上的状态。 */
@@ -204,6 +278,14 @@ fun DownloadsPage(
     var loaderError by remember { mutableStateOf<String?>(null) }
     var loadingLoaders by remember { mutableStateOf(false) }
 
+    // Forge：官方只给 recommended / latest 两个频道，拉一次就有全部可选项。
+    // 与 Fabric 互斥——一次只能叠一层加载器，两个都勾着装出来的东西没法解释。
+    var installForge by remember { mutableStateOf(false) }
+    var forgeVersions by remember { mutableStateOf<List<ForgeVersion>>(emptyList()) }
+    var forgeVersion by remember { mutableStateOf("") }
+    var forgeError by remember { mutableStateOf<String?>(null) }
+    var loadingForge by remember { mutableStateOf(false) }
+
     var manifest by remember { mutableStateOf<VersionManifest?>(null) }
     var manifestError by remember { mutableStateOf<String?>(null) }
     var loadingManifest by remember { mutableStateOf(false) }
@@ -252,6 +334,10 @@ fun DownloadsPage(
             message = "还没选 Fabric 版本：等下面的 loader 列表拉出来，或者取消「装 Fabric」。"
             return
         }
+        if (installForge && forgeVersion.isBlank()) {
+            message = "还没选 Forge 版本：等下面的版本列表拉出来，或者取消「装 Forge」。"
+            return
+        }
         val dir = File(dirText)
         job?.cancel()
         meter.reset()
@@ -266,7 +352,11 @@ fun DownloadsPage(
 
         job = scope.launch {
             try {
-                val choice = if (installFabric) LoaderChoice.Fabric(loaderVersion) else LoaderChoice.Vanilla
+                val choice = when {
+                    installFabric -> LoaderChoice.Fabric(loaderVersion)
+                    installForge -> LoaderChoice.Forge(forgeVersion)
+                    else -> LoaderChoice.Vanilla
+                }
                 val outcome = OneClickInstaller.install(
                     gameDir = dir,
                     versionId = id,
@@ -315,6 +405,15 @@ fun DownloadsPage(
                         }
                         append("）")
                     }
+                    outcome.forge?.let {
+                        append("（Forge ")
+                        append(it.forgeVersion)
+                        append("，官方安装器退出码 ")
+                        append(it.installerExitCode)
+                        append("，日志 ")
+                        append(it.logFile.name)
+                        append("）")
+                    }
                     append("，Java ")
                     append(outcome.java.majorVersion)
                     append(if (outcome.javaInstalled) "（这次新下的）" else "（本机已有）")
@@ -348,19 +447,52 @@ fun DownloadsPage(
         }
         loadingLoaders = true
         loaderError = null
-        withContext(Dispatchers.IO) {
-            try {
+        try {
+            withContext(Dispatchers.IO) {
                 val versions = FabricInstaller.listLoaders(gameVersion)
                 loaderVersions = versions
                 val preferred = versions.firstOrNull { it.stable } ?: versions.firstOrNull()
                 loaderVersion = preferred?.version.orEmpty()
-            } catch (e: Exception) {
-                loaderVersions = emptyList()
-                loaderVersion = ""
-                loaderError = e.message ?: (e::class.simpleName ?: "拉取 Fabric 版本失败")
             }
+        } catch (e: CancellationException) {
+            // 换版本号会重启 LaunchedEffect，正在飞的请求被取消是正常现象，不能当成「拉取失败」显示
+            throw e
+        } catch (e: Exception) {
+            loaderVersions = emptyList()
+            loaderVersion = ""
+            loaderError = e.message ?: (e::class.simpleName ?: "拉取 Fabric 版本失败")
+        } finally {
+            // 取消时也要把 loading 收掉，否则界面会一直停在「正在查 loader 列表…」
+            loadingLoaders = false
         }
-        loadingLoaders = false
+    }
+
+    /** 拉某个原版版本的 Forge 推荐版本；失败只记原因，不弹错。 */
+    suspend fun refreshForgeVersions(gameVersion: String) {
+        if (gameVersion.isBlank()) {
+            forgeVersions = emptyList()
+            forgeVersion = ""
+            return
+        }
+        loadingForge = true
+        forgeError = null
+        try {
+            withContext(Dispatchers.IO) {
+                val versions = ForgeInstaller.listVersions(gameVersion)
+                forgeVersions = versions
+                val preferred = versions.firstOrNull { it.recommended } ?: versions.firstOrNull()
+                forgeVersion = preferred?.version.orEmpty()
+            }
+        } catch (e: CancellationException) {
+            // 与 Fabric 同理：换版本号会重启 LaunchedEffect，取消不是失败
+            throw e
+        } catch (e: Exception) {
+            forgeVersions = emptyList()
+            forgeVersion = ""
+            forgeError = e.message ?: (e::class.simpleName ?: "拉取 Forge 版本失败")
+        } finally {
+            loadingForge = false
+        }
     }
 
     fun cancelInstall() {
@@ -373,8 +505,14 @@ fun DownloadsPage(
     }
 
     LaunchedEffect(versionText) {
-        // 换版本就换 loader 列表；不开「装 Fabric」时也顺手拉，用户一勾就有得选。
-        if (versionText.isNotBlank()) refreshLoaders(versionText.trim())
+        // 换版本就换加载器列表；不开「装 Fabric / Forge」时也顺手拉，用户一勾就有得选。
+        // 手打版本号时每敲一个字符都会触发一次，先等 400ms 让输入停下来，避免连发请求互相取消。
+        if (versionText.isBlank()) return@LaunchedEffect
+        delay(400)
+        refreshLoaders(versionText.trim())
+        // Forge 的 promotions_slim.json 只有 4 KB，拉一次就有全部可选项；
+        // 失败也不影响只装原版，所以和 Fabric 一样只记原因不弹错。
+        refreshForgeVersions(versionText.trim())
     }
 
     LaunchedEffect(Unit) {
@@ -437,10 +575,16 @@ fun DownloadsPage(
                 singleLine = true,
                 enabled = !busy,
             )
-            // 勾了 Fabric 就把按钮改名叫「安装 Fabric」——用户点的是同一个动作，
+            // 勾了加载器就把按钮改名——用户点的是同一个动作，
             // 但按钮文字要能对得上他心里想的那件事。
             Button(onClick = { startInstall() }, enabled = !busy) {
-                Text(if (installFabric) "安装 Fabric" else "一键安装")
+                Text(
+                    when {
+                        installFabric -> "安装 Fabric"
+                        installForge -> "安装 Forge"
+                        else -> "一键安装"
+                    },
+                )
             }
             if (busy) {
                 OutlinedButton(onClick = { cancelInstall() }) { Text("取消") }
@@ -450,13 +594,31 @@ fun DownloadsPage(
         FabricRow(
             enabled = !busy,
             installFabric = installFabric,
-            onInstallFabricChange = { installFabric = it },
+            onInstallFabricChange = {
+                installFabric = it
+                if (it) installForge = false
+            },
             gameVersion = versionText.trim(),
             versions = loaderVersions,
             selected = loaderVersion,
             onSelectedChange = { loaderVersion = it },
             loading = loadingLoaders,
             error = loaderError,
+        )
+
+        ForgeRow(
+            enabled = !busy,
+            installForge = installForge,
+            onInstallForgeChange = {
+                installForge = it
+                if (it) installFabric = false
+            },
+            gameVersion = versionText.trim(),
+            versions = forgeVersions,
+            selected = forgeVersion,
+            onSelectedChange = { forgeVersion = it },
+            loading = loadingForge,
+            error = forgeError,
         )
 
         Row(
@@ -553,7 +715,10 @@ fun DownloadsPage(
         val snapshot = progress
         if (snapshot != null && snapshot.total > 0L) {
             Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                ProgressBar(snapshot.fraction)
+                // 分母不全时画进度条等于撒谎（永远停在 9x%），只报文件数
+                if (snapshot.totalReliable) {
+                    ProgressBar(snapshot.fraction)
+                }
                 Text(
                     formatProgressDetail(snapshot),
                     style = MaterialTheme.typography.bodySmall,
@@ -645,7 +810,12 @@ private fun StepList(currentStep: InstallStep, states: Map<InstallStep, StepStat
 }
 
 private fun formatProgressDetail(step: StepProgress): String = when (step.step) {
-    InstallStep.DOWNLOADING -> step.detail + " · " + formatBytes(step.done) + " / " + formatBytes(step.total)
+    InstallStep.DOWNLOADING -> if (step.totalReliable) {
+        step.detail + " · " + formatBytes(step.done) + " / " + formatBytes(step.total)
+    } else {
+        // 有文件体积未知：不报总量，免得用户算出一个到不了的百分比
+        step.detail + " · 已下 " + formatBytes(step.done)
+    }
     InstallStep.JAVA_INSTALL -> "Java 运行时下载 " + (step.fraction * 100f).toInt() + "%"
     else -> step.detail
 }
