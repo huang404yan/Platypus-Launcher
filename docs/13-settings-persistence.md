@@ -127,6 +127,15 @@ ui-jvm-0.8.0-preview.1-*.jar -> ['SettingsPageKt']
 
 新代码确实进了发行包。
 
+随后又打了一次完整发行产物（2026-11-09 15:36–15:38）：
+
+- msi：`:app-desktop:packageMsi -PskipWix -PwixDir=D:\ruanjian\kaifa\wix314` → `BUILD SUCCESSFUL in 25s`，产物 64,876,652 B，sha256 `558b5a2529a1e910053c10cfd7026f4b6b66e1e8309affa98ff1d0673b171401`。
+- 解包复核：`dist/_unpack-msi2.cmd` 后台 `msiexec /a`（`msiexec_exit=0`）解到 `dist/_msi-unpack2/`（127 M），`Platypus Preview.exe` 597,504 B、sha256 `7f2ba938...0a7ed`（jpackage 壳不随代码变，与 app-image、zip 三处一致）；解包目录里的 `ui-jvm-...-3b736be06b44fb18e8705d234374.jar` 命中 `SettingsPageKt`，`core-...-91c0c23e41a37a58fd58cdd028cbacf0.jar` 命中 `JsonSettingsRepository` 与 `LauncherSettings`。
+- zip：用 Python `zipfile` 重打 app-image 目录，200 条目、63,212,178 B，sha256 `9caa1320829a8d2c2ebfb86bbc3e7d7721176c810b572e445e2d7ecbdb32b12c`。
+- 两份都已放回 `releases/preview/windows/`（旧的 15:06 那版移到 `dist/_old-releases/win-0909-1506/`）。
+
+**出包必踩的坑**：`-PskipWix` 与 `-PwixDir` 必须同时给。只给 `-PwixDir` 会在 `:unzipWix` 失败：`Cannot expand ZIP 'C:\Users\zero\.gradle\compose-jb\wix311.zip'`。
+
 ---
 
 ## 四、没做的部分（明确列出，不含糊）
