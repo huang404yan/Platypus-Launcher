@@ -5,6 +5,7 @@
 - 包名（用来在系统设置里找它）：`io.github.huang404yan.platypus.launcher.preview`
 - 版本：`0.8.0-preview.1`（`versionCode 80001`）
 - 当前能力：**能列版本、能下载游戏文件、能建实例、能自检环境。不能启动游戏**（S1 还没做完）。
+- 2026-11-09 17:19 换过包：新版换上了下载断点续传（`.part` + `Range`），与 Windows 端同一套 `HttpDownloader`。旧包 `12,772,675 B` / sha256 `5b18650f...b37aa7` 已移到 `dist/_old-releases/android-1417/`。
 
 ---
 
@@ -13,10 +14,10 @@
 | | |
 |---|---|
 | 文件 | `releases/preview/android/Platypus-Launcher-0.8.0-preview.1-android.apk` |
-| 大小 | 12,772,675 B（约 12.2 MB） |
-| sha256 | `5b18650fb2421c2a1f7d2eee5bf31b01fa7e671512df3f09aec194d573b37aa7` |
+| 大小 | 12,660,566 B（约 12.1 MB） |
+| sha256 | `92c8843daf902cc71ad5db1e5cef3afd9655f8411fd5d58dfbe21a7272b657b5` |
 
-如果这个包是通过微信/QQ/网盘传的，**先确认大小对不对**（12.2 MB）。这些渠道偶尔会改文件。
+如果这个包是通过微信/QQ/网盘传的，**先确认大小对不对**（12.1 MB）。这些渠道偶尔会改文件。
 
 装的时候系统会拦：
 

@@ -76,7 +76,7 @@
 - 真正的大头是 `lib/modules`（jimage，122.73 MiB）。它装的是整个 JDK 的类库，Minecraft 只用其中一小部分。用 `jlink` 只保留 `java.base` + `java.desktop` + `java.logging` + `java.naming` + `jdk.unsupported` 等必要模块，**理论上能压到 40–60 MiB**。但 `jlink` 需要原生 `jlink` 可执行文件，而 Pojav 这个包是交叉编译产物、没带 `jlink`；要裁就得在 Linux x86_64 上跑一次 jlink 再回填。**这条没验证过，且成本不低，先不做。**
 - 结论：**短期按 36.3 MB 压缩 / 161.5 MB 落盘打包**。双 ABI（arm64 + arm32）合计约 72 MB 压缩 / 323 MB 落盘 —— 这个体积不适合塞进 APK，应该走「首次启动时下载」或「按 ABI 出两个 APK」。
 
-**为什么 JRE 不能塞进 APK [实测依据]**：当前 debug APK 是 12,772,675 B（12.2 MiB）。塞一个 ABI 就会变成 ~49 MB，两个 ABI ~85 MB。侧载场景能忍，但每次改代码都要传 85 MB，开发循环会废掉。
+**为什么 JRE 不能塞进 APK [实测依据]**：当前 debug APK 是 12,660,566 B（12.1 MiB）。塞一个 ABI 就会变成 ~49 MB，两个 ABI ~85 MB。侧载场景能忍，但每次改代码都要传 85 MB，开发循环会废掉。
 
 ---
 
