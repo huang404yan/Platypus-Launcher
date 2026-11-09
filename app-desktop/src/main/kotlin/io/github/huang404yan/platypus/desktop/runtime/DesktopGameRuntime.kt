@@ -1,6 +1,7 @@
 package io.github.huang404yan.platypus.desktop.runtime
 
 import io.github.huang404yan.platypus.core.Brand
+import io.github.huang404yan.platypus.core.auth.Session
 import io.github.huang404yan.platypus.core.instance.Instance
 import io.github.huang404yan.platypus.core.launch.GameHandle
 import io.github.huang404yan.platypus.core.launch.GameRuntime
@@ -75,6 +76,12 @@ class DesktopGameRuntime(
         val arguments = mutableListOf(java.path)
         arguments += command.toArgumentList()
 
+        // 把完整命令行落盘：加载器（Forge 之类）启动失败时，缺的参数就在这一行里，
+        // 用户把日志发过来就能复现，不必再让他手工拼。accessToken 必须脱敏。
+        dumpCommandLine(layout.gameDir, layout.versionDir.name, arguments, request.session)?.let { file ->
+            onEvent(LaunchEvent.LogLine("命令行已写入 " + file.path))
+        }
+
         val builder = ProcessBuilder(arguments)
             .directory(context.gameDir)
             // Minecraft 的日志一半在 stdout 一半在 stderr，合流后逐行回调即可。
@@ -101,6 +108,26 @@ class DesktopGameRuntime(
         }
         handle
     }
+
+    /**
+     * 把实际执行的命令行写到 logs/platypus-launch-<版本>.txt，一行一个参数。
+     *
+     * 只读落盘，失败不影响启动（返回 null 就算了）。accessToken 一律替换成 ***，
+     * 这份文件会被用户随手发到群里。
+     */
+    private fun dumpCommandLine(
+        gameDir: File,
+        versionName: String,
+        arguments: List<String>,
+        session: Session,
+    ): File? = runCatching {
+        val dir = File(gameDir, "logs").apply { mkdirs() }
+        val file = File(dir, "platypus-launch-" + versionName + ".txt")
+        val token = session.accessToken
+        val masked = if (token.isNotBlank()) arguments.map { it.replace(token, "***") } else arguments
+        file.writeText(masked.joinToString(System.lineSeparator()) + System.lineSeparator(), Charsets.UTF_8)
+        file
+    }.getOrNull()
 
     /** 逐行读日志，同时留在环形缓冲里供退出归因使用。 */
     private fun pump(

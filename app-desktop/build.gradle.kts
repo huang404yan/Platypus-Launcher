@@ -204,6 +204,76 @@ tasks.register<JavaExec>("fabricE2e") {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// 开发期 Forge 一键装验收（需要联网）
+//
+// 与 fabricE2e 同形，只是把 LoaderChoice.Fabric 换成 LoaderChoice.Forge：
+// 原版文件 → 补 Java → 跑官方 installer（约 3 分钟）→ 登记实例 → 启动进主菜单。
+// 日志落在 dist/_e2e-logs/forge-*.log，installer 自己的日志在 <游戏目录>/forge-installers/。
+//
+//   gradle :app-desktop:forgeE2e -PforgeDir=dist/_forge-e2e [-Pgv=1.20.1]
+//          [-PforgeVersion=47.4.0] [-PskipOrig=true]
+//
+// skipOrig=true 时假定该目录里原版已经装好，只走 ForgeInstaller 那一段。
+// ─────────────────────────────────────────────────────────────────────────────
+tasks.register<JavaExec>("forgeE2e") {
+    group = "verification"
+    description = "无头验收：干净目录装 1.20.1 + Forge 并启动进主菜单（开发期用，需联网）"
+    dependsOn(tasks.named("testClasses"))
+    mainClass.set("io.github.huang404yan.platypus.desktop.ForgeE2eKt")
+    classpath = sourceSets["test"].runtimeClasspath
+    workingDir = rootProject.projectDir
+    jvmArgs("-Dfile.encoding=UTF-8")
+
+    argumentProviders.add(
+        CommandLineArgumentProvider {
+            val dir = providers.gradleProperty("forgeDir").orNull
+                ?: error("缺少 -PforgeDir=<游戏目录>（建议 dist/_forge-e2e）")
+            listOf(
+                rootProject.file(dir).absolutePath,
+                providers.gradleProperty("gv").orElse("1.20.1").get(),
+                providers.gradleProperty("forgeVersion").orElse("").get(),
+                providers.gradleProperty("e2eUser").orElse("Dev").get(),
+                providers.gradleProperty("e2eTimeoutMs").orElse("300000").get(),
+                providers.gradleProperty("skipOrig").orElse("false").get(),
+            )
+        },
+    )
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 开发期 模组 验收（需要联网，走 Modrinth 公共 API）
+//
+//   gradle :app-desktop:modsE2e -PmodsDir=dist/_mods-e2e [-PmodQuery=sodium]
+//          [-Pgv=1.20.1] [-PmodsLoader=fabric] [-Pe2eTimeoutMs=60000]
+//
+// 真下一个模组进 <游戏目录>/mods/，再用 ModScanner 扫一遍确认元数据读得出来。
+// 日志落在 dist/_e2e-logs/mods-e2e-*.log。
+// ─────────────────────────────────────────────────────────────────────────────
+tasks.register<JavaExec>("modsE2e") {
+    group = "verification"
+    description = "无头验收：从 Modrinth 下一个模组进 mods/ 并扫描（开发期用，需联网）"
+    dependsOn(tasks.named("testClasses"))
+    mainClass.set("io.github.huang404yan.platypus.desktop.ModsE2eKt")
+    classpath = sourceSets["test"].runtimeClasspath
+    workingDir = rootProject.projectDir
+    jvmArgs("-Dfile.encoding=UTF-8")
+
+    argumentProviders.add(
+        CommandLineArgumentProvider {
+            val dir = providers.gradleProperty("modsDir").orNull
+                ?: error("缺少 -PmodsDir=<游戏目录>（建议 dist/_mods-e2e）")
+            listOf(
+                rootProject.file(dir).absolutePath,
+                providers.gradleProperty("modQuery").orElse("sodium").get(),
+                providers.gradleProperty("gv").orElse("1.20.1").get(),
+                providers.gradleProperty("modsLoader").orElse("fabric").get(),
+                providers.gradleProperty("e2eTimeoutMs").orElse("60000").get(),
+            )
+        },
+    )
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // 品牌与打包参数
 //
 // 版本号唯一真源是根 build.gradle.kts 的 allprojects.version；这里只按「版本号里
