@@ -109,7 +109,7 @@ MSYS_NO_PATHCONV=1 cmd.exe /c "D:\ruanjian\kaifa\qidongqigongju\gradle-9.9.0\bin
   - **64,712,812 字节**
   - **sha256 = `2d3e8fc9d44d3690620464f66ee0b68e89de5929120430e91d291be3a334d3f2`**
   - 这是**一键装闭环之前那一版**的构建产物（本次验收当时的记录，保留不删）。
-- 归档副本（**2026-11-09 23:34 换为 preview.2**）：`releases/preview/windows/Platypus-Launcher-0.8.0-preview.2-win-x64.msi` 现为 **65,421,420 B**，sha256 `8210a107392fe82c6de34b402fe1348b386f4e99fe506264e00b10f9cc4cce92`。19:24 那版（preview.1 含 Fabric，65,101,932 B / `5e3d3bd7...da32f5`）已改名暂存到 `dist/_rel_new/prev1-neoforge.msi`；16:43 那版（64,970,860 B / `bef0246b...b617a`）与 15:36 那版（含设置页但不含断点续传）早已换出。preview.2 的解包复核见 `docs/06-wix-msi-build.md` 的「八次」。
+- 归档副本（**2026-11-10 07:22 换为 preview.3**）：`releases/preview/windows/Platypus-Launcher-0.8.0-preview.3-win-x64.msi` 现为 **65,519,724 B**，sha256 `660f4601ec6fca9a65b41b96c6f401747b0c19d905af6e2cb5a6680323c416a3`。preview.2 那版（65,421,420 B / `8210a107...cce92`）已换出到 `dist/_rel_new/`。19:24 那版（preview.1 含 Fabric，65,101,932 B / `5e3d3bd7...da32f5`）早先已改名暂存到 `dist/_rel_new/prev1-neoforge.msi`；16:43 那版（64,970,860 B / `bef0246b...b617a`）与 15:36 那版（含设置页但不含断点续传）早已换出。preview.3 的解包复核见 `docs/06-wix-msi-build.md` 的「九次」。
   - 中间那版 64,815,212 B / sha256 `ed466ab324d693efe4ff9f60a89f3a7521b99287dbc5505c944ea4ce5fe92a1a`（14:57，含一键装闭环、不含设置页）已移到 `dist/_old-releases/win-0909-1506/`。
   - 旧副本 64,565,356 B / sha256 `0c234da25a8f3bb17c1aa635367e5381e4afd6712b51d9c65e7bde1f53b1731b` 早于「一键装闭环」代码（`0fdd97c`），包内不含 `OneClickInstaller.class` 与 `MojangJavaRuntimeInstaller.class`，已移到 `dist/_old-releases/win-0909/`。
   - 换包后的解包复核：解出 `Platypus Preview.exe` 597,504 B，sha256 `7f2ba938c55661e4bb98da02f6e85c936d78fded763931d08d5c217ed730a7ed`，与 app-image、免安装 zip 三处一致。
@@ -263,7 +263,7 @@ MSYS_NO_PATHCONV=1 cmd.exe /c "D:\ruanjian\kaifa\qidongqigongju\gradle-9.9.0\bin
 
 ### F1（low，既有问题，非本次改动引入）版本号在 androidApp 里硬编码了一份
 
-- 位置：`androidApp/build.gradle.kts:19` `versionName = "0.8.0-preview.2"`（versionCode 80002）
+- 位置：`androidApp/build.gradle.kts:19` `versionName = "0.8.0-preview.3"`（versionCode 80003）
 - 现状：根 `build.gradle.kts:15` 是版本真源，androidApp 又写了同一份字面量。这次两者一致（所以构建没炸），但下次只改根版本就会不一致。文件本身带 `check(applicationId == expectedId)` 护栏，会对「包名与版本通道不符」报错，但**不会**发现「versionName 落后于根 version」。
 - 该行来自提交 `9fa2168`，**不是**本任务或 t2~t5 引入。
 - 建议（未实施）：`versionName = rootProject.version.toString()`，或加一条 `check(versionName == rootProject.version.toString())`。

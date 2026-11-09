@@ -219,7 +219,7 @@ Android 的内存模型和桌面完全不同，这里有两个独立的限制：
 
 | 产物 | 位置 |
 |---|---|
-| 可安装 APK（含诊断页） | `releases/preview/android/Platypus-Launcher-0.8.0-preview.2-android.apk` |
+| 可安装 APK（含诊断页） | `releases/preview/android/Platypus-Launcher-0.8.0-preview.3-android.apk` |
 | 用户测试步骤 | [10-android-ceshi-buzhou.md](./10-android-ceshi-buzhou.md) |
 | S1 真机实验清单 | [11-android-s1-shiyan.md](./11-android-s1-shiyan.md) |
 | 下载页（可跑） | `androidApp/src/main/kotlin/.../preview/DownloadPage.kt` |

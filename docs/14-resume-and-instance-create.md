@@ -199,8 +199,8 @@ MSYS_NO_PATHCONV=1 cmd.exe /c "D:\ruanjian\kaifa\qidongqigongju\gradle-9.9.0\bin
 | 项 | 值 |
 | --- | --- |
 | 出包命令 | `gradle --no-daemon :app-desktop:createDistributable :app-desktop:packageMsi :androidApp:assembleDebug -PskipWix -PwixDir=D:\ruanjian\kaifa\wix314` → **BUILD SUCCESSFUL in 37s**，exit 0 |
-| msi | `releases/preview/windows/Platypus-Launcher-0.8.0-preview.2-win-x64.msi`，**65,421,420 B**，sha256 `8210a107392fe82c6de34b402fe1348b386f4e99fe506264e00b10f9cc4cce92`（2026-11-09 23:34 preview.2 重出；上一版 preview.1 的 65,101,932 B / `5e3d3bd7...da32f5` 已换出） |
-| zip | `releases/preview/windows/Platypus-Launcher-0.8.0-preview.2-win-x64.zip`，**63,756,961 B**（200 条目），sha256 `b2d0bac291d43d5060aa9076120115e84fbb51f83ee582977b2e30cd1b8a5ea7`（同上换新；上一版 63,437,782 B / `ca91e9fd...ba8a3f`） |
+| msi | `releases/preview/windows/Platypus-Launcher-0.8.0-preview.3-win-x64.msi`，**65,519,724 B**，sha256 `660f4601ec6fca9a65b41b96c6f401747b0c19d905af6e2cb5a6680323c416a3`（2026-11-10 07:22 preview.3 重出；上一版 preview.2 的 65,421,420 B / `8210a107...cce92` 已换出） |
+| zip | `releases/preview/windows/Platypus-Launcher-0.8.0-preview.3-win-x64.zip`，**63,855,778 B**（200 条目），sha256 `d39892a92453d4e628862b4394c2c5a96da80195cdc27fd20e79e419b1b78f40`（同上换新；上一版 preview.2 的 63,756,961 B / `b2d0bac2...a5ea7`） |
 | app-image exe | 597,504 B，sha256 `7f2ba938c55661e4bb98da02f6e85c936d78fded763931d08d5c217ed730a7ed` |
 | 旧包去向 | 15:36 那版（msi `558b5a25...171401` 64,876,652 B / zip `9caa1320...32b12c` 63,212,178 B）移到 `dist/_old-releases/win-0909-1536/` |
 
