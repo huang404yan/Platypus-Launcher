@@ -28,6 +28,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -39,7 +40,10 @@ import io.github.huang404yan.platypus.core.instance.Instance
 import io.github.huang404yan.platypus.core.instance.InstanceScanner
 import io.github.huang404yan.platypus.core.instance.LoaderKind
 import io.github.huang404yan.platypus.core.instance.ScanResult
+import io.github.huang404yan.platypus.core.instance.instanceKey
+import io.github.huang404yan.platypus.core.instance.mergeInstances
 import java.io.File
+import kotlinx.coroutines.launch
 
 enum class Page(val label: String) {
     LAUNCH("启动"),
@@ -69,8 +73,8 @@ fun App(initialGameRoot: String? = null, backend: LauncherBackend? = null) {
             ) {
                 when (page) {
                     Page.LAUNCH -> LaunchPage(backend, initialGameRoot)
-                    Page.INSTANCE -> InstancePage(initialGameRoot)
-                    Page.DOWNLOAD -> DownloadsPage(initialGameRoot)
+                    Page.INSTANCE -> InstancePage(backend, initialGameRoot)
+                    Page.DOWNLOAD -> DownloadsPage(initialGameRoot, backend) { page = Page.LAUNCH }
                     Page.ABOUT -> AboutPage()
                     else -> PlaceholderPage(page)
                 }
@@ -134,15 +138,22 @@ private fun SideBar(current: Page, onSelect: (Page) -> Unit) {
 }
 
 @Composable
-private fun InstancePage(initialGameRoot: String?) {
+private fun InstancePage(backend: LauncherBackend?, initialGameRoot: String?) {
     var rootText by remember { mutableStateOf(initialGameRoot ?: defaultGameRoot()) }
     var result by remember { mutableStateOf<ScanResult?>(null) }
+    var registered by remember { mutableStateOf<List<Instance>>(emptyList()) }
     var scannedAt by remember { mutableStateOf(0L) }
+    val scope = rememberCoroutineScope()
 
     fun rescan() {
         val text = rootText.trim()
         result = if (text.isEmpty()) null else InstanceScanner.scan(File(text))
         scannedAt = System.currentTimeMillis()
+        if (backend != null) {
+            scope.launch {
+                registered = runCatching { backend.instances.list() }.getOrDefault(emptyList())
+            }
+        }
     }
 
     LaunchedEffect(Unit) {
@@ -152,7 +163,8 @@ private fun InstancePage(initialGameRoot: String?) {
     Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text("实例", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
         Text(
-            "扫描一个已有的游戏目录，把它下面的版本识别成实例。只读，不改动任何文件。",
+            "扫描已有游戏目录里的版本，并合并启动器自己登记的实例。扫描只读，不改动任何文件；" +
+                "登记的实例优先显示（带内存设置）。",
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -173,25 +185,27 @@ private fun InstancePage(initialGameRoot: String?) {
         }
 
         val current = result
+        val merged = mergeInstances(registered, current?.instances.orEmpty())
         when {
-            current == null -> Hint("还没有扫描。填入目录后点「扫描」。")
-            !current.isGameDirectory -> {
+            current == null && merged.isEmpty() -> Hint("还没有扫描。填入目录后点「扫描」。")
+            current != null && !current.isGameDirectory && merged.isEmpty() -> {
                 Hint("这个目录看起来不是游戏目录。")
                 current.warnings.forEach { WarningLine(it) }
             }
             else -> {
                 Text(
-                    "找到 ${current.instances.size} 个实例" +
-                        if (current.warnings.isEmpty()) "" else "，${current.warnings.size} 条提示",
+                    "找到 " + merged.size + " 个实例（登记 " + registered.size + " · 扫描 " +
+                        (current?.instances?.size ?: 0) + "）" +
+                        if (current == null || current.warnings.isEmpty()) "" else "，" + current.warnings.size + " 条提示",
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.SemiBold,
                 )
-                current.warnings.forEach { WarningLine(it) }
-                if (current.instances.isEmpty()) {
-                    Hint("没有识别到版本。检查 versions/ 下是否每个版本都有同名 .json。")
+                current?.warnings.orEmpty().forEach { WarningLine(it) }
+                if (merged.isEmpty()) {
+                    Hint("没有识别到版本。去「下载」页装一个，或检查 versions/ 下是否每个版本都有同名 .json。")
                 } else {
                     LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        items(current.instances) { instance -> InstanceCard(instance) }
+                        items(merged, key = { instanceKey(it) }) { instance -> InstanceCard(instance) }
                     }
                 }
             }
@@ -220,6 +234,11 @@ private fun InstanceCard(instance: Instance) {
                 )
                 Text(
                     instance.directory,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Text(
+                    instance.memoryMb.toString() + " MB" + if (instance.registered) " · 已登记" else " · 仅扫描到",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )

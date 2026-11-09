@@ -27,12 +27,23 @@ import kotlinx.coroutines.withContext
  *
  * 坏路径一律静默跳过：文件不存在、不是可执行文件、起不来、卡住超时、输出不像 Java，
  * 都只是让这个候选从结果里消失，不抛异常、不影响其它候选。
+ *
+ * [ensure] 在本机找不到精确主版本时会从 Mojang 官方 runtime 清单下载一份到
+ * `<gameRoot>/runtime/<component>`（见 [MojangJavaRuntimeInstaller]），装好即用。
  */
 class DesktopJavaRuntimeService(
     /** 额外的候选（界面上用户手动指定的 java.exe 或 JDK 根目录）。 */
     private val extraCandidates: () -> List<String> = { emptyList() },
     /** 游戏目录，用来找启动器自带的 runtime（.minecraft/runtime 等）。 */
     private val gameRoot: File? = null,
+    /**
+     * 是否同时扫描别的启动器留下的运行时（%APPDATA%/.minecraft、PCL、HMCL 等）。
+     *
+     * 产品行为是扫：用户机器上已经有一份能用的 Java 时不该再下一份 150 MB 的。
+     * 开发期的无头验收要关掉它，否则宿主机上碰巧存在的同版本运行时会掩盖
+     * 「自动下载」这条代码路径，测出来的就是假的通过。
+     */
+    private val scanGlobalLaunchers: Boolean = true,
 ) : JavaRuntimeService {
 
     private val windows: Boolean = System.getProperty("os.name").orEmpty().lowercase().contains("win")
@@ -75,24 +86,50 @@ class DesktopJavaRuntimeService(
     }
 
     /**
-     * 从已探测到的运行时里挑一个主版本正好是 [major] 的。
+     * 确保主版本正好是 [major] 的运行时可用：先探测，探测不到再从 Mojang 官方清单下载。
      *
      * 只认精确匹配，不拿更高版本顶替：老版本 Minecraft（尤其带 Forge/Fabric mod 的 1.16.5）
      * 在 Java 16/17/21 上会直接崩，静默换一个「更高的 Java」比明确报错更难排查。
-     * 自动下载安装 JDK 还没做（不在本任务范围），找不到就抛 [JavaRuntimeUnavailableException]，
-     * 消息里带上本机现有的主版本，方便界面提示用户自己装或手动指定。
      */
-    override suspend fun ensure(major: Int, onProgress: (Float) -> Unit): JavaRuntime {
+    override suspend fun ensure(major: Int, onProgress: (Float) -> Unit): JavaRuntime =
+        ensureRuntime(major, component = null, onProgress = onProgress)
+
+    /**
+     * 带版本 json 里 `javaVersion.component` 的版本：component 是 Mojang 的权威标识
+     * （如 java-runtime-gamma），只在它缺失时才按主版本号兜底映射。
+     */
+    override suspend fun ensureRuntime(
+        major: Int,
+        component: String?,
+        onProgress: (Float) -> Unit,
+    ): JavaRuntime {
         val all = detect()
+        all.findExactMajor(major)?.let {
+            onProgress(1f)
+            return it
+        }
+        onProgress(0.15f)
+
+        val root = gameRoot ?: throw JavaRuntimeUnavailableException(
+            "本机没有 Java " + major + "，且没有配置游戏目录，无法下载托管运行时；" +
+                "请手动指定 java.exe 或通过 -Dplatypus.gameDir 指定目录。",
+        )
+        val installer = MojangJavaRuntimeInstaller(root)
+        val java = try {
+            installer.ensure(major, component) { fraction -> onProgress(0.15f + 0.85f * fraction) }
+        } catch (e: JavaRuntimeInstallException) {
+            val available = all.map { it.majorVersion }.distinct().sorted().joinToString("、") { "Java " + it }
+            val suffix = if (available.isEmpty()) "本机没有探测到任何 Java。" else "本机现有 " + available + "。"
+            throw JavaRuntimeUnavailableException("自动下载 Java " + major + " 失败：" + e.message + " " + suffix)
+        }
         onProgress(1f)
-        all.findExactMajor(major)?.let { return it }
-        val available = all.map { it.majorVersion }.distinct().sorted().joinToString("、") { "Java " + it }
-        throw JavaRuntimeUnavailableException(
-            if (available.isEmpty()) {
-                "本机没有探测到任何 Java 运行时，而游戏要求 Java " + major + "；自动下载运行时尚未实现。"
-            } else {
-                "本机没有 Java " + major + "，只有 " + available + "；自动下载运行时尚未实现。"
-            },
+        // 装完立刻探一次，拿到 vendor/arch；探不动也用文件路径兜底（文件确实存在）。
+        val probed = probe(java.path)?.runtime
+        return probed?.copy(managed = true) ?: JavaRuntime(
+            path = java.path,
+            majorVersion = major,
+            vendor = "Mojang",
+            managed = true,
         )
     }
 
@@ -120,11 +157,13 @@ class DesktopJavaRuntimeService(
     private fun launcherRuntimeDirs(): List<String> {
         val roots = LinkedHashSet<String>()
         gameRoot?.let { roots += it.path }
-        env("APPDATA")?.let { roots += File(it, ".minecraft").path }
-        env("APPDATA")?.let { roots += File(it, "PCL").path }
-        env("APPDATA")?.let { roots += File(it, "HMCL").path }
-        env("LOCALAPPDATA")?.let { roots += File(it, "PCL").path }
-        env("PLATYPUS_JAVA_DIR")?.let { roots += it }
+        if (scanGlobalLaunchers) {
+            env("APPDATA")?.let { roots += File(it, ".minecraft").path }
+            env("APPDATA")?.let { roots += File(it, "PCL").path }
+            env("APPDATA")?.let { roots += File(it, "HMCL").path }
+            env("LOCALAPPDATA")?.let { roots += File(it, "PCL").path }
+            env("PLATYPUS_JAVA_DIR")?.let { roots += it }
+        }
         val names = listOf("runtime", "java", "jre", "jres", "java-runtimes", "javas")
         val dirs = LinkedHashSet<String>()
         for (root in roots) {

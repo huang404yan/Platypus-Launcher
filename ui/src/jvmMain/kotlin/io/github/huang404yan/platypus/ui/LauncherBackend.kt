@@ -1,5 +1,6 @@
 package io.github.huang404yan.platypus.ui
 
+import io.github.huang404yan.platypus.core.instance.InstanceRepository
 import io.github.huang404yan.platypus.core.launch.GameRuntime
 import io.github.huang404yan.platypus.core.runtime.JavaRuntimeService
 
@@ -12,4 +13,7 @@ import io.github.huang404yan.platypus.core.runtime.JavaRuntimeService
 interface LauncherBackend {
     val javaRuntimes: JavaRuntimeService
     val gameRuntime: GameRuntime
+
+    /** 实例登记（本启动器建过 / 用户改过的实例，带内存与 Java 路径）。 */
+    val instances: InstanceRepository
 }

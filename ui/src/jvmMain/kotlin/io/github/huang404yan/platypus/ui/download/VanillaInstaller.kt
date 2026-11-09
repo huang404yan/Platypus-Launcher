@@ -4,6 +4,7 @@ import io.github.huang404yan.platypus.core.download.DownloadItem
 import io.github.huang404yan.platypus.core.download.DownloadProgress
 import io.github.huang404yan.platypus.core.download.DownloadReport
 import io.github.huang404yan.platypus.core.download.HttpDownloader
+import io.github.huang404yan.platypus.core.runtime.GameJavaRules
 import io.github.huang404yan.platypus.core.version.DownloadPlanner
 import io.github.huang404yan.platypus.core.version.VersionManifest
 import io.github.huang404yan.platypus.core.version.parseAssetIndex
@@ -41,6 +42,12 @@ object VanillaInstaller {
         val versionJsonPath: String,
         val totalBytes: Long,
         val items: List<DownloadItem>,
+        /** 版本 json 里的游戏版本号（一个版本目录只对应一个游戏版本）。 */
+        val gameVersion: String = "",
+        /** 版本 json 的 javaVersion.majorVersion，缺省时按 GameJavaRules 推。 */
+        val javaMajorVersion: Int = 8,
+        /** 版本 json 的 javaVersion.component，例如 java-runtime-gamma；缺省为 null。 */
+        val javaComponent: String? = null,
     ) {
         val totalFiles: Int get() = items.size
     }
@@ -81,11 +88,17 @@ object VanillaInstaller {
 
         val unique = items.distinctBy { it.target }
         val totalBytes = unique.sumOf { if (it.size > 0) it.size else 0L }
+        // javaVersion 在新版本 json 里都有；老版本可能整个缺失，用游戏版本号兜底推一次。
+        val declaredJava = version.javaVersion
         return InstallPlan(
             versionId = resolvedId,
             versionJsonPath = jsonFile.path,
             totalBytes = totalBytes,
             items = unique,
+            gameVersion = resolvedId,
+            javaMajorVersion = declaredJava?.majorVersion?.takeIf { it > 0 }
+                ?: GameJavaRules.requiredMajor(resolvedId),
+            javaComponent = declaredJava?.component?.takeIf { it.isNotBlank() },
         )
     }
 

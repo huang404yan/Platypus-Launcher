@@ -34,10 +34,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import io.github.huang404yan.platypus.core.download.DownloadFailure
-import io.github.huang404yan.platypus.core.download.DownloadItem
-import io.github.huang404yan.platypus.core.download.DownloadProgress
+import io.github.huang404yan.platypus.core.instance.Instance
 import io.github.huang404yan.platypus.core.version.VersionManifest
+import io.github.huang404yan.platypus.ui.download.InstallOutcome
+import io.github.huang404yan.platypus.ui.download.InstallStep
+import io.github.huang404yan.platypus.ui.download.InstallStepException
+import io.github.huang404yan.platypus.ui.download.OneClickInstaller
+import io.github.huang404yan.platypus.ui.download.StepProgress
 import io.github.huang404yan.platypus.ui.download.VanillaInstaller
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -47,22 +50,42 @@ import kotlinx.coroutines.withContext
 import java.io.File
 import java.util.Locale
 
-/** 下载流程所处的阶段，只用来决定界面显示什么。 */
-private sealed interface InstallPhase {
-    data object Idle : InstallPhase
-    data object Planning : InstallPhase
-    data object Downloading : InstallPhase
-    data object Finished : InstallPhase
-    data class Failed(val message: String) : InstallPhase
+/** 单个安装步骤在界面上的状态。 */
+private sealed interface StepState {
+    data object Pending : StepState
+    data object Running : StepState
+    data object Succeeded : StepState
+    data class Failed(val message: String) : StepState
 }
 
+/** 一键装的整体阶段。 */
+private sealed interface InstallPhase {
+    data object Idle : InstallPhase
+    data object Running : InstallPhase
+    data class Finished(val outcome: InstallOutcome) : InstallPhase
+    data class Failed(val step: InstallStep, val message: String) : InstallPhase
+}
+
+/** 界面上依次展示的步骤（不含 IDLE 与 DONE）。 */
+private val VISIBLE_STEPS = listOf(
+    InstallStep.PLANNING,
+    InstallStep.DOWNLOADING,
+    InstallStep.JAVA_CHECK,
+    InstallStep.JAVA_INSTALL,
+    InstallStep.REGISTERING,
+)
+
 /**
- * 下载页：选一个原版版本，装进指定的 .minecraft 目录。
+ * 下载页：选一个原版版本，一次完成「下载 → 补 Java → 建实例」。
  *
- * 解析与下载都在 Dispatchers.IO 上跑，界面只读状态，不阻塞 UI 线程。
+ * 解析、下载、解压都在 Dispatchers.IO 上跑，界面只读状态，不阻塞 UI 线程。
  */
 @Composable
-fun DownloadsPage(initialGameRoot: String?) {
+fun DownloadsPage(
+    initialGameRoot: String?,
+    backend: LauncherBackend? = null,
+    onInstalled: (Instance) -> Unit = {},
+) {
     var gameDirText by remember { mutableStateOf(initialGameRoot ?: defaultGameRoot()) }
     var versionText by remember { mutableStateOf("") }
     var filterText by remember { mutableStateOf("") }
@@ -72,11 +95,11 @@ fun DownloadsPage(initialGameRoot: String?) {
     var loadingManifest by remember { mutableStateOf(false) }
 
     var phase by remember { mutableStateOf<InstallPhase>(InstallPhase.Idle) }
-    var progress by remember { mutableStateOf<DownloadProgress?>(null) }
+    var currentStep by remember { mutableStateOf(InstallStep.IDLE) }
+    var stepStates by remember { mutableStateOf<Map<InstallStep, StepState>>(emptyMap()) }
+    var progress by remember { mutableStateOf<StepProgress?>(null) }
     var speedBytesPerSecond by remember { mutableStateOf(0L) }
     var elapsedMs by remember { mutableStateOf(0L) }
-    var failures by remember { mutableStateOf<List<DownloadFailure>>(emptyList()) }
-    var planInfo by remember { mutableStateOf<VanillaInstaller.InstallPlan?>(null) }
     var message by remember { mutableStateOf("") }
 
     val scope = rememberCoroutineScope()
@@ -96,7 +119,7 @@ fun DownloadsPage(initialGameRoot: String?) {
         loadingManifest = false
     }
 
-    fun startFresh() {
+    fun startInstall() {
         val dirText = gameDirText.trim()
         if (dirText.isEmpty()) {
             message = "先填一个目标目录，比如 D:/mc-test。"
@@ -107,92 +130,93 @@ fun DownloadsPage(initialGameRoot: String?) {
             message = "先选或手填一个版本号，比如 1.20.1。"
             return
         }
+        if (backend == null) {
+            message = "后端未装配：一键安装需要桌面端注入 Java 与实例存储实现。"
+            return
+        }
         val dir = File(dirText)
         job?.cancel()
         meter.reset()
+        stepStates = emptyMap()
         progress = null
-        failures = emptyList()
-        planInfo = null
         speedBytesPerSecond = 0L
         elapsedMs = 0L
-        phase = InstallPhase.Planning
+        currentStep = InstallStep.PLANNING
+        phase = InstallPhase.Running
         message = "正在解析 " + id + " 的版本元数据…"
         val startedAt = System.currentTimeMillis()
 
-        job = scope.launch(Dispatchers.IO) {
+        job = scope.launch {
             try {
-                val plan = VanillaInstaller.plan(dir, id, manifest)
-                planInfo = plan
-                message = "版本 " + plan.versionId + "：共 " + plan.totalFiles +
-                    " 个文件，约 " + formatBytes(plan.totalBytes) + "，开始下载…"
-                phase = InstallPhase.Downloading
-                val report = VanillaInstaller.download(plan.items) { snapshot ->
-                    progress = snapshot
-                    val speed = meter.sample(snapshot.completedBytes)
-                    if (speed >= 0) speedBytesPerSecond = speed
+                val outcome = OneClickInstaller.install(
+                    gameDir = dir,
+                    versionId = id,
+                    javaRuntimes = backend.javaRuntimes,
+                    instances = backend.instances,
+                    manifest = manifest,
+                ) { step ->
+                    if (step.step != currentStep) {
+                        val previous = currentStep
+                        if (previous != InstallStep.IDLE && previous != InstallStep.DONE) {
+                            stepStates = stepStates + (previous to StepState.Succeeded)
+                        }
+                        currentStep = step.step
+                    }
+                    if (step.step != InstallStep.IDLE && step.step != InstallStep.DONE) {
+                        stepStates = stepStates + (step.step to StepState.Running)
+                    }
+                    progress = step
+                    if (step.detail.isNotBlank()) message = step.detail
                     elapsedMs = System.currentTimeMillis() - startedAt
+                    if (step.step == InstallStep.DOWNLOADING) {
+                        val speed = meter.sample(step.done)
+                        if (speed >= 0) speedBytesPerSecond = speed
+                    }
                 }
                 elapsedMs = System.currentTimeMillis() - startedAt
-                speedBytesPerSecond = 0L
-                failures = report.failures
-                phase = InstallPhase.Finished
-                message = if (report.ok) {
-                    "下载完成：" + report.succeeded + " 个文件，用时 " + formatDuration(elapsedMs)
-                } else {
-                    "下载结束：" + report.succeeded + " 个成功，" + report.failures.size +
-                        " 个失败，用时 " + formatDuration(elapsedMs)
+                progress = null
+                stepStates = VISIBLE_STEPS.associateWith { StepState.Succeeded }
+                currentStep = InstallStep.DONE
+                phase = InstallPhase.Finished(outcome)
+                message = buildString {
+                    append("已完成：")
+                    append(outcome.versionId)
+                    append("，Java ")
+                    append(outcome.java.majorVersion)
+                    append(if (outcome.javaInstalled) "（这次新下的）" else "（本机已有）")
+                    append("，用时 ")
+                    append(formatDuration(outcome.elapsedMs))
                 }
             } catch (e: CancellationException) {
                 throw e
+            } catch (e: InstallStepException) {
+                stepStates = stepStates + (e.step to StepState.Failed(e.message ?: "失败"))
+                currentStep = e.step
+                phase = InstallPhase.Failed(e.step, e.message ?: "失败")
+                message = "卡在「" + e.step.label + "」：" + (e.message ?: "未知错误")
             } catch (e: Exception) {
-                phase = InstallPhase.Failed(e.message ?: (e::class.simpleName ?: "下载失败"))
-                message = "下载失败：" + (e.message ?: (e::class.simpleName ?: "未知错误"))
+                val step = currentStep.takeIf { it != InstallStep.IDLE } ?: InstallStep.PLANNING
+                stepStates = stepStates + (step to StepState.Failed(e.message ?: "失败"))
+                phase = InstallPhase.Failed(step, e.message ?: (e::class.simpleName ?: "未知错误"))
+                message = "卡在「" + step.label + "」：" + (e.message ?: (e::class.simpleName ?: "未知错误"))
             }
         }
     }
 
-    fun retryFailures() {
-        val retryItems: List<DownloadItem> = failures.map { it.item }
-        if (retryItems.isEmpty()) return
+    fun cancelInstall() {
         job?.cancel()
-        meter.reset()
-        progress = null
+        job = null
+        phase = InstallPhase.Idle
+        currentStep = InstallStep.IDLE
         speedBytesPerSecond = 0L
-        elapsedMs = 0L
-        phase = InstallPhase.Downloading
-        message = "正在重试 " + retryItems.size + " 个失败项…"
-        val startedAt = System.currentTimeMillis()
-
-        job = scope.launch(Dispatchers.IO) {
-            try {
-                val report = VanillaInstaller.download(retryItems) { snapshot ->
-                    progress = snapshot
-                    val speed = meter.sample(snapshot.completedBytes)
-                    if (speed >= 0) speedBytesPerSecond = speed
-                    elapsedMs = System.currentTimeMillis() - startedAt
-                }
-                elapsedMs = System.currentTimeMillis() - startedAt
-                speedBytesPerSecond = 0L
-                failures = report.failures
-                phase = InstallPhase.Finished
-                message = if (report.ok) {
-                    "重试全部成功，用时 " + formatDuration(elapsedMs)
-                } else {
-                    "重试后仍有 " + report.failures.size + " 个失败"
-                }
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                phase = InstallPhase.Failed(e.message ?: (e::class.simpleName ?: "重试失败"))
-            }
-        }
+        message = "已取消。已下好的文件不会丢，再点一次会跳过校验通过的部分。"
     }
 
     LaunchedEffect(Unit) {
         if (manifest == null) refreshManifest()
     }
 
-    val busy = phase == InstallPhase.Planning || phase == InstallPhase.Downloading
+    val busy = phase is InstallPhase.Running
     val releases = manifest?.releases().orEmpty()
     val visible = if (filterText.isBlank()) {
         releases
@@ -203,8 +227,8 @@ fun DownloadsPage(initialGameRoot: String?) {
     Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Text("下载", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
         Text(
-            "从 Mojang 拉版本清单，把原版客户端、库文件和资源下载到指定目录。文件按 sha1 校验，" +
-                "已存在的文件会跳过，可以中断后再来一次。",
+            "选一个版本点「一键安装」：下载原版文件、按需补 Java 运行时、登记成实例，完成后直接去启动。" +
+                "文件按 sha1 校验，已存在的会跳过，可以中断后再来一次。",
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -237,15 +261,9 @@ fun DownloadsPage(initialGameRoot: String?) {
                 singleLine = true,
                 enabled = !busy,
             )
-            Button(onClick = { startFresh() }, enabled = !busy) { Text("开始下载") }
+            Button(onClick = { startInstall() }, enabled = !busy) { Text("一键安装") }
             if (busy) {
-                OutlinedButton(onClick = {
-                    job?.cancel()
-                    job = null
-                    phase = InstallPhase.Idle
-                    speedBytesPerSecond = 0L
-                    message = "已取消。已下好的文件不会丢，再点一次会跳过校验通过的部分。"
-                }) { Text("取消") }
+                OutlinedButton(onClick = { cancelInstall() }) { Text("取消") }
             }
         }
 
@@ -282,7 +300,7 @@ fun DownloadsPage(initialGameRoot: String?) {
                 Modifier.fillMaxWidth(),
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
             ) {
-                LazyColumn(Modifier.fillMaxWidth().heightIn(max = 170.dp).padding(4.dp)) {
+                LazyColumn(Modifier.fillMaxWidth().heightIn(max = 132.dp).padding(4.dp)) {
                     items(visible, key = { it.id }) { entry ->
                         val selected = entry.id == versionText.trim()
                         Row(
@@ -318,56 +336,121 @@ fun DownloadsPage(initialGameRoot: String?) {
             DownloadHint(message, error = phase is InstallPhase.Failed)
         }
 
-        val snapshot = progress
-        if (snapshot != null) {
-            Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                ProgressBar(snapshot.fraction)
+        // 失败后给一个明确的下一动作：直接重来，已下好并通过 sha1 的文件会跳过。
+        // 用户不用自己判断「再点一次一键安装是不是会从头下」。
+        if (phase is InstallPhase.Failed && !busy) {
+            Row(
+                Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Button(onClick = { startInstall() }) { Text("重试这一步") }
                 Text(
-                    "已完成 " + snapshot.completedFiles + " / " + snapshot.totalFiles + " 个文件 · " +
-                        formatBytes(snapshot.completedBytes) + " / " + formatBytes(snapshot.totalBytes),
-                    style = MaterialTheme.typography.bodyMedium,
-                )
-                Text(
-                    "速度 " + formatSpeed(speedBytesPerSecond) + " · 已用 " + formatDuration(elapsedMs) +
-                        (planInfo?.let { " · 版本 " + it.versionId } ?: ""),
+                    "已下好的文件会跳过，不会从头再来。",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
         }
 
-        planInfo?.let { plan ->
-            Text(
-                "版本 json：" + plan.versionJsonPath,
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+        // 分步进度：每一步一行，卡在哪一步一眼能看出来。
+        if (currentStep != InstallStep.IDLE) {
+            StepList(currentStep = currentStep, states = stepStates)
         }
 
-        if (failures.isNotEmpty()) {
+        val snapshot = progress
+        if (snapshot != null && snapshot.total > 0L) {
+            Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                ProgressBar(snapshot.fraction)
+                Text(
+                    formatProgressDetail(snapshot),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                if (snapshot.step == InstallStep.DOWNLOADING) {
+                    Text(
+                        "速度 " + formatSpeed(speedBytesPerSecond) + " · 已用 " + formatDuration(elapsedMs),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+        }
+
+        val finished = phase as? InstallPhase.Finished
+        if (finished != null) {
+            Card(
+                Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer),
+            ) {
+                Column(
+                    Modifier.fillMaxWidth().padding(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Text(
+                        "实例已就绪：" + finished.outcome.instance.name,
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    Text(
+                        "游戏目录 " + File(finished.outcome.instance.directory).parentFile?.parentFile?.path.orEmpty(),
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                    Text(
+                        "Java：" + finished.outcome.java.path,
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Button(onClick = { onInstalled(finished.outcome.instance) }) { Text("去启动") }
+                    }
+                }
+            }
+        }
+
+        Spacer(Modifier.weight(1f))
+    }
+}
+
+/** 「步骤名 —— 状态」的一行；失败时把原因原样显示出来。 */
+@Composable
+private fun StepList(currentStep: InstallStep, states: Map<InstallStep, StepState>) {
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        VISIBLE_STEPS.forEach { step ->
+            val state = states[step] ?: StepState.Pending
+            val (mark, color) = when (state) {
+                is StepState.Pending -> "·" to MaterialTheme.colorScheme.onSurfaceVariant
+                is StepState.Running -> "…" to MaterialTheme.colorScheme.primary
+                is StepState.Succeeded -> "✓" to MaterialTheme.colorScheme.primary
+                is StepState.Failed -> "✗" to MaterialTheme.colorScheme.error
+            }
             Row(
                 Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 Text(
-                    "失败 " + failures.size + " 项",
-                    Modifier.weight(1f),
-                    style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.SemiBold,
-                    color = MaterialTheme.colorScheme.error,
+                    mark + " " + step.label,
+                    style = MaterialTheme.typography.bodySmall,
+                    fontWeight = if (step == currentStep) FontWeight.SemiBold else FontWeight.Normal,
+                    color = color,
                 )
-                Button(onClick = { retryFailures() }, enabled = !busy) { Text("重试失败项") }
-            }
-            LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                items(failures, key = { it.item.target }) { failure ->
-                    FailureCard(failure)
+                if (state is StepState.Failed) {
+                    Text(
+                        state.message,
+                        Modifier.weight(1f),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                    )
                 }
             }
-        } else {
-            Spacer(Modifier.weight(1f))
         }
     }
+}
+
+private fun formatProgressDetail(step: StepProgress): String = when (step.step) {
+    InstallStep.DOWNLOADING -> step.detail + " · " + formatBytes(step.done) + " / " + formatBytes(step.total)
+    InstallStep.JAVA_INSTALL -> "Java 运行时下载 " + (step.fraction * 100f).toInt() + "%"
+    else -> step.detail
 }
 
 @Composable
@@ -386,23 +469,6 @@ private fun ProgressBar(fraction: Float) {
                     .fillMaxHeight()
                     .background(MaterialTheme.colorScheme.primary, MaterialTheme.shapes.small),
             )
-        }
-    }
-}
-
-@Composable
-private fun FailureCard(failure: DownloadFailure) {
-    Card(
-        Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer),
-    ) {
-        Column(Modifier.fillMaxWidth().padding(10.dp)) {
-            Text(
-                File(failure.item.target).path,
-                style = MaterialTheme.typography.bodySmall,
-                fontWeight = FontWeight.SemiBold,
-            )
-            Text(failure.reason, style = MaterialTheme.typography.bodySmall)
         }
     }
 }
