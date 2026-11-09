@@ -19,38 +19,115 @@ dependencies {
     implementation(libs.kotlinx.coroutines.swing)
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// 品牌与打包参数
+//
+// 版本号唯一真源是根 build.gradle.kts 的 allprojects.version；这里只按「版本号里
+// 有没有 -preview」判断走孵化线还是正式线，两条线共用同一份构建脚本。
+//
+// 文案与 core/src/main/kotlin/io/github/huang404yan/platypus/core/Brand.kt 保持一致
+// —— 构建脚本读不到 core 的编译产物（BuildInfo 是编译期生成的），改 Brand.kt 的
+// 品牌名/标语时请同步改这里，反之亦然。
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** 一条产品线的打包参数。两条线必须互不覆盖。 */
+data class ChannelBrand(
+    val nameEn: String,
+    val nameZh: String,
+    val slogan: String,
+    /** 相对仓库根；branding/ 不入库，缺失时回退到随源码提交的通用图标。 */
+    val windowsIcon: String,
+    val linuxIcon: String,
+    val linuxPackageName: String,
+    /** 安装包的升级标识。两条线必须不同，否则跨通道升级会互相覆盖。 */
+    val upgradeUuid: String,
+)
+
+val previewBrand = ChannelBrand(
+    nameEn = "Platypus Preview",
+    nameZh = "鸭嘴兽·孵化版",
+    slogan = "自然界早就缝合好了。",
+    windowsIcon = "branding/windows/platypus-baby.ico",
+    linuxIcon = "branding/linux/baby/platypus-baby.png",
+    linuxPackageName = "platypus-preview",
+    // 孵化线沿用仓库最早的 UUID，保持既有配置不跳变。
+    upgradeUuid = "6d1f3c52-8a4e-4b57-9c1d-2f0a7b6e5d84",
+)
+
+val stableBrand = ChannelBrand(
+    nameEn = "Platypus Launcher",
+    nameZh = "鸭嘴兽启动器",
+    slogan = "把好东西，缝在一起。",
+    windowsIcon = "branding/windows/platypus-adult.ico",
+    linuxIcon = "branding/linux/adult/platypus-adult.png",
+    linuxPackageName = "platypus",
+    // 正式线独立 UUID：与孵化线并存时不互相抢升级。
+    upgradeUuid = "5b2e7d10-9c43-4f68-8a1b-3e6d0f94c275",
+)
+
+val fullVersion = project.version.toString()
+val isPreviewChannel = fullVersion.contains("-preview")
+val brand = if (isPreviewChannel) previewBrand else stableBrand
+
+/** 首选图标不存在时回退到通用图标；两者都没有就返回 null，让 jpackage 用默认图标。 */
+fun resolveIcon(preferred: String, fallback: String): java.io.File? {
+    val candidate = rootProject.file(preferred)
+    if (candidate.isFile) return candidate
+    val fallbackFile = rootProject.file(fallback)
+    if (fallbackFile.isFile) {
+        logger.info("[package] 图标 {} 不存在，回退到 {}", preferred, fallback)
+        return fallbackFile
+    }
+    logger.warn("[package] 图标 {} 与 {} 都不存在，jpackage 将使用默认图标", preferred, fallback)
+    return null
+}
+
 compose.desktop {
     application {
         mainClass = "io.github.huang404yan.platypus.desktop.MainKt"
 
-        // 原生包用 jpackage 打，图标与应用名跟孵化版对齐。
-        // 产物在 app-desktop/build/compose/binaries/main/ 下。
+        // 原生包用 jpackage 打。产物在 app-desktop/build/compose/binaries/main/ 下。
         nativeDistributions {
-            // Msi 需要 WiX（root 工程的 downloadWix 会去 GitHub 拉），
-            // 连不上 GitHub 时用 -PskipWix 跳过 WiX 下载。
-            targetFormats(TargetFormat.Deb, TargetFormat.AppImage)
-            packageName = "Platypus Preview"
-            packageVersion = project.version.toString().substringBefore("-")
-            description = "非官方 Minecraft 启动器，与 Mojang Studios 及 Microsoft 无关联。"
+            // 目标格式跟着构建机走，不能写死 Linux 格式：
+            //   Windows → Msi（需要 WiX Toolset；没有 WiX 时用 -PskipWix 跳过下载，
+            //             代价是出不了 msi，只能出 createDistributable 的 app-image）
+            //   macOS   → Dmg
+            //   其它    → Deb / AppImage
+            // 在 Windows 上声明 Deb 只会得到「Task not found: packageMsi」之类的空结果。
+            val hostOs = System.getProperty("os.name").orEmpty().lowercase()
+            val hostTargets = when {
+                hostOs.contains("win") -> listOf(TargetFormat.Msi)
+                hostOs.contains("mac") -> listOf(TargetFormat.Dmg)
+                else -> listOf(TargetFormat.Deb, TargetFormat.AppImage)
+            }
+            targetFormats(*hostTargets.toTypedArray())
+
+            packageName = brand.nameEn
+            // jpackage 只接受纯数字版本（主.次.修订），preview 后缀不能进包版本。
+            packageVersion = fullVersion.substringBefore("-")
+            description =
+                brand.nameZh + "（" + brand.nameEn + "）—— 非官方 Minecraft 启动器，" +
+                    "与 Mojang Studios 及 Microsoft 无关联。" + brand.slogan
             vendor = "Platypus Launcher"
 
             windows {
-                iconFile.set(project.file("src/main/resources/icon/platypus.ico"))
-                menuGroup = "Platypus Launcher"
+                resolveIcon(brand.windowsIcon, "app-desktop/src/main/resources/icon/platypus.ico")
+                    ?.let { iconFile.set(it) }
+                menuGroup = brand.nameEn
                 shortcut = true
-                // 固定装到程序目录，避免默认装进 LocalAppData 让用户找不到。
+                // 允许用户选安装目录，避免默认装进 LocalAppData 让用户找不到。
                 dirChooser = true
                 perUserInstall = true
-                upgradeUuid = "6d1f3c52-8a4e-4b57-9c1d-2f0a7b6e5d84"
+                upgradeUuid = brand.upgradeUuid
             }
 
             linux {
-                iconFile.set(project.file("src/main/resources/icon/platypus.png"))
-                menuGroup = "Platypus Launcher"
+                resolveIcon(brand.linuxIcon, "app-desktop/src/main/resources/icon/platypus.png")
+                    ?.let { iconFile.set(it) }
+                menuGroup = brand.nameEn
                 appCategory = "Game"
-                packageName = "platypus-preview"
+                packageName = brand.linuxPackageName
             }
-
         }
     }
 }

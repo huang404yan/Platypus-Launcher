@@ -25,13 +25,16 @@ fun main(args: Array<String>) {
 
     val title = if (Brand.isPreview) "${Brand.PREVIEW_NAME_ZH} ${Brand.version}" else Brand.NAME_ZH
 
+    // 组合根：整个程序只有这一处装配后端，Composable 里不 new 任何实现。
+    val services = DesktopServices.create(root.takeIf { it.isNotBlank() }?.let(::File))
+
     application {
         Window(
             onCloseRequest = ::exitApplication,
             title = title,
             icon = loadWindowIcon(),
         ) {
-            App(initialGameRoot = root.ifBlank { null })
+            App(initialGameRoot = root.ifBlank { null }, backend = services)
         }
     }
 }

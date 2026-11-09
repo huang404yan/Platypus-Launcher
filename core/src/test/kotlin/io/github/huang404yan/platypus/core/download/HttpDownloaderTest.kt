@@ -140,6 +140,47 @@ class HttpDownloaderTest {
         assertEquals("alpha-content", File(target("mirrored.txt")).readText())
     }
 
+    @Test
+    fun `并发下载到同一个不存在的目录不会把后到的线程判成失败`() = runBlocking {
+        val bytes = bodies.getValue("/a.txt")
+        // 同一个深层目录下的 16 个文件：目录一开始不存在，谁先到谁建。
+        val deep = File(tmpDir, "assets/objects/6f")
+        val items = (0 until 16).map { index ->
+            DownloadItem(
+                url = url("/a.txt"),
+                target = File(deep, "file-$index.bin").path,
+                sha1 = sha1(bytes),
+                size = bytes.size.toLong(),
+            )
+        }
+
+        val report = downloader.download(items) {}
+
+        assertTrue(report.ok, "并发建目录不应失败：${report.failures}")
+        assertEquals(16, report.succeeded)
+        assertTrue(deep.isDirectory)
+        assertEquals(16, deep.listFiles()?.size ?: 0)
+    }
+
+    @Test
+    fun `目标目录已经存在时不会报无法创建目录`() = runBlocking {
+        val bytes = bodies.getValue("/a.txt")
+        val deep = File(tmpDir, "assets/objects/6f").apply { mkdirs() }
+        val report = downloader.download(
+            listOf(
+                DownloadItem(
+                    url = url("/a.txt"),
+                    target = File(deep, "already-there.bin").path,
+                    sha1 = sha1(bytes),
+                    size = bytes.size.toLong(),
+                ),
+            ),
+        )
+
+        assertTrue(report.ok, "目录已存在应视为成功：${report.failures}")
+        assertEquals("alpha-content", File(deep, "already-there.bin").readText())
+    }
+
     private fun sha1(bytes: ByteArray): String =
         MessageDigest.getInstance("SHA-1").digest(bytes)
             .joinToString("") { (it.toInt() and 0xFF).toString(16).padStart(2, '0') }
