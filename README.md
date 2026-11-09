@@ -83,6 +83,8 @@ Windows 下也可以用 `gradlew.bat`。首次构建会下载约 300 MB 依赖�
 - `docs/18-mods-page.md`：**模组页**（本地 `mods/` 扫描、Modrinth 搜索安装、为什么不是 CurseForge）
 - `docs/20-android-pages.md`：**Android 端模组 / 联机 / 设置三页**（ModInstaller 下沉 core、MulticastLock、为什么启动页仍是占位）
 - `docs/19-neoforge-installer.md`：**NeoForge 一键安装**（官方 maven 被重置 → BMCLAPI 镜像、`--mirror` 对 client 安装无效的字节码级证据、`inheritsFrom` 是版本映射的唯一可信来源、预铺 70 个依赖库让 installer 完全不联网）
+- `docs/21-gongneng-xifen.md`：**功能细分与补全路线**（对照 PCL 自编版逐页列出差距、「有了但不好用」八条实证、补全 P1–P7 / 细分 S1–S6 / 美化 U1–U4 三阶段）
+- `docs/22-shili-geli-yu-xiangqing.md`：**实例真隔离与实例详情页**（`--gameDir` 指实例目录、libraries/assets 仍共享、旧共享 mods 复制不移动、`isolationSmoke` 的五条磁盘判据）
 
 ## 下载
 
@@ -117,11 +119,13 @@ M0（骨架）+ M1（实例扫描）+ M2（下载器）+ M3（**Windows 一键�
 
 **下载断点续传**：先写 `<文件>.part`，校验通过才转正；`.part` 有内容就发 `Range` 接着下，断网不清半成品，下次自动接上。进度条会额外显示「其中 N 个接着上次下（省了 M MB）」（`docs/14`）。
 
-单测 **245 例全过**（24 个测试类，`./gradlew :core:test`）。另有九个无头冒烟任务（`e2eInstall` / `settingsSmoke` / `instanceFlowSmoke` / `resumeSmoke` / `deleteSmoke` / `fabricE2e` / `forgeE2e` / `neoForgeE2e` / `modsE2e`），走的是界面按钮同一批函数；`resumeSmoke` / `fabricE2e` / `forgeE2e` / `neoForgeE2e` / `modsE2e` 需要联网，分别在空目录真装 Fabric、真跑 Forge 与 NeoForge 官方安装器、真从 Modrinth 下一个模组；`deleteSmoke` 在 `dist/_delete-smoke` 里全程造假数据，不碰真实 `.minecraft`。
+单测 **272 例全过**（27 个测试类，`./gradlew :core:test`）。另有十个无头冒烟任务（`e2eInstall` / `settingsSmoke` / `instanceFlowSmoke` / `resumeSmoke` / `deleteSmoke` / `fabricE2e` / `forgeE2e` / `neoForgeE2e` / `modsE2e` / `isolationSmoke`），走的是界面按钮同一批函数；`resumeSmoke` / `fabricE2e` / `forgeE2e` / `neoForgeE2e` / `modsE2e` 需要联网，分别在空目录真装 Fabric、真跑 Forge 与 NeoForge 官方安装器、真从 Modrinth 下一个模组；`deleteSmoke` 在 `dist/_delete-smoke` 里全程造假数据，不碰真实 `.minecraft`。
 
 **能装 Fabric 了**：下载页勾「顺带装 Fabric」→ 拉 meta.fabricmc.net 的 loader 列表（默认落在最新 stable）→ 装 profile json（只改 `id`，保留 `inheritsFrom`）→ 按 maven 坐标补全 8 个库的地址并下载 → 登记成 `1.20.1-fabric-0.20.1` 这样的实例。实测空目录全流程 4 分 29 秒进主菜单，日志首行 `Loading Minecraft 1.20.1 with Fabric Loader 0.20.1`（`docs/15`）。
 
 **能装 Forge 了**：下载页勾「顺带装 Forge」→ 拉 `promotions_slim.json`（默认 recommended）→ 下载官方 installer（8.8 MB，装过一次就复用）→ 备好 `launcher_profiles.json` → 跑 `--installClient` 逐行透传日志 → 校验 version json → **把原版 client jar 复制成 `<forgeId>.jar`**（不 copy 会撞模块，报 `ResolutionException: Module minecraft contains package net.minecraft.server`）→ 登记成 `1.20.1-forge-47.4.28`。实测空目录全流程 7 分 55 秒（含下载 3641 个原版文件与自动补 Java 17）、已装目录 7 秒，进主菜单 11.0 秒（`docs/17`）。
+
+**实例终于真隔离了**：以前所有实例共用一份 `mods/` 与 `saves/`（`--gameDir` 被反推成游戏根目录），装两个整合包会互相打架。现在 `--gameDir` 指向 `<游戏目录>/versions/<id>`，`libraries/` 与 `assets/` 仍共享；`isolationSmoke` 用五条磁盘判据反向证明（实例目录里的 `logs/latest.log` 有内容 9291 B、共享 `latest.log` 的 mtime 与共享 `saves/` 件数一字未变），实测进主菜单 9.6 秒。模组页跟着改成「先选实例」，隔离前装在共享 `mods/` 里的模组可以一键**复制**进某个实例（不移动、不覆盖同名）。实例卡片新增「详情」：本机 Java 列表里挑运行时、改内存与 JVM 参数、看版本 json 摘要（mainClass / 继承自 / 库条目数 / 需要的 Java）、看八个子目录各占多少、一键打开目录（`docs/22`）。
 
 **有模组页了**：左侧列出 `mods/` 里已装的（读 `fabric.mod.json` / `mods.toml` / `neoforge.mods.toml` 拿 id、名字、版本、加载器，坏 jar 标出来但不崩），右侧从 Modrinth 搜、选一个装进去，下载沿用 `.part` 续传 + sha1 强校验。实测装 Sodium 971 552 字节、33 秒（`docs/18`）。
 
