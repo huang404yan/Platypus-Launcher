@@ -41,6 +41,8 @@ import io.github.huang404yan.platypus.core.auth.OfflineProfile
 import io.github.huang404yan.platypus.core.instance.Instance
 import io.github.huang404yan.platypus.core.instance.InstanceScanner
 import io.github.huang404yan.platypus.core.instance.ScanResult
+import io.github.huang404yan.platypus.core.instance.instanceKey
+import io.github.huang404yan.platypus.core.instance.mergeInstances
 import io.github.huang404yan.platypus.core.launch.GameHandle
 import io.github.huang404yan.platypus.core.launch.LaunchDiagnosis
 import io.github.huang404yan.platypus.core.launch.LaunchEvent
@@ -48,15 +50,18 @@ import io.github.huang404yan.platypus.core.launch.LaunchRequest
 import io.github.huang404yan.platypus.core.runtime.GameJavaRules
 import io.github.huang404yan.platypus.core.runtime.JavaRuntime
 import io.github.huang404yan.platypus.core.runtime.findExactMajor
+import io.github.huang404yan.platypus.core.version.parseVersionJson
 import java.io.File
-import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.Dispatchers
 
 /**
- * 启动页：选实例 → 选 Java → 起进程 → 看日志。
+ * 启动页：选实例 → 调内存 → 选 Java → 起进程 → 看日志。
  *
- * 三个后端能力都从 [LauncherBackend] 注入（core 里的接口），这个文件不 new 任何实现，
- * 也不碰平台 API，方便单独替换成假的实现做预览。
+ * 实例来自两处：本地登记（[io.github.huang404yan.platypus.core.instance.InstanceRepository]）
+ * 与目录扫描（[InstanceScanner]），前者优先、后者补充，互不覆盖。
  *
  * 线程模型：GameRuntime 的 onEvent 来自 IO 线程，这里直接写 Compose 快照状态
  * （快照状态本身线程安全），读日志的循环留在后端，界面不做轮询。
@@ -79,10 +84,14 @@ fun LaunchPage(backend: LauncherBackend?, initialGameRoot: String?) {
 
     var rootText by remember { mutableStateOf(initialGameRoot ?: defaultGameRoot()) }
     var scanned by remember { mutableStateOf<ScanResult?>(null) }
+    var registered by remember { mutableStateOf<List<Instance>>(emptyList()) }
     var selected by remember { mutableStateOf<Instance?>(null) }
 
     var javaPhase by remember { mutableStateOf<JavaPhase>(JavaPhase.Idle) }
     var selectedJava by remember { mutableStateOf<JavaRuntime?>(null) }
+
+    var memoryText by remember { mutableStateOf(Instance.DEFAULT_MEMORY_MB.toString()) }
+    var memoryNotice by remember { mutableStateOf("") }
 
     var username by remember { mutableStateOf("Dev") }
     var phase by remember { mutableStateOf<LaunchPhase>(LaunchPhase.Idle) }
@@ -93,13 +102,24 @@ fun LaunchPage(backend: LauncherBackend?, initialGameRoot: String?) {
     var handle by remember { mutableStateOf<GameHandle?>(null) }
     var menuReached by remember { mutableStateOf(false) }
 
-    fun rescan() {
+    /** 扫描目录 + 读登记，登记的排在前面。 */
+    suspend fun rescan() {
         val text = rootText.trim()
-        val result = if (text.isEmpty()) null else InstanceScanner.scan(File(text))
-        scanned = result
-        if (selected == null || selected?.directory !in result?.instances.orEmpty().map { it.directory }) {
-            selected = result?.instances?.firstOrNull()
+        val result = withContext(Dispatchers.IO) {
+            if (text.isEmpty()) null else InstanceScanner.scan(File(text))
         }
+        val saved = withContext(Dispatchers.IO) {
+            runCatching { backend.instances.list() }.getOrDefault(emptyList())
+        }
+        scanned = result
+        registered = saved
+        val merged = mergeInstances(saved, result?.instances.orEmpty())
+        if (selected == null || merged.none { instanceKey(it) == instanceKey(selected!!) }) {
+            selected = merged.firstOrNull()
+        } else {
+            selected = merged.firstOrNull { instanceKey(it) == instanceKey(selected!!) }
+        }
+        selected?.let { memoryText = it.memoryMb.toString() }
     }
 
     fun detectJava() {
@@ -109,14 +129,77 @@ fun LaunchPage(backend: LauncherBackend?, initialGameRoot: String?) {
             javaPhase = try {
                 JavaPhase.Done(backend.javaRuntimes.detect())
             } catch (t: Throwable) {
-                JavaPhase.Failed(t.message ?: t.javaClass.simpleName)
+                // 探测失败不能当成「没有 Java」，原文要原样带到界面上
+                JavaPhase.Failed(t.message ?: t.javaClass.simpleName, duringInstall = false)
             }
         }
     }
 
-    fun launchGame() {
+    /** 版本 json 里声明的 javaVersion.component；读不到就返回 null，由后端按主版本推。 */
+    fun javaComponentOf(instance: Instance): String? =
+        runCatching {
+            val json = File(File(instance.directory), File(instance.directory).name + ".json")
+            if (!json.isFile) return null
+            parseVersionJson(json.readText()).javaVersion?.component?.takeIf { it.isNotBlank() }
+        }.getOrNull()
+
+    fun installJava() {
         val instance = selected ?: return
-        val java = selectedJava ?: return
+        val major = GameJavaRules.requiredMajor(instance.gameVersion)
+        if (javaPhase is JavaPhase.Installing) return
+        javaPhase = JavaPhase.Installing(0f, "准备下载 Java " + major)
+        scope.launch {
+            try {
+                val runtime = backend.javaRuntimes.ensureRuntime(major, javaComponentOf(instance)) { fraction ->
+                    javaPhase = JavaPhase.Installing(fraction, "正在下载 Java " + major)
+                }
+                val refreshed = runCatching { backend.javaRuntimes.detect() }.getOrDefault(emptyList())
+                javaPhase = JavaPhase.Done(refreshed)
+                selectedJava = runtime
+            } catch (t: Throwable) {
+                // 下载失败的原文（清单里哪几个文件、什么原因）必须留在界面上
+                javaPhase = JavaPhase.Failed(t.message ?: t.javaClass.simpleName, duringInstall = true)
+            }
+        }
+    }
+
+    fun saveMemory(): Instance? {
+        val target = selected ?: return null
+        val parsed = memoryText.trim().toIntOrNull()
+        if (parsed == null) {
+            memoryNotice = "内存要填整数，单位 MB。"
+            return null
+        }
+        val clamped = Instance.clampMemoryMb(parsed)
+        if (clamped != parsed) {
+            memoryNotice = "已按允许范围（" + Instance.MIN_MEMORY_MB + "–" + Instance.MAX_MEMORY_MB +
+                " MB）改成 " + clamped + " MB。"
+        } else {
+            memoryNotice = "已写入实例：" + clamped + " MB。"
+        }
+        memoryText = clamped.toString()
+        val updated = target.copy(memoryMb = clamped, registered = true)
+        selected = updated
+        scope.launch {
+            runCatching { backend.instances.save(updated) }
+                .onFailure { memoryNotice = "写入实例失败：" + (it.message ?: it.javaClass.simpleName) }
+            val saved = runCatching { backend.instances.list() }.getOrDefault(emptyList())
+            registered = saved
+        }
+        return updated
+    }
+
+    fun launchGame() {
+        val instance = saveMemory() ?: return
+        val java = selectedJava ?: run {
+            // 按钮正常情况下是禁用的，但内存保存失败或并发改动仍可能走到这里：
+            // 不能静默什么都不做，否则用户只会觉得「点了没反应」。
+            val needMajor = GameJavaRules.requiredMajor(instance.gameVersion)
+            phase = LaunchPhase.Failed(
+                "还没选 Java：本机没有 Java " + needMajor + "，先点「自动补 Java " + needMajor + "」，或在列表里选一个。",
+            )
+            return
+        }
         logs.clear()
         buffer.clear()
         menuReached = false
@@ -188,11 +271,13 @@ fun LaunchPage(backend: LauncherBackend?, initialGameRoot: String?) {
 
     val busy = phase is LaunchPhase.Starting || phase is LaunchPhase.Running
     val requiredMajor = selected?.let { GameJavaRules.requiredMajor(it.gameVersion) }
+    val merged = mergeInstances(registered, scanned?.instances.orEmpty())
+    val exactJava = requiredMajor?.let { major -> (javaPhase as? JavaPhase.Done)?.runtimes?.findExactMajor(major) }
 
     Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text("启动", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
         Text(
-            "选一个实例、选一个 Java，点「启动」。离线模式，不登录任何账号。",
+            "选一个实例、调好内存、选一个 Java，点「启动」。离线模式，不登录任何账号。",
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -211,29 +296,51 @@ fun LaunchPage(backend: LauncherBackend?, initialGameRoot: String?) {
                 singleLine = true,
                 enabled = !busy,
             )
-            Button(onClick = { rescan() }, enabled = !busy) { Text("扫描") }
+            Button(onClick = { scope.launch { rescan() } }, enabled = !busy) { Text("扫描") }
         }
 
         val result = scanned
         when {
-            result == null -> SectionHint("还没有扫描。")
-            !result.isGameDirectory -> SectionHint("这个目录看起来不是游戏目录。")
-            result.instances.isEmpty() -> SectionHint("没有识别到版本。")
+            result == null && merged.isEmpty() -> SectionHint("还没有扫描。")
+            merged.isEmpty() && result != null && !result.isGameDirectory -> SectionHint("这个目录看起来不是游戏目录。")
+            merged.isEmpty() -> SectionHint("没有识别到版本。去「下载」页装一个。")
             else -> {
-                LazyColumn(Modifier.fillMaxWidth().heightIn(max = 132.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    items(result.instances) { instance ->
+                LazyColumn(Modifier.fillMaxWidth().heightIn(max = 120.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    items(merged, key = { instanceKey(it) }) { instance ->
                         InstanceRow(
                             instance = instance,
-                            selected = instance.directory == selected?.directory,
+                            selected = instanceKey(instance) == selected?.let { instanceKey(it) },
                             enabled = !busy,
-                            onClick = { selected = instance },
+                            onClick = {
+                                selected = instance
+                                memoryText = instance.memoryMb.toString()
+                                memoryNotice = ""
+                            },
                         )
                     }
                 }
             }
         }
 
-        // ② Java
+        // ② 内存
+        Row(
+            Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            OutlinedTextField(
+                value = memoryText,
+                onValueChange = { memoryText = it },
+                modifier = Modifier.weight(1f),
+                label = { Text("最大内存（MB，范围 " + Instance.MIN_MEMORY_MB + "–" + Instance.MAX_MEMORY_MB + "）") },
+                singleLine = true,
+                enabled = !busy && selected != null,
+            )
+            OutlinedButton(onClick = { saveMemory() }, enabled = !busy && selected != null) { Text("保存到实例") }
+        }
+        if (memoryNotice.isNotBlank()) SectionHint(memoryNotice)
+
+        // ③ Java
         Row(
             Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
@@ -248,7 +355,16 @@ fun LaunchPage(backend: LauncherBackend?, initialGameRoot: String?) {
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-            OutlinedButton(onClick = { detectJava() }, enabled = javaPhase !is JavaPhase.Detecting && !busy) {
+            val installing = javaPhase as? JavaPhase.Installing
+            if (requiredMajor != null && exactJava == null && javaPhase is JavaPhase.Done && !busy) {
+                Button(onClick = { installJava() }, enabled = installing == null) {
+                    Text(if (installing != null) "补 Java 中…" else "自动补 Java " + requiredMajor)
+                }
+            }
+            OutlinedButton(
+                onClick = { detectJava() },
+                enabled = javaPhase !is JavaPhase.Detecting && installing == null && !busy,
+            ) {
                 Text(if (javaPhase is JavaPhase.Detecting) "探测中…" else "重新探测")
             }
         }
@@ -256,19 +372,25 @@ fun LaunchPage(backend: LauncherBackend?, initialGameRoot: String?) {
         when (val current = javaPhase) {
             is JavaPhase.Idle -> SectionHint("还没有探测。")
             is JavaPhase.Detecting -> SectionHint("正在探测本机 Java…")
-            is JavaPhase.Failed -> SectionHint("探测失败：" + current.message, error = true)
+            is JavaPhase.Installing -> SectionHint(
+                current.detail + "（" + (current.fraction * 100f).toInt() + "%）",
+            )
+            is JavaPhase.Failed -> SectionHint(
+                (if (current.duringInstall) "补 Java 失败：" else "探测 Java 失败：") + current.message,
+                error = true,
+            )
             is JavaPhase.Done -> {
                 if (current.runtimes.isEmpty()) {
-                    SectionHint("没有找到任何 Java。装一个 JDK 再点「重新探测」。", error = true)
+                    SectionHint("没有找到任何 Java。可以点上面的「自动补 Java」现下一个。", error = true)
                 } else {
                     if (requiredMajor != null && current.runtimes.findExactMajor(requiredMajor) == null) {
                         SectionHint(
-                            "本机没有 Java " + requiredMajor + "。直接启动大概率会因为版本不匹配失败。",
+                            "本机没有 Java " + requiredMajor + "。点「自动补 Java " + requiredMajor + "」会从 Mojang 下到游戏目录的 runtime/ 下。",
                             error = true,
                         )
                     }
                     LazyColumn(
-                        Modifier.fillMaxWidth().heightIn(max = 132.dp),
+                        Modifier.fillMaxWidth().heightIn(max = 110.dp),
                         verticalArrangement = Arrangement.spacedBy(6.dp),
                     ) {
                         items(current.runtimes) { runtime ->
@@ -285,7 +407,7 @@ fun LaunchPage(backend: LauncherBackend?, initialGameRoot: String?) {
             }
         }
 
-        // ③ 启动
+        // ④ 启动
         Row(
             Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
@@ -307,7 +429,7 @@ fun LaunchPage(backend: LauncherBackend?, initialGameRoot: String?) {
 
         StatusLine(phase = phase, stageText = stageText, menuReached = menuReached)
 
-        // ④ 日志
+        // ⑤ 日志
         val listState = rememberLazyListState()
         LaunchedEffect(logs.size) {
             if (logs.isNotEmpty()) listState.scrollToItem(logs.size - 1)
@@ -342,12 +464,15 @@ fun LaunchPage(backend: LauncherBackend?, initialGameRoot: String?) {
 
 private const val MAX_VISIBLE_LINES = 500
 
-/** Java 探测的三种状态；探测失败不能当成「没有 Java」。 */
+/** Java 探测的四种状态；探测失败不能当成「没有 Java」。 */
 private sealed interface JavaPhase {
     data object Idle : JavaPhase
     data object Detecting : JavaPhase
     data class Done(val runtimes: List<JavaRuntime>) : JavaPhase
-    data class Failed(val message: String) : JavaPhase
+    data class Installing(val fraction: Float, val detail: String) : JavaPhase
+
+    /** [duringInstall] 区分「探测本机 Java 失败」与「补 Java 下载失败」——两者诱因完全不同。 */
+    data class Failed(val message: String, val duringInstall: Boolean) : JavaPhase
 }
 
 /** 一次启动的生命周期。 */
@@ -414,7 +539,8 @@ private fun InstanceRow(instance: Instance, selected: Boolean, enabled: Boolean,
             Column(Modifier.weight(1f)) {
                 Text(instance.name, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
                 Text(
-                    "游戏 " + instance.gameVersion + " · " + instance.loader.name,
+                    "游戏 " + instance.gameVersion + " · " + instance.loader.name +
+                        " · " + instance.memoryMb + " MB" + if (instance.registered) " · 已登记" else "",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -444,7 +570,8 @@ private fun JavaRow(runtime: JavaRuntime, selected: Boolean, recommended: Boolea
         ) {
             Column(Modifier.weight(1f)) {
                 Text(
-                    "Java " + runtime.majorVersion + (runtime.vendor?.let { " · " + it } ?: ""),
+                    "Java " + runtime.majorVersion + (runtime.vendor?.let { " · " + it } ?: "") +
+                        if (runtime.managed) " · 启动器托管" else "",
                     style = MaterialTheme.typography.titleSmall,
                     fontWeight = FontWeight.SemiBold,
                 )

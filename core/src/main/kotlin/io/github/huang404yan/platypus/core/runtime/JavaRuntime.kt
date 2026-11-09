@@ -24,6 +24,19 @@ interface JavaRuntimeService {
 
     /** 缺失时下载；返回可用运行时。 */
     suspend fun ensure(major: Int, onProgress: (Float) -> Unit = {}): JavaRuntime
+
+    /**
+     * 带「版本 json 里的 javaVersion.component」的版本。
+     *
+     * component（java-runtime-gamma 之类）是 Mojang 的权威标识；主版本号只是它的投影，
+     * 而且同一个主版本在 Mojang 的清单里可能对应多个组件（beta 与 gamma 实测都是 17）。
+     * 默认实现忽略 component，退回按主版本号查找，方便测试替身。
+     */
+    suspend fun ensureRuntime(
+        major: Int,
+        component: String?,
+        onProgress: (Float) -> Unit = {},
+    ): JavaRuntime = ensure(major, onProgress)
 }
 
 /**

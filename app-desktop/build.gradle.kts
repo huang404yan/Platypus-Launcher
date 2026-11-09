@@ -17,6 +17,45 @@ dependencies {
     implementation(project(":core"))
     implementation(compose.desktop.currentOs)
     implementation(libs.kotlinx.coroutines.swing)
+
+    // 只有开发期无头验收（src/test）用得到，不进发行包。
+    testImplementation(project(":ui"))
+    testImplementation(project(":core"))
+    testImplementation(libs.kotlinx.coroutines.swing)
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 开发期无头验收
+//
+// 把「下载 → 补 Java → 登记实例 → 启动进主菜单」整条链路在一个真实目录上跑一遍，
+// 调用的就是界面按钮背后那几个函数，只是没有鼠标点击。产物落 dist/_e2e-logs/。
+//
+//   gradle :app-desktop:e2eInstall -Pe2eDir=dist/_test-mc/_e2e-YYYYMMDD [-Pe2eVersion=1.20.1]
+//
+// 注意：不要把宿主机 %APPDATA%/.minecraft 里已有的运行时算进来，驱动里已显式关掉
+// 全局启动器扫描，否则自动下载那段代码根本不会被走到。
+// ─────────────────────────────────────────────────────────────────────────────
+tasks.register<JavaExec>("e2eInstall") {
+    group = "verification"
+    description = "无头验收：在干净目录上从零走到主菜单（开发期用）"
+    dependsOn(tasks.named("testClasses"))
+    mainClass.set("io.github.huang404yan.platypus.desktop.E2eInstallKt")
+    classpath = sourceSets["test"].runtimeClasspath
+    workingDir = rootProject.projectDir
+    jvmArgs("-Dfile.encoding=UTF-8")
+
+    argumentProviders.add(
+        CommandLineArgumentProvider {
+            val dir = providers.gradleProperty("e2eDir").orNull
+                ?: error("缺少 -Pe2eDir=<游戏目录>（建议 dist/_test-mc/_e2e-<日期>）")
+            listOf(
+                rootProject.file(dir).absolutePath,
+                providers.gradleProperty("e2eVersion").orElse("1.20.1").get(),
+                providers.gradleProperty("e2eUser").orElse("Dev").get(),
+                providers.gradleProperty("e2eTimeoutMs").orElse("300000").get(),
+            )
+        },
+    )
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
