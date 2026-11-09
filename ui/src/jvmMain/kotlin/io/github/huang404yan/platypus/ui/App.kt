@@ -35,6 +35,7 @@ enum class Page(val label: String) {
     LAUNCH("启动"),
     INSTANCE("实例"),
     DOWNLOAD("下载"),
+    MODS("模组"),
     LINK("联机"),
     SETTINGS("设置"),
     ABOUT("关于"),
@@ -68,6 +69,7 @@ fun App(initialGameRoot: String? = null, backend: LauncherBackend? = null) {
                         page = Page.LAUNCH
                     }
                     Page.DOWNLOAD -> DownloadsPage(initialGameRoot, backend) { page = Page.LAUNCH }
+                    Page.MODS -> ModsPage(initialGameRoot, backend)
                     Page.SETTINGS -> SettingsPage(backend)
                     Page.ABOUT -> AboutPage()
                     else -> PlaceholderPage(page)
