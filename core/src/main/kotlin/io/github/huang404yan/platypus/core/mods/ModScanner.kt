@@ -45,7 +45,11 @@ data class ModScanResult(
 }
 
 /**
- * 扫描 <游戏目录>/mods。
+ * 扫描 <目录>/mods。
+ *
+ * 传进来的这个「目录」在 P1 之后是**实例目录**（`<gameRoot>/versions/<id>`），不是游戏根目录：
+ * 每个实例有自己的 mods/。谁该当那个目录由 [InstanceMods] 决定，这里只认「目录」本身，
+ * 免得 ModScanner 依赖实例模型、core 里绕成一团。
  *
  * 只读、不写盘、不联网。为什么读 jar 里的元数据而不是只看文件名：用户从 CurseForge 下下来的
  * 文件名经常是 sodium-fabric-0.5.13+mc1.20.1.jar 这种，看名字猜不出显示名和版本；
@@ -57,7 +61,13 @@ object ModScanner {
 
     private val json = Json { ignoreUnknownKeys = true; isLenient = true }
 
-    /** mods 目录的位置。注意它在游戏目录下，不在 versions/<id>/ 下 —— 所有实例共享。 */
+    /**
+     * mods 目录的位置：`<dir>/mods`。
+     *
+     * P1 之前 [gameDir] 传的是游戏根目录，所以所有实例共用一份 mods/（这一行曾经就是这么写的）。
+     * 现在传实例目录，每个实例一份。参数名保留 gameDir 是因为上层传进来的东西
+     * 最终就是游戏的 `--gameDir`，改名反而会让调用点看不出对应关系。
+     */
     fun modsDir(gameDir: File): File = File(gameDir, MODS_DIR_NAME)
 
     fun scan(gameDir: File): ModScanResult {
