@@ -1,17 +1,18 @@
 package io.github.huang404yan.platypus.ui
 
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -28,14 +29,19 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import io.github.huang404yan.platypus.core.instance.Instance
 import io.github.huang404yan.platypus.core.instance.InstanceScanner
 import io.github.huang404yan.platypus.core.instance.LoaderKind
+import io.github.huang404yan.platypus.core.instance.instanceKey
+import io.github.huang404yan.platypus.core.instance.mergeInstances
+import io.github.huang404yan.platypus.core.mods.InstanceMods
+import io.github.huang404yan.platypus.core.mods.InstanceModsSnapshot
+import io.github.huang404yan.platypus.core.mods.LegacyAdoptResult
 import io.github.huang404yan.platypus.core.mods.ModEntry
-import io.github.huang404yan.platypus.core.mods.ModScanResult
-import io.github.huang404yan.platypus.core.mods.ModScanner
 import io.github.huang404yan.platypus.core.mods.ModInstallProgress
 import io.github.huang404yan.platypus.core.mods.ModInstaller
 import io.github.huang404yan.platypus.core.mods.ModProject
@@ -46,7 +52,14 @@ import kotlinx.coroutines.withContext
 import java.io.File
 
 /**
- * 模组页：左边看 mods/ 里已经装了什么，右边从 Modrinth 搜一个装进去。
+ * 模组页：先选实例，左边看这个实例的 mods/ 里有什么，右边从 Modrinth 搜一个装进去。
+ *
+ * **P1 之后每个实例有自己的 mods 目录**（`<游戏目录>/versions/<id>/mods`），所以这一页
+ * 必须先知道操作哪个实例。以前这里是「游戏目录 → 共享 mods/」，隔离后那样写会一边装进
+ * 新目录、一边显示旧目录，谁也说不清模组到底装到哪去了。
+ *
+ * 隔离前留在 `<游戏目录>/mods` 里的那批模组，这里单独提示一行并给「搬进这个实例」，
+ * 不静默忽略 —— 用户会以为模组被吞了。
  *
  * 只做「装单个模组」——依赖求解没做（见 ModInstaller 的注释），所以装完会提示
  * requiredDependencies 有几个，让用户自己去装，不假装解决了。
@@ -56,16 +69,16 @@ fun ModsPage(initialGameRoot: String? = null, backend: LauncherBackend? = null) 
     val scope = rememberCoroutineScope()
 
     var rootText by remember { mutableStateOf(initialGameRoot ?: defaultGameRoot()) }
+    var instances by remember { mutableStateOf<List<Instance>>(emptyList()) }
+    var scanError by remember { mutableStateOf("") }
+    /** 选中的实例，用 instanceKey 记：切换目录后重新扫描，靠它把选择找回来。 */
+    var selectedKey by remember { mutableStateOf("") }
+
     var gameVersion by remember { mutableStateOf("") }
-    // 游戏目录里扫出来的版本（同一个游戏目录下可能有 1.20.1、1.20.1-forge-47.4.28 等多个）。
-    // 用来给「游戏版本」填空：留空去搜会把最新版模组装进来（实测装进了 mc26.3 的 Sodium，
-    // 而启动的是 1.20.1），所以这里主动把可用版本列出来，能填就自动填。
-    var knownVersions by remember { mutableStateOf<List<String>>(emptyList()) }
-    // 过滤用的加载器：null 表示不限。
     var loader by remember { mutableStateOf<LoaderKind?>(LoaderKind.FABRIC) }
     var query by remember { mutableStateOf("") }
 
-    var scan by remember { mutableStateOf<ModScanResult?>(null) }
+    var snapshot by remember { mutableStateOf<InstanceModsSnapshot?>(null) }
     var scanning by remember { mutableStateOf(false) }
 
     var results by remember { mutableStateOf<List<ModProject>>(emptyList()) }
@@ -77,25 +90,76 @@ fun ModsPage(initialGameRoot: String? = null, backend: LauncherBackend? = null) 
     var progress by remember { mutableStateOf<ModInstallProgress?>(null) }
     var notice by remember { mutableStateOf("") }
 
-    val gameDir = File(rootText.trim().ifBlank { "." })
-
-    suspend fun rescan() {
+    /** 扫游戏目录里的实例清单，尽量保住当前选择。 */
+    suspend fun rescanInstances(): List<Instance> {
         if (rootText.isBlank()) {
-            scan = null
+            instances = emptyList()
+            snapshot = null
+            return emptyList()
+        }
+        val root = File(rootText.trim())
+        val scanned = withContext(Dispatchers.IO) { runCatching { InstanceScanner.scan(root) }.getOrNull() }
+        val registered = withContext(Dispatchers.IO) {
+            runCatching { backend?.instances?.list() }.getOrNull().orEmpty()
+        }
+        scanError = when {
+            scanned == null -> "读不了这个目录：" + root.absolutePath
+            !scanned.isGameDirectory -> "这里不是游戏目录（缺少 versions/、libraries/ 或 assets/）"
+            else -> ""
+        }
+        val merged = mergeInstances(registered, scanned?.instances.orEmpty())
+        instances = merged
+        if (merged.none { instanceKey(it) == selectedKey }) {
+            // 选择失效就退到第一个：先按名字排，原版实例排后面（原版装不了模组）
+            selectedKey = merged
+                .sortedBy { it.loader == LoaderKind.VANILLA }
+                .firstOrNull()
+                ?.let { instanceKey(it) }
+                .orEmpty()
+        }
+        return merged
+    }
+
+    /** 扫选中实例的 mods/，并把它记着的游戏版本带进搜索条件。 */
+    suspend fun rescanMods() {
+        val target = instances.firstOrNull { instanceKey(it) == selectedKey }
+        if (target == null) {
+            snapshot = null
             return
         }
         scanning = true
         try {
-            scan = withContext(Dispatchers.IO) { ModScanner.scan(gameDir) }
+            snapshot = withContext(Dispatchers.IO) { runCatching { InstanceMods.scan(target) }.getOrNull() }
         } finally {
             scanning = false
         }
-        knownVersions = withContext(Dispatchers.IO) {
-            runCatching { instanceGameVersions(gameDir) }.getOrDefault(emptyList())
+        // 实例自己记着 gameVersion，比让用户手打靠谱得多；用户改过的值不覆盖。
+        if (gameVersion.isBlank() && target.gameVersion.isNotBlank()) {
+            gameVersion = target.gameVersion
         }
-        // 只在自己还空着的时候自动带出，不覆盖用户手填的值。
-        if (gameVersion.isBlank()) {
-            knownVersions.firstOrNull()?.let { gameVersion = it }
+    }
+
+    suspend fun adoptLegacy() {
+        val target = instances.firstOrNull { instanceKey(it) == selectedKey } ?: return
+        notice = ""
+        val result: LegacyAdoptResult? = withContext(Dispatchers.IO) {
+            runCatching { InstanceMods.adoptLegacy(target) }.getOrElse { e ->
+                notice = "搬模组失败：" + (e.message ?: e.toString())
+                null
+            }
+        }
+        if (result != null) {
+            notice = buildString {
+                append("从共享 mods/ 搬进这个实例 ").append(result.copied.size).append(" 个")
+                if (result.skipped.isNotEmpty()) {
+                    append("；").append(result.skipped.size).append(" 个同名跳过（不覆盖已有文件）")
+                }
+                if (result.failed.isNotEmpty()) {
+                    append("；").append(result.failed.size).append(" 个失败")
+                }
+                append("。共享目录里的原件没删。")
+            }
+            rescanMods()
         }
     }
 
@@ -108,10 +172,10 @@ fun ModsPage(initialGameRoot: String? = null, backend: LauncherBackend? = null) 
         if (gameVersion.isBlank()) {
             // 留空会让 Modrinth 的 versions facet 被省略，pickBest 取到最新版模组（例如 mc26.3 的
             // Sodium）——装进去要等启动崩溃才发现。宁可拦住。
-            searchError = if (knownVersions.isEmpty()) {
-                "先填游戏版本（如 1.20.1），或者把游戏目录指到一个装过版本的 .minecraft。留空会搜到最新版模组，跟你的游戏对不上。"
+            searchError = if (instances.isEmpty()) {
+                "先在游戏目录里选一个实例：没有实例就不知道要给哪个版本找模组。"
             } else {
-                "先选游戏版本：这个目录下有 " + knownVersions.take(4).joinToString("、") + "。"
+                "先填游戏版本（如 1.20.1）。留空会搜到最新版模组，跟你的游戏对不上。"
             }
             return
         }
@@ -134,8 +198,9 @@ fun ModsPage(initialGameRoot: String? = null, backend: LauncherBackend? = null) 
     }
 
     suspend fun install(project: ModProject) {
-        if (rootText.isBlank()) {
-            notice = "先填游戏目录。"
+        val target = instances.firstOrNull { instanceKey(it) == selectedKey }
+        if (target == null) {
+            notice = "先选一个实例：模组装进实例自己的 mods/，没有实例就没有目标目录。"
             return
         }
         if (gameVersion.isBlank()) {
@@ -143,26 +208,27 @@ fun ModsPage(initialGameRoot: String? = null, backend: LauncherBackend? = null) 
             return
         }
         val kind = loader ?: LoaderKind.FABRIC
+        val instanceDir = File(target.directory.trim().trim('"'))
         installingSlug = project.slug
         progress = null
         notice = ""
         try {
             val result = withContext(Dispatchers.IO) {
                 ModInstaller.install(
-                    gameDir = gameDir,
+                    gameDir = instanceDir,
                     slug = project.slug,
                     gameVersion = gameVersion.trim().ifBlank { null },
                     loader = kind,
                 ) { p: ModInstallProgress -> progress = p }
             }
-            notice = "已装 " + result.entry.title + " " + result.version +
+            notice = "已装进 " + target.name + "：" + result.entry.title + " " + result.version +
                 "（" + formatBytesShort(result.downloadedBytes) + "）" +
                 if (result.requiredDependencies.isEmpty()) {
                     "。"
                 } else {
                     "。还差 " + result.requiredDependencies.size + " 个前置模组，需要自己再装。"
                 }
-            rescan()
+            rescanMods()
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
@@ -181,13 +247,16 @@ fun ModsPage(initialGameRoot: String? = null, backend: LauncherBackend? = null) 
                 rootText = stored.defaultGameRoot
             }
         }
-        if (rootText.isNotBlank()) rescan()
+        if (rootText.isNotBlank()) {
+            rescanInstances()
+            rescanMods()
+        }
     }
 
     Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text("模组", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
         Text(
-            "mods/ 在游戏目录下，所有实例共用。左边是本地已装的，右边从 Modrinth 搜。",
+            "每个实例有自己的 mods/。左边是这个实例已装的，右边从 Modrinth 搜了装进去。",
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -204,10 +273,32 @@ fun ModsPage(initialGameRoot: String? = null, backend: LauncherBackend? = null) 
                 singleLine = true,
             )
             Button(
-                onClick = { scope.launch { rescan() } },
+                onClick = {
+                    scope.launch {
+                        rescanInstances()
+                        rescanMods()
+                    }
+                },
                 enabled = !scanning && rootText.isNotBlank(),
-            ) { Text(if (scanning) "扫描中…" else "刷新已装") }
+            ) { Text(if (scanning) "扫描中…" else "刷新") }
         }
+
+        InstancePicker(
+            instances = instances,
+            selectedKey = selectedKey,
+            loading = scanning,
+            onSelect = {
+                selectedKey = it
+                // 换实例等于换游戏版本，之前自动带出的版本要跟着换；
+                // 用户手填过的内容在这里没法分辨，直接按新实例重置更可预期。
+                gameVersion = ""
+                results = emptyList()
+                searched = false
+                notice = ""
+                scope.launch { rescanMods() }
+            },
+        )
+        if (scanError.isNotBlank()) ModHint(scanError, error = true)
 
         Row(
             Modifier.fillMaxWidth(),
@@ -235,43 +326,35 @@ fun ModsPage(initialGameRoot: String? = null, backend: LauncherBackend? = null) 
             }
         }
 
-        // 游戏目录里已经有的版本，点一下直接填进「游戏版本」。
-        // 模组版本强绑定 MC 版本，让用户手打容易打错或干脆留空。
-        if (knownVersions.isNotEmpty()) {
-            Row(
-                Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(4.dp),
-            ) {
-                Text(
-                    "目录里的版本：",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                knownVersions.take(6).forEach { version ->
-                    TextButton(
-                        onClick = { gameVersion = version },
-                        contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp),
-                    ) { Text(version, style = MaterialTheme.typography.labelSmall) }
-                }
-            }
-        }
-
         if (notice.isNotBlank()) ModHint(notice)
         if (searchError.isNotBlank()) ModHint("Modrinth：" + searchError, error = true)
 
-        val current = scan
+        val current = snapshot
+        if (current != null && current.hasLegacy) {
+            LegacyModsRow(
+                snapshot = current,
+                busy = scanning,
+                onAdopt = { scope.launch { adoptLegacy() } },
+            )
+        }
+
         if (current != null) {
             Text(
-                if (current.exists) {
-                    "已装 " + current.totalCount + " 个（启用 " + current.mods.size +
-                        " · 停用 " + current.disabled.size + "）"
+                if (current.scan.exists) {
+                    "这个实例已装 " + current.scan.totalCount + " 个（启用 " + current.scan.mods.size +
+                        " · 停用 " + current.scan.disabled.size + "）"
                 } else {
-                    "这个目录下还没有 mods/，装第一个模组时会自动建。"
+                    "这个实例还没有 mods/，装第一个模组时会自动建。"
                 },
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.SemiBold,
             )
-            current.warnings.forEach { ModHint(it) }
+            Text(
+                current.modsDir.absolutePath,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            current.scan.warnings.forEach { ModHint(it) }
         }
 
         Row(
@@ -284,10 +367,16 @@ fun ModsPage(initialGameRoot: String? = null, backend: LauncherBackend? = null) 
             ) {
                 Column(Modifier.fillMaxSize().padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text("本地 mods/", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
-                    val installed = current?.let { it.mods + it.disabled }.orEmpty()
+                    val installed = current?.let { it.scan.mods + it.scan.disabled }.orEmpty()
                     if (installed.isEmpty()) {
                         Box(Modifier.fillMaxSize()) {
-                            ModHint(if (rootText.isBlank()) "先填游戏目录。" else "这里还没有模组。")
+                            ModHint(
+                                when {
+                                    rootText.isBlank() -> "先填游戏目录。"
+                                    instances.isEmpty() -> "这个目录下没有实例，先去「实例」页建一个。"
+                                    else -> "这个实例还没有模组。"
+                                },
+                            )
                         }
                     } else {
                         LazyColumn(verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -330,21 +419,85 @@ fun ModsPage(initialGameRoot: String? = null, backend: LauncherBackend? = null) 
 }
 
 /**
- * 从游戏目录的 versions/ 里取出所有版本对应的 Minecraft 版本号（去重、原版在前）。
+ * 实例选择条。
  *
- * 用 InstanceScanner 而不是自己读 json：它已经处理了 inheritsFrom、加载器版本 id 解析，
- * 扫不出东西（目录不存在 / 没有 versions/）就返回空列表，不抛错。
+ * 横向滚动而不是下拉：实例通常三五个，一眼能看全，也省了展开/收起的状态。
+ * 原版实例排后面 —— 它们装不了模组，排在前面只会让人点了再发现不行。
  */
-private fun instanceGameVersions(gameDir: File): List<String> {
-    if (!gameDir.isDirectory) return emptyList()
-    val scanned = InstanceScanner.scan(gameDir)
-    if (!scanned.isGameDirectory) return emptyList()
-    // 原版实例排前面：mods 的兼容性以 MC 版本为准，加载器不影响。
-    return scanned.instances
-        .sortedBy { it.loader != LoaderKind.VANILLA }
-        .map { it.gameVersion }
-        .filter { it.isNotBlank() }
-        .distinct()
+@Composable
+private fun InstancePicker(
+    instances: List<Instance>,
+    selectedKey: String,
+    loading: Boolean,
+    onSelect: (String) -> Unit,
+) {
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Text(
+            if (instances.isEmpty()) {
+                if (loading) "正在找实例…" else "没有实例。先去「实例」页新建一个，或者把游戏目录改成装过版本的那个。"
+            } else {
+                "装在哪个实例里（共 " + instances.size + " 个）："
+            },
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        if (instances.isNotEmpty()) {
+            LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                items(instances.sortedBy { it.loader == LoaderKind.VANILLA }, key = { instanceKey(it) }) { instance ->
+                    val key = instanceKey(instance)
+                    val active = key == selectedKey
+                    OutlinedButton(
+                        onClick = { onSelect(key) },
+                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                    ) {
+                        Text(
+                            instance.name + "  ·  " + instance.gameVersion +
+                                (if (instance.loader == LoaderKind.VANILLA) "  原版" else "  " + loaderLabel(instance.loader)),
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = if (active) FontWeight.SemiBold else FontWeight.Normal,
+                            color = if (active) {
+                                MaterialTheme.colorScheme.primary
+                            } else {
+                                MaterialTheme.colorScheme.onSurfaceVariant
+                            },
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** 共享 mods/ 里还有隔离前留下的模组时，提示一行并给一个「搬进这个实例」。 */
+@Composable
+private fun LegacyModsRow(snapshot: InstanceModsSnapshot, busy: Boolean, onAdopt: () -> Unit) {
+    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
+        Column(Modifier.fillMaxWidth().padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text(
+                "共享 mods/ 里还有 " + snapshot.legacyCount + " 个模组（隔离前装的）",
+                style = MaterialTheme.typography.bodySmall,
+                fontWeight = FontWeight.SemiBold,
+            )
+            Text(
+                "在 " + snapshot.legacyModsDir.absolutePath + "。这个实例现在看不到它们。",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    "搬过去是复制：不覆盖同名文件，共享目录原件不删。",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.weight(1f),
+                )
+                OutlinedButton(onClick = onAdopt, enabled = !busy) { Text("搬进这个实例") }
+            }
+        }
+    }
 }
 
 private fun nextLoader(current: LoaderKind?): LoaderKind? = when (current) {
