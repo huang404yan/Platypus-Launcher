@@ -12,7 +12,7 @@ plugins {
 
 allprojects {
     group = "io.github.huang404yan.platypus"
-    version = "0.8.0-preview.1"
+    version = "0.8.0-preview.2"
 }
 
 // compose 插件在 Windows 上会注册 downloadWix（去 GitHub 下 WiX，只给 Msi 用）。
