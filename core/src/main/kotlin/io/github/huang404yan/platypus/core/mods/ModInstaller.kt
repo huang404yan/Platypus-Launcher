@@ -1,16 +1,9 @@
-package io.github.huang404yan.platypus.ui.download
+package io.github.huang404yan.platypus.core.mods
 
 import io.github.huang404yan.platypus.core.download.DownloadItem
 import io.github.huang404yan.platypus.core.download.DownloadReport
 import io.github.huang404yan.platypus.core.download.HttpDownloader
 import io.github.huang404yan.platypus.core.instance.LoaderKind
-import io.github.huang404yan.platypus.core.mods.ModEntry
-import io.github.huang404yan.platypus.core.mods.ModProject
-import io.github.huang404yan.platypus.core.mods.ModScanner
-import io.github.huang404yan.platypus.core.mods.ModVersionFile
-import io.github.huang404yan.platypus.core.mods.ModrinthMeta
-import io.github.huang404yan.platypus.core.mods.getOrNull
-import io.github.huang404yan.platypus.core.mods.reasonOrNull
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File

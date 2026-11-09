@@ -4,8 +4,8 @@ import io.github.huang404yan.platypus.core.instance.LoaderKind
 import io.github.huang404yan.platypus.core.mods.ModEntry
 import io.github.huang404yan.platypus.core.mods.ModScanner
 import io.github.huang404yan.platypus.core.mods.ModrinthMeta
-import io.github.huang404yan.platypus.ui.download.ModInstallProgress
-import io.github.huang404yan.platypus.ui.download.ModInstaller
+import io.github.huang404yan.platypus.core.mods.ModInstallProgress
+import io.github.huang404yan.platypus.core.mods.ModInstaller
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeoutOrNull
 import java.io.File

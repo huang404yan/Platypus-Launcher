@@ -16,6 +16,12 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
 
+    <!-- 联机页要听 Minecraft 的局域网广播（组播 224.0.2.60:4445）。Android 在 Wi-Fi 上
+         默认丢组播包，必须拿 MulticastLock 才收得到，那需要这两条权限；
+         缺了也不崩，只是永远「找到 0 个世界」。 -->
+    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+    <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />
+
     <application
         android:allowBackup="true"
         android:icon="@mipmap/ic_launcher"
