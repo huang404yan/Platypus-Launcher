@@ -101,6 +101,7 @@ private fun AppRoot() {
         ) {
             when (tab) {
                 Tab.INSTANCE -> InstancePage()
+                Tab.DOWNLOAD -> DownloadPage()
                 Tab.ABOUT -> AboutPage()
                 else -> Placeholder(tab)
             }
@@ -390,7 +391,7 @@ private fun Warning(text: String) {
     Text(text, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
 }
 
-private fun hasFileAccess(context: Context): Boolean {
+internal fun hasFileAccess(context: Context): Boolean {
     return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
         Environment.isExternalStorageManager()
     } else {
@@ -398,7 +399,7 @@ private fun hasFileAccess(context: Context): Boolean {
     }
 }
 
-private fun openAllFilesSettings(context: Context) {
+internal fun openAllFilesSettings(context: Context) {
     if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return
     val perApp = Intent(
         Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
@@ -410,7 +411,7 @@ private fun openAllFilesSettings(context: Context) {
 }
 
 @Suppress("DEPRECATION")
-private fun defaultGameRoot(): String {
+internal fun defaultGameRoot(): String {
     val base = Environment.getExternalStorageDirectory().absolutePath
     val candidates = listOf(
         "$base/.minecraft",

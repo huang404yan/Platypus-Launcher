@@ -10,6 +10,7 @@ import java.io.File
 import java.io.FileOutputStream
 import java.net.HttpURLConnection
 import java.net.URL
+import java.nio.file.Files
 import java.security.MessageDigest
 import java.util.Collections
 import java.util.concurrent.atomic.AtomicInteger
@@ -117,7 +118,14 @@ class HttpDownloader(
     private fun fetch(item: DownloadItem, onBytes: (Long) -> Unit): String? {
         val target = File(item.target)
         target.parentFile?.let { parent ->
-            if (!parent.isDirectory && !parent.mkdirs()) return "无法创建目录：${parent.path}"
+            try {
+                // Files.createDirectories 是幂等的：并发下载时另一个线程刚把同名目录建好，
+                // 这里也照样返回成功。不能用 "!isDirectory && !mkdirs()" —— mkdirs 在目录
+                // 已存在时返回 false，会被误判成失败（t5 实测 assets/objects/6f 偶发失败）。
+                Files.createDirectories(parent.toPath())
+            } catch (e: Exception) {
+                return "无法创建目录：${parent.path}（${e.message ?: e.javaClass.simpleName}）"
+            }
         }
 
         val candidates = buildList {

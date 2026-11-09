@@ -58,7 +58,7 @@ fun defaultGameRoot(): String {
 }
 
 @Composable
-fun App(initialGameRoot: String? = null) {
+fun App(initialGameRoot: String? = null, backend: LauncherBackend? = null) {
     MaterialTheme {
         var page by remember { mutableStateOf(Page.INSTANCE) }
         LaunchedEffect(Unit) { println("[ui] initial page=$page") }
@@ -68,7 +68,9 @@ fun App(initialGameRoot: String? = null) {
                 Modifier.weight(1f).fillMaxHeight().padding(24.dp),
             ) {
                 when (page) {
+                    Page.LAUNCH -> LaunchPage(backend, initialGameRoot)
                     Page.INSTANCE -> InstancePage(initialGameRoot)
+                    Page.DOWNLOAD -> DownloadsPage(initialGameRoot)
                     Page.ABOUT -> AboutPage()
                     else -> PlaceholderPage(page)
                 }
