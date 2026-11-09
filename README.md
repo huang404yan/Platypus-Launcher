@@ -105,8 +105,10 @@ M0（骨架）+ M1（实例扫描）+ M2（下载器）+ M3（**Windows 一键�
 
 **实例页能自己建实例了**：填版本号 + 实例名 + 内存，本地已有那份游戏就直接认养（不联网），没有才走一键装；已登记的实例能改内存、能移除登记（只去掉登记，版本文件不动）。从实例页点「去启动」会跳到启动页并自动选中它（`docs/14`）。
 
+**实例能删了，且删得小心**：卡片上的「删除文件…」先算计划（绝对路径、文件数、总字节数）再弹确认框；`saves/` 默认不删，搬到 `<游戏目录>/platypus/saves-backup/`，要连存档一起删得自己勾。实现是「改名 `<dir>.deleting-<时间戳>` → `walkBottomUp` 递归删 → 失败改名回来」，没引第三方回收站库。三种情况直接拒绝：版本目录不存在、目标在 `versions/` 之外、同一目录还被别的实例登记着（`docs/16`）。
+
 **下载断点续传**：先写 `<文件>.part`，校验通过才转正；`.part` 有内容就发 `Range` 接着下，断网不清半成品，下次自动接上。进度条会额外显示「其中 N 个接着上次下（省了 M MB）」（`docs/14`）。
 
-单测 **127 例全过**（15 个测试类，`./gradlew :core:test`）。另有四个无头冒烟任务（`e2eInstall` / `settingsSmoke` / `instanceFlowSmoke` / `resumeSmoke`），走的是界面按钮同一批函数；`resumeSmoke` 需要联网，用 Mojang 官方 CDN 上不可变的文件验证断点续传。
+单测 **138 例全过**（16 个测试类，`./gradlew :core:test`）。另有五个无头冒烟任务（`e2eInstall` / `settingsSmoke` / `instanceFlowSmoke` / `resumeSmoke` / `deleteSmoke`），走的是界面按钮同一批函数；`resumeSmoke` 需要联网，用 Mojang 官方 CDN 上不可变的文件验证断点续传；`deleteSmoke` 在 `dist/_delete-smoke` 里全程造假数据，不碰真实 `.minecraft`。
 
-尚未实现：正版/微软登录（`core/auth` 只有接口）、Forge/Fabric 安装器、LINK（联机）页面、实例删除（只有移除登记）。
+尚未实现：正版/微软登录（`core/auth` 只有接口）、Forge/Fabric 安装器、LINK（联机）页面。

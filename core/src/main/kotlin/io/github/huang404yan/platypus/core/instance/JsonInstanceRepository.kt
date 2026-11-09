@@ -55,6 +55,14 @@ class JsonInstanceRepository(private val indexFile: File) : InstanceRepository {
         if (kept.size != current.size) write(kept)
     }
 
+    /**
+     * 同步读一遍磁盘上的登记（不加协程锁）。
+     *
+     * 只给「删除前确认没有别的实例共用这个目录」这类只读校验用：它要在一个纯同步的
+     * core 函数里跑，调不了 suspend 的 list()。真正的增删改仍然走加锁的那几个方法。
+     */
+    fun snapshot(): List<Instance> = read()
+
     private fun read(): List<Instance> {
         if (!indexFile.isFile) return emptyList()
         val text = runCatching { indexFile.readText(Charsets.UTF_8) }.getOrNull().orEmpty()
