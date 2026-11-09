@@ -108,6 +108,9 @@ fun InstancePage(
     var editingKey by remember { mutableStateOf<String?>(null) }
     var editNotice by remember { mutableStateOf("") }
 
+    /** 正在看详情的实例（按 instanceKey 记，切目录后能对上）。null = 列表视图。 */
+    var detailKey by remember { mutableStateOf<String?>(null) }
+
     /** 正在确认删除的实例（null = 没有弹窗）。 */
     var deleteTarget by remember { mutableStateOf<Instance?>(null) }
     /** 弹窗里算出来的删除计划：路径、文件数、字节数、能不能删。 */
@@ -399,6 +402,17 @@ fun InstancePage(
     val merged = mergeInstances(registered, result?.instances.orEmpty())
     val scannedOnly = merged.count { !it.registered }
 
+    val detailInstance = detailKey?.let { key -> merged.firstOrNull { instanceKey(it) == key } }
+    if (detailInstance != null) {
+        InstanceDetailPanel(
+            instance = detailInstance,
+            backend = backend,
+            onBack = { detailKey = null },
+            onNotice = { detailKey = null; message = it; scope.launch { rescan() } },
+        )
+        return
+    }
+
     Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text("实例", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
         Text(
@@ -497,6 +511,7 @@ fun InstancePage(
                                 onLaunch = { onLaunch(instance) },
                                 onRemove = { removeRegistration(instance) },
                                 onDelete = { prepareDelete(instance) },
+                                onDetails = { detailKey = instanceKey(instance) },
                                 enabled = !busy && !deleting,
                             )
                         }
@@ -711,6 +726,7 @@ private fun InstanceCard(
     onLaunch: () -> Unit,
     onRemove: () -> Unit,
     onDelete: () -> Unit,
+    onDetails: () -> Unit,
     enabled: Boolean,
 ) {
     var memoryText by remember(instance.memoryMb, editing) { mutableStateOf(instance.memoryMb.toString()) }
@@ -786,6 +802,7 @@ private fun InstanceCard(
                         OutlinedButton(onClick = onStartEdit, enabled = enabled) { Text("改内存") }
                     }
                     // 删除文件对「已登记」和「仅扫描到」都开放：用户清理磁盘时不关心当初是谁登记的。
+                    OutlinedButton(onClick = onDetails, enabled = enabled) { Text("详情") }
                     OutlinedButton(onClick = onDelete, enabled = enabled) { Text("删除文件…") }
                     if (!instance.registered) {
                         OutlinedButton(onClick = onRegister, enabled = enabled) { Text("登记成实例") }
