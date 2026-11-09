@@ -810,6 +810,7 @@ private fun describeStep(step: InstallStep): String = when (step) {
     InstallStep.DOWNLOADING -> "下载游戏文件"
     InstallStep.JAVA_CHECK -> "检查 Java 运行时"
     InstallStep.JAVA_INSTALL -> "下载 Java 运行时"
+    InstallStep.LOADER_INSTALL -> "安装 Fabric 加载器"
     InstallStep.REGISTERING -> "登记实例"
     InstallStep.DONE -> "完成"
 }

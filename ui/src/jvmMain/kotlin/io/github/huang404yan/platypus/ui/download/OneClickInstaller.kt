@@ -3,6 +3,8 @@ package io.github.huang404yan.platypus.ui.download
 import io.github.huang404yan.platypus.core.download.DownloadReport
 import io.github.huang404yan.platypus.core.instance.Instance
 import io.github.huang404yan.platypus.core.instance.InstanceRepository
+import io.github.huang404yan.platypus.core.instance.LoaderKind
+import io.github.huang404yan.platypus.core.loader.FabricMeta
 import io.github.huang404yan.platypus.core.runtime.JavaRuntime
 import io.github.huang404yan.platypus.core.runtime.JavaRuntimeService
 import io.github.huang404yan.platypus.core.runtime.findExactMajor
@@ -19,6 +21,7 @@ enum class InstallStep(val label: String) {
     DOWNLOADING("下载游戏文件"),
     JAVA_CHECK("检查 Java 运行时"),
     JAVA_INSTALL("下载 Java 运行时"),
+    LOADER_INSTALL("安装 Fabric 加载器"),
     REGISTERING("登记实例"),
     DONE("完成"),
 }
@@ -50,7 +53,22 @@ data class InstallOutcome(
     val javaInstalled: Boolean,
     val downloadReport: DownloadReport,
     val elapsedMs: Long,
+    /** 装了加载器时的 Fabric 安装结果；原版安装为 null。 */
+    val fabric: FabricInstallResult? = null,
 )
+
+/**
+ * 要顺带装的加载器。Forge 下一轮接进来时在这加一个分支即可，
+ * 安装顺序（原版 → 补 Java → 加载器 → 登记）不用动：先有原版文件，
+ * 加载器才能以 inheritsFrom 叠在它上面；加载器只走 HTTP，与 Java 无关。
+ */
+sealed interface LoaderChoice {
+    /** 只装原版，不加加载器。 */
+    data object Vanilla : LoaderChoice
+
+    /** Fabric；loaderVersion 留空表示装最新的 stable。 */
+    data class Fabric(val loaderVersion: String? = null) : LoaderChoice
+}
 
 /**
  * 「选版本 → 下载 → 补 Java → 建实例」的一条龙。
@@ -69,6 +87,8 @@ object OneClickInstaller {
         memoryMb: Int = Instance.DEFAULT_MEMORY_MB,
         /** 自定义实例名；留空或全空白时退回版本号，保证老调用方行为不变。 */
         instanceName: String? = null,
+        /** 要装的加载器；null 表示只装原版（老行为）。 */
+        loader: LoaderChoice? = null,
         onProgress: (StepProgress) -> Unit = {},
     ): InstallOutcome = withContext(Dispatchers.IO) {
         val startedAt = System.currentTimeMillis()
@@ -165,14 +185,64 @@ object OneClickInstaller {
             }
         }
 
-        // ④ 登记实例
+        // ④ 加载器：原版文件已经就位，Fabric 只是在它上面叠一层 inheritsFrom
+        var effectiveVersionId = plan.versionId
+        var fabric: FabricInstallResult? = null
+        if (loader is LoaderChoice.Fabric) {
+            val wanted = loader.loaderVersion?.trim().orEmpty()
+            onProgress(
+                StepProgress(
+                    InstallStep.LOADER_INSTALL,
+                    if (wanted.isEmpty()) "查询 Fabric 最新稳定版" else "安装 Fabric " + wanted,
+                ),
+            )
+            try {
+                fabric = FabricInstaller.install(
+                    gameRoot = gameDir,
+                    vanillaVersion = plan.versionId,
+                    loaderVersion = wanted.takeIf { it.isNotEmpty() },
+                ) { p ->
+                    onProgress(
+                        StepProgress(
+                            InstallStep.LOADER_INSTALL,
+                            p.step.label + if (p.detail.isBlank()) "" else "：" + p.detail,
+                            done = p.done,
+                            total = p.total,
+                        ),
+                    )
+                }
+            } catch (e: FabricInstallException) {
+                throw InstallStepException(
+                    InstallStep.LOADER_INSTALL,
+                    "Fabric " + e.step.label + "失败：" + describe(e),
+                    e,
+                )
+            } catch (e: Exception) {
+                throw InstallStepException(
+                    InstallStep.LOADER_INSTALL,
+                    "装 Fabric 失败：" + describe(e),
+                    e,
+                )
+            }
+            effectiveVersionId = fabric.versionId
+        }
+
+        // ⑤ 登记实例
         onProgress(StepProgress(InstallStep.REGISTERING, "写入实例登记"))
-        val displayName = instanceName?.trim()?.takeIf { it.isNotEmpty() } ?: plan.versionId
+        val loaderVersion = fabric?.loaderVersion
+        val displayName = instanceName?.trim()?.takeIf { it.isNotEmpty() }
+            ?: if (fabric != null) {
+                FabricMeta.displayName(plan.gameVersion, loaderVersion.orEmpty())
+            } else {
+                plan.versionId
+            }
         val instance = Instance(
-            id = plan.versionId,
+            id = effectiveVersionId,
             name = displayName,
             gameVersion = plan.gameVersion,
-            directory = DownloadPlanner.versionDir(gameDir, plan.versionId).absolutePath,
+            loader = if (fabric != null) LoaderKind.FABRIC else LoaderKind.VANILLA,
+            loaderVersion = loaderVersion,
+            directory = DownloadPlanner.versionDir(gameDir, effectiveVersionId).absolutePath,
             javaPath = java.path,
             memoryMb = Instance.clampMemoryMb(memoryMb),
             registered = true,
@@ -186,11 +256,12 @@ object OneClickInstaller {
         onProgress(StepProgress(InstallStep.DONE, "可以启动了", done = 1L, total = 1L))
         InstallOutcome(
             instance = instance,
-            versionId = plan.versionId,
+            versionId = effectiveVersionId,
             java = java,
             javaInstalled = javaInstalled,
             downloadReport = report,
             elapsedMs = System.currentTimeMillis() - startedAt,
+            fabric = fabric,
         )
     }
 
