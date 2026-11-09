@@ -194,6 +194,24 @@ MSYS_NO_PATHCONV=1 cmd.exe /c "D:\ruanjian\kaifa\qidongqigongju\gradle-9.9.0\bin
 
 ---
 
+## 五之二、发行产物（实测）
+
+| 项 | 值 |
+| --- | --- |
+| 出包命令 | `gradle --no-daemon :app-desktop:createDistributable :app-desktop:packageMsi -PskipWix -PwixDir=D:\ruanjian\kaifa\wix314` → **BUILD SUCCESSFUL in 24s**，exit 0 |
+| msi | `releases/preview/windows/Platypus-Launcher-0.8.0-preview.1-win-x64.msi`，**64,970,860 B**，sha256 `bef0246be60a98ba72f257b7d28a80b3a1e43829539203427e4e43ca869b617a` |
+| zip | `releases/preview/windows/Platypus-Launcher-0.8.0-preview.1-win-x64.zip`，**63,294,137 B**（200 条目），sha256 `f366da718e39643f6d2a13d188c7b4a435afc84f4036c465d514cf885bde23be` |
+| app-image exe | 597,504 B，sha256 `7f2ba938c55661e4bb98da02f6e85c936d78fded763931d08d5c217ed730a7ed` |
+| 旧包去向 | 15:36 那版（msi `558b5a25...171401` 64,876,652 B / zip `9caa1320...32b12c` 63,212,178 B）移到 `dist/_old-releases/win-0909-1536/` |
+
+**三处 exe 哈希一致**（app-image 目录、zip 内、`msiexec /a` 解包出来的），这是唯一可信的一致性判据——msi 本身不可重现，同一个源码两次打包体积与哈希都不同（见 `docs/06-wix-msi-build.md`）。
+
+解包解到 `dist/_msi-unpack3/`，包内类实测命中：`ui-jvm-...-d38215d6....jar` 有 `InstancePageKt`（30 个类）与 `SettingsPageKt`（5 个），`core-...-d334c0a3....jar` 有 `LocalInstance` 与 `HttpDownloader`（5 个）。→ 新代码确实进了包。
+
+> 解包脚本第一版用 `%~dp0..\releases\...` 拼路径，`msiexec` 报 **1619**（无法打开此安装程序包）。改绝对路径后 exit 0。
+
+---
+
 ## 六、还没做到的
 
 1. **续传没在真实断网上验证过**。6 个单测用的都是本地 `HttpServer`，覆盖了 206 / 200 / 416 / 提前 EOF / 连接异常五类响应；但「下 600 MB 时拔网线」这种真实场景没跑过。真实服务器的 CDN 是否稳定支持 `Range` 也未逐个验证——piston-meta 与 bmclapi2 都支持（实测 206），但 assets 与 libraries 走的域名不同。
