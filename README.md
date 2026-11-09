@@ -74,6 +74,7 @@ Windows 下也可以用 `gradlew.bat`。首次构建会下载约 300 MB 依赖�
 - `docs/09-android-baseline.md`：**Android 运行端技术基线**（JRE 只到 17、单版本 700–900 MB、渲染三选一）
 - `docs/10-android-ceshi-buzhou.md`：**Android 预览版测试步骤**（给用户的手册）
 - `docs/11-android-s1-shiyan.md`：**S1 真机实验清单**（用户可执行，含回报表格）
+- `docs/12-win-oneclick-loop.md`：**一键装闭环**（选版本 → 下载 → 补 Java → 建实例 → 启动）
 
 ## 下载
 
@@ -88,10 +89,16 @@ releases/preview/{android,windows,linux}/   Platypus Preview 孵化版
 
 每个平台最多留 5 个，命名与留存规则见 `releases/README.md`。
 
-> 目前只有 Android 的孵化版包。桌面端还没有可分发的 exe（缺 jpackage 打包配置）。
+> 三端孵化版包都已能出：Android 是 `.apk`，Windows 是免安装 `.zip` 与安装包 `.msi`。产物在 `releases/preview/` 下（不入库）。
 
 ## 状态
 
-M0（骨架）+ M1（实例扫描）+ 下载器已完成，当前版本 **0.8.0-preview.1**（孵化线）。Java 运行时探测、启动链路尚未开始。
+M0（骨架）+ M1（实例扫描）+ M2（下载器）+ M3（**Windows 一键装闭环**）已完成，当前版本 **0.8.0-preview.1**（孵化线）。
 
-已实现：实例扫描（`core/instance`）、HTTP 下载器（多源镜像、sha1 校验、`.part` 断点、并发限流）、Mojang 版本清单与版本 json 解析（容错缺字段）、下载计划生成（客户端 jar / libraries / assets 索引 / 资源对象，含 BMCLAPI 镜像备选）。单测 29 个全过。
+**Windows 端已经能双击玩起来**：选版本 → 下载（客户端 jar / libraries / assets）→ 缺 Java 自动从 Mojang 官方运行时清单补 → 登记成实例 → 启动进主菜单，全程不需要人替启动器干活。实例内存可在启动页改（512–32768 MB）。
+
+**Android 端还差得远**：下载页与诊断页已写但**从未在真机上跑过**；「应用内起 JVM + 图形转译」这条路（`docs/09`）目前只有纸面推算，没有一份真机数字。这一条成立与否决定手机优先是不是宣传语。
+
+单测 **105 例全过**（12 个测试类，`./gradlew :core:test`）。
+
+尚未实现：正版/微软登录（`core/auth` 只有接口）、Forge/Fabric 安装器、下载续传、LINK（联机）与 MORE 两个页面。
