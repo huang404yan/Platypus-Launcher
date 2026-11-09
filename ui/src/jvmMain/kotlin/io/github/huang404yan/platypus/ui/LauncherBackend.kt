@@ -3,6 +3,7 @@ package io.github.huang404yan.platypus.ui
 import io.github.huang404yan.platypus.core.instance.InstanceRepository
 import io.github.huang404yan.platypus.core.launch.GameRuntime
 import io.github.huang404yan.platypus.core.runtime.JavaRuntimeService
+import io.github.huang404yan.platypus.core.settings.SettingsRepository
 
 /**
  * 界面需要的后端能力集合。
@@ -16,4 +17,12 @@ interface LauncherBackend {
 
     /** 实例登记（本启动器建过 / 用户改过的实例，带内存与 Java 路径）。 */
     val instances: InstanceRepository
+
+    /**
+     * 启动器设置（离线用户名、默认游戏目录、默认内存）。
+     *
+     * 给默认值 null 是为了让只关心实例与运行时的假实现（预览、单测）不用跟着改；
+     * 生产装配（DesktopServices）一定会提供，界面在 null 时退回内置默认值。
+     */
+    val settings: SettingsRepository? get() = null
 }

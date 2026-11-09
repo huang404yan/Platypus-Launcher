@@ -59,6 +59,31 @@ tasks.register<JavaExec>("e2eInstall") {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// 开发期设置持久化冒烟
+//
+// 验证「界面保存 → 落盘 → 重新装配读回」这条真实链路，走的是 DesktopServices.create
+// 这个唯一装配点。产物只在临时目录里，不碰用户真实的 .minecraft。
+//
+//   gradle :app-desktop:settingsSmoke -PsmokeDir=dist/_settings-smoke
+// ─────────────────────────────────────────────────────────────────────────────
+tasks.register<JavaExec>("settingsSmoke") {
+    group = "verification"
+    description = "无头冒烟：设置文件落盘位置与读回（开发期用）"
+    dependsOn(tasks.named("testClasses"))
+    mainClass.set("io.github.huang404yan.platypus.desktop.SettingsSmokeKt")
+    classpath = sourceSets["test"].runtimeClasspath
+    workingDir = rootProject.projectDir
+    jvmArgs("-Dfile.encoding=UTF-8")
+
+    argumentProviders.add(
+        CommandLineArgumentProvider {
+            val dir = providers.gradleProperty("smokeDir").orElse("dist/_settings-smoke").get()
+            listOf(rootProject.file(dir).absolutePath)
+        },
+    )
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // 品牌与打包参数
 //
 // 版本号唯一真源是根 build.gradle.kts 的 allprojects.version；这里只按「版本号里

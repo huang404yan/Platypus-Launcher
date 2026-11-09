@@ -87,6 +87,8 @@ fun DownloadsPage(
     onInstalled: (Instance) -> Unit = {},
 ) {
     var gameDirText by remember { mutableStateOf(initialGameRoot ?: defaultGameRoot()) }
+    // 设置里指定的默认内存；一键装按它登记新实例，用户装完还能在启动页单独改
+    var defaultMemoryMb by remember { mutableStateOf(Instance.DEFAULT_MEMORY_MB) }
     var versionText by remember { mutableStateOf("") }
     var filterText by remember { mutableStateOf("") }
 
@@ -154,6 +156,7 @@ fun DownloadsPage(
                     javaRuntimes = backend.javaRuntimes,
                     instances = backend.instances,
                     manifest = manifest,
+                    memoryMb = defaultMemoryMb,
                 ) { step ->
                     if (step.step != currentStep) {
                         val previous = currentStep
@@ -184,7 +187,9 @@ fun DownloadsPage(
                     append("，Java ")
                     append(outcome.java.majorVersion)
                     append(if (outcome.javaInstalled) "（这次新下的）" else "（本机已有）")
-                    append("，用时 ")
+                    append("，内存 ")
+                    append(outcome.instance.memoryMb)
+                    append(" MB（可在启动页改），用时 ")
                     append(formatDuration(outcome.elapsedMs))
                 }
             } catch (e: CancellationException) {
@@ -213,6 +218,17 @@ fun DownloadsPage(
     }
 
     LaunchedEffect(Unit) {
+        // 设置里的默认游戏目录与默认内存先读，避免用户每次都要重填目录、装出来的实例内存是写死的
+        val repository = backend?.settings
+        if (repository != null) {
+            val stored = withContext(Dispatchers.IO) { runCatching { repository.load() }.getOrNull() }
+            if (stored != null) {
+                if (initialGameRoot.isNullOrBlank() && stored.defaultGameRoot.isNotBlank()) {
+                    gameDirText = stored.defaultGameRoot
+                }
+                defaultMemoryMb = stored.defaultMemoryMb
+            }
+        }
         if (manifest == null) refreshManifest()
     }
 

@@ -4,6 +4,8 @@ import io.github.huang404yan.platypus.core.instance.InstanceRepository
 import io.github.huang404yan.platypus.core.instance.JsonInstanceRepository
 import io.github.huang404yan.platypus.core.launch.GameRuntime
 import io.github.huang404yan.platypus.core.runtime.JavaRuntimeService
+import io.github.huang404yan.platypus.core.settings.JsonSettingsRepository
+import io.github.huang404yan.platypus.core.settings.SettingsRepository
 import io.github.huang404yan.platypus.desktop.runtime.DesktopGameRuntime
 import io.github.huang404yan.platypus.desktop.runtime.DesktopJavaRuntimeService
 import io.github.huang404yan.platypus.ui.LauncherBackend
@@ -23,6 +25,8 @@ class DesktopServices private constructor(
     override val gameRuntime: GameRuntime,
     /** 实例登记。 */
     override val instances: InstanceRepository,
+    /** 启动器设置。 */
+    override val settings: SettingsRepository,
 ) : LauncherBackend {
     companion object {
         /**
@@ -33,18 +37,35 @@ class DesktopServices private constructor(
 
         /**
          * @param instanceIndex 实例索引文件；null 时按 gameRoot 推导，gameRoot 也为 null 时
-         *   退到用户目录下的 platypus/instances.json（先能存下来，之后用户指了目录再迁移）。
+         *   退到用户目录下的 .platypus/instances.json（先能存下来，之后用户指了目录再迁移）。
          */
         fun create(gameRoot: File?, instanceIndex: File?): DesktopServices = DesktopServices(
             javaRuntimes = DesktopJavaRuntimeService(gameRoot = gameRoot),
             gameRuntime = DesktopGameRuntime(),
             instances = JsonInstanceRepository(instanceIndex ?: defaultInstanceIndex(gameRoot)),
+            settings = JsonSettingsRepository(settingsFile(gameRoot)),
         )
 
         private fun defaultInstanceIndex(gameRoot: File?): File {
             if (gameRoot != null) return JsonInstanceRepository.defaultIndexFile(gameRoot)
+            return JsonInstanceRepository.defaultIndexFile(fallbackHome())
+        }
+
+        /**
+         * 设置文件与实例索引同层：有游戏目录时放 <gameRoot>/platypus/settings.json，
+         * 没有时放用户目录下的 .platypus/settings.json。
+         *
+         * 刻意不跟着「用户当前选中的目录」漂移：设置本身记的就是那个目录，
+         * 若设置文件也跟着目录走，换目录就看不到上次的选择了。
+         */
+        private fun settingsFile(gameRoot: File?): File {
+            if (gameRoot != null) return JsonSettingsRepository.defaultFile(gameRoot)
+            return JsonSettingsRepository.defaultFile(fallbackHome())
+        }
+
+        private fun fallbackHome(): File {
             val home = System.getProperty("user.home").orEmpty().ifBlank { "." }
-            return JsonInstanceRepository.defaultIndexFile(File(home, ".platypus"))
+            return File(home, ".platypus")
         }
     }
 }
