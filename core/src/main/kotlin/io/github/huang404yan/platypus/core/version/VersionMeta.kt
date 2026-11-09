@@ -114,6 +114,15 @@ data class Library(
     val rules: List<Rule>? = null,
     val natives: JsonElement? = null,
     val extract: Extract? = null,
+    /**
+     * 非 Mojang 风格的库（Fabric/Forge 生成的 json）会把下载信息平铺在库对象上：
+     * url 是 maven 仓库的目录前缀（如 https://maven.fabricmc.net/），sha1/size 直接给。
+     * Mojang 的 version json 不带这些字段，所以全部给默认值。
+     */
+    val url: String? = null,
+    val sha1: String? = null,
+    val size: Long = -1L,
+    val md5: String? = null,
 ) {
     /** 该库在当前平台是否应该被安装。 */
     fun isAllowed(

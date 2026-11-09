@@ -96,7 +96,12 @@ object InstanceScanner {
         return when {
             lower.contains("neoforge") -> LoaderKind.NEOFORGE to matchVersion(versionId, "neoforge[-_]([0-9][0-9A-Za-z.\\-]*)")
             lower.contains("quilt") -> LoaderKind.QUILT to matchVersion(versionId, "quilt[-_]loader[-_]([0-9][0-9.]*)")
-            lower.contains("fabric") -> LoaderKind.FABRIC to matchVersion(versionId, "fabric[-_]loader[-_]([0-9][0-9.]*)")
+            // fabric-loader-0.16.14-1.20.1（Fabric 官方 profile 的 id）与
+            // 1.20.1-fabric-0.16.14（本启动器自己起的名字）两种都认。
+            lower.contains("fabric") -> LoaderKind.FABRIC to (
+                matchVersion(versionId, "fabric[-_]loader[-_]([0-9][0-9.]*)")
+                    ?: matchVersion(versionId, "fabric[-_]([0-9][0-9.]*)$")
+                )
             lower.contains("forge") -> LoaderKind.FORGE to matchVersion(versionId, "forge[-_]([0-9][0-9A-Za-z.\\-]*)")
             lower.contains("optifine") -> LoaderKind.OPTIFINE to null
             else -> LoaderKind.VANILLA to null

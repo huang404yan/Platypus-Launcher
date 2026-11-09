@@ -18,6 +18,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -35,10 +36,13 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import io.github.huang404yan.platypus.core.instance.Instance
+import io.github.huang404yan.platypus.core.loader.FabricLoaderVersion
 import io.github.huang404yan.platypus.core.version.VersionManifest
+import io.github.huang404yan.platypus.ui.download.FabricInstaller
 import io.github.huang404yan.platypus.ui.download.InstallOutcome
 import io.github.huang404yan.platypus.ui.download.InstallStep
 import io.github.huang404yan.platypus.ui.download.InstallStepException
+import io.github.huang404yan.platypus.ui.download.LoaderChoice
 import io.github.huang404yan.platypus.ui.download.OneClickInstaller
 import io.github.huang404yan.platypus.ui.download.StepProgress
 import io.github.huang404yan.platypus.ui.download.VanillaInstaller
@@ -49,6 +53,106 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.util.Locale
+
+/**
+ * 「装 Fabric」一行：勾选框 + loader 下拉 + 当前选择说明。
+ *
+ * 下拉用展开式列表而不是 ExposedDropdownMenu——Compose MP 桌面端的 Menu 组件
+ * 在弹层里对点击的响应不稳，直接铺一个可滚动的 Card 更省事。
+ */
+@Composable
+private fun FabricRow(
+    enabled: Boolean,
+    installFabric: Boolean,
+    onInstallFabricChange: (Boolean) -> Unit,
+    gameVersion: String,
+    versions: List<FabricLoaderVersion>,
+    selected: String,
+    onSelectedChange: (String) -> Unit,
+    loading: Boolean,
+    error: String?,
+) {
+    var expanded by remember { mutableStateOf(false) }
+
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Row(
+            Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Checkbox(
+                checked = installFabric,
+                onCheckedChange = { onInstallFabricChange(it) },
+                enabled = enabled,
+            )
+            Text("顺带装 Fabric", style = MaterialTheme.typography.bodyMedium)
+            Text(
+                when {
+                    gameVersion.isBlank() -> "先选一个原版版本"
+                    loading -> "正在查 loader 列表…"
+                    error != null -> "loader 列表拉取失败"
+                    versions.isEmpty() -> "这个版本没有可用的 Fabric"
+                    selected.isBlank() -> "选一个 loader 版本"
+                    else -> selected + "（" + versions.size + " 个可选）"
+                },
+                Modifier.weight(1f),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            OutlinedButton(
+                onClick = { expanded = !expanded },
+                enabled = enabled && versions.isNotEmpty(),
+            ) {
+                Text(if (expanded) "收起" else "选 loader 版本")
+            }
+        }
+
+        if (expanded && versions.isNotEmpty()) {
+            Card(
+                Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+            ) {
+                LazyColumn(Modifier.fillMaxWidth().heightIn(max = 120.dp).padding(4.dp)) {
+                    items(versions, key = { it.version }) { entry ->
+                        val isSelected = entry.version == selected
+                        Row(
+                            Modifier
+                                .fillMaxWidth()
+                                .background(
+                                    if (isSelected) MaterialTheme.colorScheme.primary.copy(alpha = 0.16f)
+                                    else Color.Transparent,
+                                    MaterialTheme.shapes.small,
+                                )
+                                .clickable(enabled = enabled) {
+                                    onSelectedChange(entry.version)
+                                    onInstallFabricChange(true)
+                                    expanded = false
+                                }
+                                .padding(horizontal = 10.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                entry.version,
+                                Modifier.weight(1f),
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal,
+                            )
+                            Text(
+                                if (entry.stable) "stable" else "beta",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        if (error != null) {
+            DownloadHint("Fabric：" + error, error = true)
+        }
+    }
+}
 
 /** 单个安装步骤在界面上的状态。 */
 private sealed interface StepState {
@@ -72,6 +176,7 @@ private val VISIBLE_STEPS = listOf(
     InstallStep.DOWNLOADING,
     InstallStep.JAVA_CHECK,
     InstallStep.JAVA_INSTALL,
+    InstallStep.LOADER_INSTALL,
     InstallStep.REGISTERING,
 )
 
@@ -91,6 +196,13 @@ fun DownloadsPage(
     var defaultMemoryMb by remember { mutableStateOf(Instance.DEFAULT_MEMORY_MB) }
     var versionText by remember { mutableStateOf("") }
     var filterText by remember { mutableStateOf("") }
+
+    // Fabric：选中的版本变化时重新拉 loader 列表，默认落在最新 stable 上。
+    var installFabric by remember { mutableStateOf(false) }
+    var loaderVersions by remember { mutableStateOf<List<FabricLoaderVersion>>(emptyList()) }
+    var loaderVersion by remember { mutableStateOf("") }
+    var loaderError by remember { mutableStateOf<String?>(null) }
+    var loadingLoaders by remember { mutableStateOf(false) }
 
     var manifest by remember { mutableStateOf<VersionManifest?>(null) }
     var manifestError by remember { mutableStateOf<String?>(null) }
@@ -136,6 +248,10 @@ fun DownloadsPage(
             message = "后端未装配：一键安装需要桌面端注入 Java 与实例存储实现。"
             return
         }
+        if (installFabric && loaderVersion.isBlank()) {
+            message = "还没选 Fabric 版本：等下面的 loader 列表拉出来，或者取消「装 Fabric」。"
+            return
+        }
         val dir = File(dirText)
         job?.cancel()
         meter.reset()
@@ -150,6 +266,7 @@ fun DownloadsPage(
 
         job = scope.launch {
             try {
+                val choice = if (installFabric) LoaderChoice.Fabric(loaderVersion) else LoaderChoice.Vanilla
                 val outcome = OneClickInstaller.install(
                     gameDir = dir,
                     versionId = id,
@@ -157,6 +274,7 @@ fun DownloadsPage(
                     instances = backend.instances,
                     manifest = manifest,
                     memoryMb = defaultMemoryMb,
+                    loader = choice,
                 ) { step ->
                     if (step.step != currentStep) {
                         val previous = currentStep
@@ -178,12 +296,25 @@ fun DownloadsPage(
                 }
                 elapsedMs = System.currentTimeMillis() - startedAt
                 progress = null
-                stepStates = VISIBLE_STEPS.associateWith { StepState.Succeeded }
+                // 只把真跑过的步骤标成成功：只装原版时不该给「安装 Fabric 加载器」打勾。
+                stepStates = stepStates.mapValues { StepState.Succeeded }
                 currentStep = InstallStep.DONE
                 phase = InstallPhase.Finished(outcome)
                 message = buildString {
                     append("已完成：")
                     append(outcome.versionId)
+                    outcome.fabric?.let {
+                        append("（Fabric ")
+                        append(it.loaderVersion)
+                        append("，")
+                        append(it.libraryFiles)
+                        append(" 个库")
+                        if (it.downloadedBytes > 0) {
+                            append("，")
+                            append(formatBytes(it.downloadedBytes))
+                        }
+                        append("）")
+                    }
                     append("，Java ")
                     append(outcome.java.majorVersion)
                     append(if (outcome.javaInstalled) "（这次新下的）" else "（本机已有）")
@@ -208,6 +339,30 @@ fun DownloadsPage(
         }
     }
 
+    /** 拉某个原版版本的 Fabric loader 列表；失败只记原因，不弹错。 */
+    suspend fun refreshLoaders(gameVersion: String) {
+        if (gameVersion.isBlank()) {
+            loaderVersions = emptyList()
+            loaderVersion = ""
+            return
+        }
+        loadingLoaders = true
+        loaderError = null
+        withContext(Dispatchers.IO) {
+            try {
+                val versions = FabricInstaller.listLoaders(gameVersion)
+                loaderVersions = versions
+                val preferred = versions.firstOrNull { it.stable } ?: versions.firstOrNull()
+                loaderVersion = preferred?.version.orEmpty()
+            } catch (e: Exception) {
+                loaderVersions = emptyList()
+                loaderVersion = ""
+                loaderError = e.message ?: (e::class.simpleName ?: "拉取 Fabric 版本失败")
+            }
+        }
+        loadingLoaders = false
+    }
+
     fun cancelInstall() {
         job?.cancel()
         job = null
@@ -215,6 +370,11 @@ fun DownloadsPage(
         currentStep = InstallStep.IDLE
         speedBytesPerSecond = 0L
         message = "已取消。已下好的文件不会丢，再点一次会跳过校验通过的部分。"
+    }
+
+    LaunchedEffect(versionText) {
+        // 换版本就换 loader 列表；不开「装 Fabric」时也顺手拉，用户一勾就有得选。
+        if (versionText.isNotBlank()) refreshLoaders(versionText.trim())
     }
 
     LaunchedEffect(Unit) {
@@ -277,11 +437,27 @@ fun DownloadsPage(
                 singleLine = true,
                 enabled = !busy,
             )
-            Button(onClick = { startInstall() }, enabled = !busy) { Text("一键安装") }
+            // 勾了 Fabric 就把按钮改名叫「安装 Fabric」——用户点的是同一个动作，
+            // 但按钮文字要能对得上他心里想的那件事。
+            Button(onClick = { startInstall() }, enabled = !busy) {
+                Text(if (installFabric) "安装 Fabric" else "一键安装")
+            }
             if (busy) {
                 OutlinedButton(onClick = { cancelInstall() }) { Text("取消") }
             }
         }
+
+        FabricRow(
+            enabled = !busy,
+            installFabric = installFabric,
+            onInstallFabricChange = { installFabric = it },
+            gameVersion = versionText.trim(),
+            versions = loaderVersions,
+            selected = loaderVersion,
+            onSelectedChange = { loaderVersion = it },
+            loading = loadingLoaders,
+            error = loaderError,
+        )
 
         Row(
             Modifier.fillMaxWidth(),
@@ -427,11 +603,16 @@ fun DownloadsPage(
     }
 }
 
-/** 「步骤名 —— 状态」的一行；失败时把原因原样显示出来。 */
+/**
+ * 「步骤名 —— 状态」的一行；失败时把原因原样显示出来。
+ *
+ * 只列真跑过的步骤 + 当前步骤：只装原版时不该冒出「安装 Fabric 加载器」这一格，
+ * 本机已有 Java 时也不该冒出一格永远是「·」的「下载 Java 运行时」。
+ */
 @Composable
 private fun StepList(currentStep: InstallStep, states: Map<InstallStep, StepState>) {
     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-        VISIBLE_STEPS.forEach { step ->
+        VISIBLE_STEPS.filter { states.containsKey(it) || it == currentStep }.forEach { step ->
             val state = states[step] ?: StepState.Pending
             val (mark, color) = when (state) {
                 is StepState.Pending -> "·" to MaterialTheme.colorScheme.onSurfaceVariant

@@ -167,6 +167,43 @@ tasks.register<JavaExec>("resumeSmoke") {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// 开发期 Fabric 一键装验收（需要联网）
+//
+// 与 e2eInstall 走同一条 OneClickInstaller.install，只是额外给了 LoaderChoice.Fabric，
+// 也就是 DownloadsPage 勾上「顺带装 Fabric」之后执行的那条路：原版文件 → Fabric 库 →
+// 补 Java → 登记实例 → 启动进主菜单。日志落在 dist/_e2e-logs/fabric-*.log。
+//
+//   gradle :app-desktop:fabricE2e -PfabricDir=dist/_fabric-e2e [-Pgv=1.20.1]
+//          [-PfabricLoader=0.16.14] [-PskipOrig=true]
+//
+// skipOrig=true 时假定该目录里原版已经装好，只走 FabricInstaller 那一段。
+// ─────────────────────────────────────────────────────────────────────────────
+tasks.register<JavaExec>("fabricE2e") {
+    group = "verification"
+    description = "无头验收：干净目录装 1.20.1 + Fabric 并启动进主菜单（开发期用，需联网）"
+    dependsOn(tasks.named("testClasses"))
+    mainClass.set("io.github.huang404yan.platypus.desktop.FabricE2eKt")
+    classpath = sourceSets["test"].runtimeClasspath
+    workingDir = rootProject.projectDir
+    jvmArgs("-Dfile.encoding=UTF-8")
+
+    argumentProviders.add(
+        CommandLineArgumentProvider {
+            val dir = providers.gradleProperty("fabricDir").orNull
+                ?: error("缺少 -PfabricDir=<游戏目录>（建议 dist/_fabric-e2e）")
+            listOf(
+                rootProject.file(dir).absolutePath,
+                providers.gradleProperty("gv").orElse("1.20.1").get(),
+                providers.gradleProperty("fabricLoader").orElse("").get(),
+                providers.gradleProperty("e2eUser").orElse("Dev").get(),
+                providers.gradleProperty("e2eTimeoutMs").orElse("300000").get(),
+                providers.gradleProperty("skipOrig").orElse("false").get(),
+            )
+        },
+    )
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // 品牌与打包参数
 //
 // 版本号唯一真源是根 build.gradle.kts 的 allprojects.version；这里只按「版本号里
