@@ -308,6 +308,38 @@ tasks.register<JavaExec>("modsE2e") {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// 实例隔离验收（P1）：证明游戏把存档 / 模组 / 日志写进实例自己的目录
+//
+//   gradle :app-desktop:isolationSmoke -PisoDir=dist/_test-mc/_nf1211 [-PisoInstance=neoforge-21.1.265]
+//          [-PisoUser=Dev] [-Pe2eTimeoutMs=300000]
+//
+// 只启动、不装东西，所以能在已经装好的目录上反复跑。断言全在磁盘上：
+// 实例目录有 logs/latest.log，共享 <游戏目录>/logs/latest.log 的修改时间没变。
+// ─────────────────────────────────────────────────────────────────────────────
+tasks.register<JavaExec>("isolationSmoke") {
+    group = "verification"
+    description = "无头验收：启动实例，证明存档模组日志落在实例自己的目录里"
+    dependsOn(tasks.named("testClasses"))
+    mainClass.set("io.github.huang404yan.platypus.desktop.InstanceIsolationSmokeKt")
+    classpath = sourceSets["test"].runtimeClasspath
+    workingDir = rootProject.projectDir
+    jvmArgs("-Dfile.encoding=UTF-8")
+
+    argumentProviders.add(
+        CommandLineArgumentProvider {
+            val dir = providers.gradleProperty("isoDir").orNull
+                ?: error("缺少 -PisoDir=<游戏目录>（建议用装好的 dist/_test-mc/_nf1211）")
+            listOf(
+                rootProject.file(dir).absolutePath,
+                providers.gradleProperty("isoInstance").orElse("").get(),
+                providers.gradleProperty("isoUser").orElse("Dev").get(),
+                providers.gradleProperty("e2eTimeoutMs").orElse("300000").get(),
+            )
+        },
+    )
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // 品牌与打包参数
 //
 // 版本号唯一真源是根 build.gradle.kts 的 allprojects.version；这里只按「版本号里

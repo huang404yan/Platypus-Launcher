@@ -3,6 +3,8 @@ package io.github.huang404yan.platypus.desktop.runtime
 import io.github.huang404yan.platypus.core.Brand
 import io.github.huang404yan.platypus.core.auth.Session
 import io.github.huang404yan.platypus.core.instance.Instance
+import io.github.huang404yan.platypus.core.instance.InstanceLayout
+import io.github.huang404yan.platypus.core.instance.InstanceLayouts
 import io.github.huang404yan.platypus.core.launch.GameHandle
 import io.github.huang404yan.platypus.core.launch.GameRuntime
 import io.github.huang404yan.platypus.core.launch.LaunchArguments
@@ -51,8 +53,10 @@ class DesktopGameRuntime(
         onEvent: (LaunchEvent) -> Unit,
     ): GameHandle = withContext(Dispatchers.IO) {
         onEvent(LaunchEvent.Stage("准备版本文件", 0.05f))
-        val layout = resolveLayout(request.instance)
-        val resolved = VersionResolver.load(layout.gameDir, layout.versionDir.name)
+        val layout = InstanceLayouts.of(request.instance)
+        // 版本 json 永远在 <gameRoot>/versions/<id>/ 下；layout.gameDir 是实例自己的游戏目录（隔离后等于版本目录），
+        // 不能拿它当 gameRoot 传进来，否则会去找 <实例目录>/versions/<id>。
+        val resolved = VersionResolver.load(layout.gameRoot, layout.versionDir.name)
             ?: throw IllegalStateException(
                 "版本文件不存在：" + File(layout.versionDir, layout.versionDir.name + ".json").path,
             )
@@ -146,26 +150,13 @@ class DesktopGameRuntime(
         }
     }
 
-    /** 版本目录、游戏根目录、库与资源目录——都从实例目录反推。 */
-    private fun resolveLayout(instance: Instance): GameLayout {
-        val versionDir = File(instance.directory)
-        // InstanceScanner 把 instance.directory 设成 versions/<id>，所以游戏根目录是上两级。
-        val gameDir = versionDir.parentFile?.parentFile ?: versionDir
-        return GameLayout(
-            versionDir = versionDir,
-            gameDir = gameDir,
-            librariesDir = File(gameDir, "libraries"),
-            assetsDir = File(gameDir, "assets"),
-        )
-    }
-
     private fun buildContext(
         request: LaunchRequest,
-        layout: GameLayout,
+        layout: InstanceLayout,
         version: VersionJson,
         resolvedJar: File?,
     ): LaunchContext {
-        val nativesDir = LaunchArguments.nativesDirFor(layout.gameDir, layout.versionDir.name)
+        val nativesDir = layout.nativesDir
         val placeholder = LaunchContext(
             gameDir = layout.gameDir,
             assetsDir = layout.assetsDir,
@@ -192,14 +183,14 @@ class DesktopGameRuntime(
      *
      * Forge 的继承型 json 自己不写 client，需要用父版本的 id 去找 —— 这里按「继承链最底层的 id」兜底。
      */
-    private fun clientJar(version: VersionJson, layout: GameLayout): File? {
+    private fun clientJar(version: VersionJson, layout: InstanceLayout): File? {
         val declared = version.downloads?.client?.path
         if (!declared.isNullOrBlank()) {
             val file = File(layout.librariesDir, declared)
             if (file.isFile) return file
         }
         // 合并后 id 是子版本，client jar 却常常在父版本目录下，逐个试。
-        val candidates = layout.gameDir.resolve("versions").listFiles()
+        val candidates = layout.gameRoot.resolve("versions").listFiles()
             ?.filter { it.isDirectory }
             ?.map { File(it, it.name + ".jar") }
             ?.filter { it.isFile }
@@ -219,14 +210,6 @@ class DesktopGameRuntime(
         val result = NativesExtractor.extract(archives, context.nativesDir)
         result.warnings.forEach(log)
     }
-
-    /** 一次启动用到的目录集合。 */
-    private data class GameLayout(
-        val versionDir: File,
-        val gameDir: File,
-        val librariesDir: File,
-        val assetsDir: File,
-    )
 }
 
 /**
