@@ -28,6 +28,12 @@ class HttpDownloaderTest {
 
     private val downloader = HttpDownloader(parallelism = 4, retries = 0)
 
+    /** rangeSupport = false 时模拟「服务器不认 Range，永远回整份」的老式源。 */
+    private var rangeSupport = true
+
+    /** 非空时，处理该路径会先返回这么多字节就断开连接，模拟下载到一半断网。 */
+    private val cutOffAfter = mutableMapOf<String, Int>()
+
     @BeforeTest
     fun setUp() {
         server = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
@@ -45,17 +51,61 @@ class HttpDownloaderTest {
     private fun handle(exchange: HttpExchange) {
         hits.incrementAndGet()
         val path = exchange.requestURI.path
-        when {
-            bodies.containsKey(path) -> respond(exchange, 200, bodies.getValue(path))
+        val body = when {
+            bodies.containsKey(path) -> bodies.getValue(path)
             path.startsWith("/mirror/") && bodies.containsKey(path.removePrefix("/mirror")) ->
-                respond(exchange, 200, bodies.getValue(path.removePrefix("/mirror")))
-            else -> respond(exchange, 404, "not found".toByteArray())
+                bodies.getValue(path.removePrefix("/mirror"))
+            else -> null
         }
+        if (body == null) {
+            respond(exchange, 404, "not found".toByteArray())
+            return
+        }
+        respondRangeAware(exchange, path, body)
     }
 
     private fun respond(exchange: HttpExchange, code: Int, body: ByteArray) {
         exchange.sendResponseHeaders(code, body.size.toLong())
         exchange.responseBody.use { it.write(body) }
+    }
+
+    /** 认 Range 的源：带 `Range: bytes=<n>-` 就回 206 + Content-Range，否则回整份 200。 */
+    private fun respondRangeAware(exchange: HttpExchange, path: String, body: ByteArray) {
+        val range = exchange.requestHeaders.getFirst("Range")
+        val start = if (rangeSupport && range != null && range.startsWith("bytes=")) {
+            range.removePrefix("bytes=").substringBefore("-").trim().toLongOrNull()
+        } else {
+            null
+        }
+
+        if (start != null) {
+            if (start >= body.size) {
+                exchange.responseHeaders.add("Content-Range", "bytes */${body.size}")
+                respond(exchange, 416, ByteArray(0))
+                return
+            }
+            val slice = body.copyOfRange(start.toInt(), body.size)
+            exchange.responseHeaders.add("Content-Range", "bytes $start-${body.size - 1}/${body.size}")
+            send(exchange, 206, slice, path)
+            return
+        }
+        send(exchange, 200, body, path)
+    }
+
+    /** 走 chunked 发送，这样 [cutOffAfter] 截断连接时客户端会看到「提前 EOF」而不是「长度不符」。 */
+    private fun send(exchange: HttpExchange, code: Int, body: ByteArray, path: String) {
+        val cut = cutOffAfter.remove(path)
+        if (cut == null) {
+            respond(exchange, code, body)
+            return
+        }
+        val partial = body.copyOfRange(0, minOf(cut, body.size))
+        exchange.sendResponseHeaders(code, 0) // 0 = chunked，长度由连接关闭决定
+        try {
+            exchange.responseBody.use { it.write(partial) }
+        } catch (_: Exception) {
+            // 客户端可能已经先断开，测试不关心
+        }
     }
 
     private fun url(path: String) = "http://127.0.0.1:${server.address.port}$path"
@@ -179,6 +229,110 @@ class HttpDownloaderTest {
 
         assertTrue(report.ok, "目录已存在应视为成功：${report.failures}")
         assertEquals("alpha-content", File(deep, "already-there.bin").readText())
+    }
+
+    @Test
+    fun `续传：已有半成品时只请求剩下的部分`() = runBlocking {
+        val bytes = bodies.getValue("/b.txt")
+        val part = File(target("b.txt") + ".part")
+        // 先塞进前 100 KB，模拟上一次下到一半
+        part.writeBytes(bytes.copyOfRange(0, 100 * 1024))
+        val before = hits.get()
+
+        var progress = 0L
+        val report = downloader.download(
+            listOf(DownloadItem(url("/b.txt"), target("b.txt"), sha1 = sha1(bytes), size = bytes.size.toLong())),
+        ) { progress = it.completedBytes }
+
+        assertTrue(report.ok, "续传应成功：${report.failures}")
+        assertTrue(File(target("b.txt")).readBytes().contentEquals(bytes), "续传结果必须与原文一致")
+        assertFalse(part.exists(), "转正后不应残留 .part")
+        assertEquals(before + 1, hits.get(), "续传应该只发一次 GET（取剩余部分），不是整份重下")
+        assertEquals(bytes.size.toLong(), progress, "进度应报完整大小")
+    }
+
+    @Test
+    fun `续传：服务器不认 Range 时自动从头重下且结果正确`() = runBlocking {
+        rangeSupport = false
+        val bytes = bodies.getValue("/b.txt")
+        File(target("b.txt") + ".part").writeBytes(bytes.copyOfRange(0, 100 * 1024))
+
+        val report = downloader.download(
+            listOf(DownloadItem(url("/b.txt"), target("b.txt"), sha1 = sha1(bytes), size = bytes.size.toLong())),
+        )
+
+        assertTrue(report.ok, "服务器忽略 Range 时也必须成功：${report.failures}")
+        assertTrue(
+            File(target("b.txt")).readBytes().contentEquals(bytes),
+            "忽略 Range 时不能把整份内容接到半成品后面，那会变成两倍的错误文件",
+        )
+    }
+
+    @Test
+    fun `续传：半成品比目标还大时清掉重下`() = runBlocking {
+        val bytes = bodies.getValue("/a.txt")
+        File(target("a.txt") + ".part").writeBytes(bytes + ByteArray(64) { 1 })
+
+        val report = downloader.download(
+            listOf(DownloadItem(url("/a.txt"), target("a.txt"), sha1 = sha1(bytes), size = bytes.size.toLong())),
+        )
+
+        assertTrue(report.ok, report.failures.toString())
+        assertEquals("alpha-content", File(target("a.txt")).readText())
+    }
+
+    @Test
+    fun `续传：416 时清掉半成品并从零成功`() = runBlocking {
+        val bytes = bodies.getValue("/a.txt")
+        // 服务器认为文件只有这么长，而 .part 声称已下满
+        File(target("a.txt") + ".part").writeBytes(ByteArray(bytes.size) { 9 })
+
+        val report = downloader.download(
+            listOf(DownloadItem(url("/a.txt"), target("a.txt"), sha1 = sha1(bytes), size = bytes.size.toLong())),
+        )
+
+        assertTrue(report.ok, report.failures.toString())
+        assertEquals("alpha-content", File(target("a.txt")).readText())
+    }
+
+    @Test
+    fun `断网后保留半成品，第二次调用能接着下完`() = runBlocking {
+        val bytes = bodies.getValue("/b.txt")
+        // 第一次只发 80 KB 就断开
+        cutOffAfter["/b.txt"] = 80 * 1024
+
+        val first = downloader.download(
+            listOf(DownloadItem(url("/b.txt"), target("b.txt"), sha1 = sha1(bytes), size = bytes.size.toLong())),
+        )
+        assertFalse(first.ok, "这一轮应该失败")
+        assertFalse(File(target("b.txt")).exists(), "失败时不应留下目标文件")
+        val partAfterFirst = File(target("b.txt") + ".part")
+        assertTrue(partAfterFirst.isFile, "断网应保留 .part 供下次续传")
+        val kept = partAfterFirst.length()
+        assertTrue(kept in 1..bytes.size.toLong(), "半成品大小应在 (0, 总长] 之间，实际 $kept")
+
+        // 第二次：网络恢复，应当只补剩下的部分
+        val before = hits.get()
+        val second = downloader.download(
+            listOf(DownloadItem(url("/b.txt"), target("b.txt"), sha1 = sha1(bytes), size = bytes.size.toLong())),
+        )
+        assertTrue(second.ok, "续传应成功：${second.failures}")
+        assertTrue(File(target("b.txt")).readBytes().contentEquals(bytes), "续传后内容必须完整正确")
+        assertTrue(hits.get() - before <= 2, "第二次只应发一次请求（最多两次，含重定向）")
+    }
+
+    @Test
+    fun `目标文件已存在时顺手清掉同名 part 文件`() = runBlocking {
+        val bytes = bodies.getValue("/a.txt")
+        File(target("a.txt")).writeBytes(bytes)
+        val part = File(target("a.txt") + ".part").apply { writeBytes(ByteArray(10)) }
+
+        val report = downloader.download(
+            listOf(DownloadItem(url("/a.txt"), target("a.txt"), sha1 = sha1(bytes), size = bytes.size.toLong())),
+        )
+
+        assertTrue(report.ok)
+        assertFalse(part.exists(), "目标已完成时 .part 是垃圾，应清掉")
     }
 
     private fun sha1(bytes: ByteArray): String =

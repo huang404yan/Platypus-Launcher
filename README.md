@@ -76,6 +76,7 @@ Windows 下也可以用 `gradlew.bat`。首次构建会下载约 300 MB 依赖�
 - `docs/11-android-s1-shiyan.md`：**S1 真机实验清单**（用户可执行，含回报表格）
 - `docs/12-win-oneclick-loop.md`：**一键装闭环**（选版本 → 下载 → 补 Java → 建实例 → 启动）
 - `docs/13-settings-persistence.md`：**启动器设置持久化**（离线用户名 / 默认游戏目录 / 默认内存）
+- `docs/14-resume-and-instance-create.md`：**下载断点续传与实例页新建入口**（`.part` + Range、本地版本直接认养、登记与移除登记）
 
 ## 下载
 
@@ -102,6 +103,10 @@ M0（骨架）+ M1（实例扫描）+ M2（下载器）+ M3（**Windows 一键�
 
 设置已经能存住：离线用户名、默认游戏目录、新实例默认内存，落在 `<游戏目录>/platypus/settings.json`，关掉再打开还在（`docs/13`）。
 
-单测 **115 例全过**（14 个测试类，`./gradlew :core:test`）。
+**实例页能自己建实例了**：填版本号 + 实例名 + 内存，本地已有那份游戏就直接认养（不联网），没有才走一键装；已登记的实例能改内存、能移除登记（只去掉登记，版本文件不动）。从实例页点「去启动」会跳到启动页并自动选中它（`docs/14`）。
 
-尚未实现：正版/微软登录（`core/auth` 只有接口）、Forge/Fabric 安装器、下载续传、LINK（联机）页面。
+**下载断点续传**：先写 `<文件>.part`，校验通过才转正；`.part` 有内容就发 `Range` 接着下，断网不清半成品，下次自动接上。进度条会额外显示「其中 N 个接着上次下（省了 M MB）」（`docs/14`）。
+
+单测 **127 例全过**（15 个测试类，`./gradlew :core:test`）。另有三个无头冒烟任务（`e2eInstall` / `settingsSmoke` / `instanceFlowSmoke`），走的是界面按钮同一批函数。
+
+尚未实现：正版/微软登录（`core/auth` 只有接口）、Forge/Fabric 安装器、LINK（联机）页面、实例删除（只有移除登记）。
