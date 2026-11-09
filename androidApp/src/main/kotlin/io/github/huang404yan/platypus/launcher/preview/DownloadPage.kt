@@ -105,7 +105,7 @@ internal fun DownloadPage() {
     LaunchedEffect(Unit) {
         val loaded = withContext(Dispatchers.IO) {
             runCatching { CatalogState.Ready(parseVersionManifest(fetchText(MANIFEST_URL))) }
-                .getOrElse { CatalogState.Failed(it.message ?: it::class.simpleName ?: "未知错误") }
+                .getOrElse { CatalogState.Failed(describe(it)) }
         }
         catalog = loaded
     }
@@ -333,6 +333,8 @@ private fun PhaseView(phase: Phase) {
             )
         }
         is Phase.Failed -> {
+            val context = LocalContext.current
+            var copied by remember { mutableStateOf(false) }
             Text(
                 phase.message,
                 style = MaterialTheme.typography.titleSmall,
@@ -341,6 +343,21 @@ private fun PhaseView(phase: Phase) {
             )
             phase.details.forEach { detail ->
                 Text(detail, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+            }
+            // 拿不到 logcat 时，这段文字就是唯一的现场证据，必须能整段带走。
+            OutlinedButton(
+                onClick = {
+                    val dump = buildString {
+                        appendLine("鸭嘴兽启动器 · 下载失败")
+                        appendLine("阶段：下载")
+                        appendLine("结果：" + phase.message)
+                        phase.details.forEach { appendLine("详情：" + it) }
+                    }
+                    copyToClipboard(context, dump)
+                    copied = true
+                },
+            ) {
+                Text(if (copied) "已复制" else "复制失败信息")
             }
         }
     }
@@ -443,7 +460,7 @@ internal object DownloadJobRunner {
                 val report = downloader.download(listOf(index))
                 val failure = report.failures.firstOrNull()
                 if (failure != null) {
-                    _phase.value = Phase.Failed("资源索引下载失败", listOf(failure.reason))
+                    _phase.value = Phase.Failed("资源索引下载失败（" + File(index.target).name + "）", listOf(failure.reason))
                     return
                 }
                 withContext(Dispatchers.IO) {
@@ -480,7 +497,8 @@ internal object DownloadJobRunner {
             // 用户主动取消：不当作失败，取消按钮已经把状态置成 Cancelled。
             throw e
         } catch (e: Exception) {
-            _phase.value = Phase.Failed(e.message ?: e::class.simpleName ?: "未知错误", emptyList())
+            // 只显示 message 会丢掉类名，用户回报时无从判断是网络、权限还是磁盘。
+            _phase.value = Phase.Failed(describe(e), emptyList())
         } finally {
             job = null
         }

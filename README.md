@@ -67,6 +67,13 @@ Windows 下也可以用 `gradlew.bat`。首次构建会下载约 300 MB 依赖�
 - `docs/02-jishuzhan-xuanxing.md`：技术栈选型与排除理由
 - `docs/03-luxian-yu-youxianji.md`：优先级评估与里程碑
 - `docs/04-juece-jilu.md`：决策记录
+- `docs/05-win-baseline.md`：Windows 端技术基线
+- `docs/06-win-acceptance.md`：Windows 端验收清单
+- `docs/07-qidong-lianlu.md`：启动链路设计
+- `docs/08-win-kaifa-jilu.md`：Windows 端开发记录
+- `docs/09-android-baseline.md`：**Android 运行端技术基线**（JRE 只到 17、单版本 700–900 MB、渲染三选一）
+- `docs/10-android-ceshi-buzhou.md`：**Android 预览版测试步骤**（给用户的手册）
+- `docs/11-android-s1-shiyan.md`：**S1 真机实验清单**（用户可执行，含回报表格）
 
 ## 下载
 

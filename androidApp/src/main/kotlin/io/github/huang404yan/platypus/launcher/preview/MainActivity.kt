@@ -80,6 +80,7 @@ private enum class Tab(val label: String) {
     INSTANCE("实例"),
     DOWNLOAD("下载"),
     LAUNCH("启动"),
+    DIAGNOSTIC("诊断"),
     MORE("更多"),
     ABOUT("关于"),
 }
@@ -102,6 +103,7 @@ private fun AppRoot() {
             when (tab) {
                 Tab.INSTANCE -> InstancePage()
                 Tab.DOWNLOAD -> DownloadPage()
+                Tab.DIAGNOSTIC -> DiagnosticPage()
                 Tab.ABOUT -> AboutPage()
                 else -> Placeholder(tab)
             }
