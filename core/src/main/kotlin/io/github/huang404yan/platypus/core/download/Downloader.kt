@@ -22,9 +22,20 @@ data class DownloadProgress(
     val totalBytes: Long = 0L,
     val resumedFiles: Int = 0,
     val resumedBytes: Long = 0L,
+    /**
+     * 有多少个条目的体积是未知的（size = -1）。
+     *
+     * 这些条目没法算进 [totalBytes]，所以 [fraction] 会偏大、永远到不了 1.0 之前就已经
+     * 看着「快满了」。界面拿到这个数就该把百分比藏起来，改用「已完成 N/M 个文件」——
+     * 显示一个假的 100% 比不显示更糟。
+     */
+    val unknownSizeFiles: Int = 0,
 ) {
     val fraction: Float
         get() = if (totalBytes <= 0) 0f else (completedBytes.toFloat() / totalBytes).coerceIn(0f, 1f)
+
+    /** 进度是否可信：分母里有没有漏掉的条目。 */
+    val fractionReliable: Boolean get() = unknownSizeFiles == 0 && totalBytes > 0
 }
 
 data class DownloadFailure(val item: DownloadItem, val reason: String)

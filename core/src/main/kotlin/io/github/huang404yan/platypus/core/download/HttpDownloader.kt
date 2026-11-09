@@ -49,6 +49,8 @@ class HttpDownloader(
 
         val totalFiles = items.size
         val totalBytes = items.sumOf { if (it.size > 0) it.size else 0L }
+        // 分母里漏掉的条目数：交给界面判断百分比能不能信（详见 DownloadProgress.unknownSizeFiles）
+        val unknownSizeFiles = items.count { it.size <= 0 }
         val completedFiles = AtomicInteger(0)
         val completedBytes = AtomicLong(0)
         // 其中「接着上次没下完的部分」有多少：只是给界面一个「真的在续传」的凭据
@@ -71,6 +73,7 @@ class HttpDownloader(
                         totalBytes = totalBytes,
                         resumedFiles = resumedFiles.get(),
                         resumedBytes = resumedBytes.get(),
+                        unknownSizeFiles = unknownSizeFiles,
                     ),
                 )
             }
