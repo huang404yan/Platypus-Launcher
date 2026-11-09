@@ -84,6 +84,35 @@ tasks.register<JavaExec>("settingsSmoke") {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// 开发期实例页链路冒烟
+//
+// 实例页的每个按钮背后只有几步：认养/新建 → 写登记 → 扫描 → 合并 → 改内存 → 移除登记。
+// 界面本身跑不了无头，但这几步都在 DesktopServices 装配出来的真实仓库上跑一遍，
+// 走的路径与界面完全相同（界面里也是调 backend.instances.save）。
+//
+//   gradle :app-desktop:instanceFlowSmoke -PinstanceDir=dist/_instance-smoke
+// ─────────────────────────────────────────────────────────────────────────────
+tasks.register<JavaExec>("instanceFlowSmoke") {
+    group = "verification"
+    description = "无头冒烟：实例认养、登记、合并、改内存、移除（开发期用）"
+    dependsOn(tasks.named("testClasses"))
+    mainClass.set("io.github.huang404yan.platypus.desktop.InstanceFlowSmokeKt")
+    classpath = sourceSets["test"].runtimeClasspath
+    workingDir = rootProject.projectDir
+    jvmArgs("-Dfile.encoding=UTF-8")
+
+    argumentProviders.add(
+        CommandLineArgumentProvider {
+            val dir = providers.gradleProperty("instanceDir").orElse("dist/_instance-smoke").get()
+            // 第二个参数可选：给一个真实的 .minecraft，就在它上面做一次只读认养验证。
+            val real = providers.gradleProperty("instanceRealDir").orNull
+            listOf(rootProject.file(dir).absolutePath) +
+                listOfNotNull(real?.takeIf { it.isNotBlank() }?.let { rootProject.file(it).absolutePath })
+        },
+    )
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // 品牌与打包参数
 //
 // 版本号唯一真源是根 build.gradle.kts 的 allprojects.version；这里只按「版本号里

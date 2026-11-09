@@ -67,6 +67,8 @@ object OneClickInstaller {
         instances: InstanceRepository,
         manifest: VersionManifest? = null,
         memoryMb: Int = Instance.DEFAULT_MEMORY_MB,
+        /** 自定义实例名；留空或全空白时退回版本号，保证老调用方行为不变。 */
+        instanceName: String? = null,
         onProgress: (StepProgress) -> Unit = {},
     ): InstallOutcome = withContext(Dispatchers.IO) {
         val startedAt = System.currentTimeMillis()
@@ -94,10 +96,17 @@ object OneClickInstaller {
         )
         val report = try {
             VanillaInstaller.download(plan.items) { snapshot ->
+                // 续传过的文件单独说一句，用户才知道不是从头再下一遍。
+                val resumed = if (snapshot.resumedFiles > 0) {
+                    "，其中 " + snapshot.resumedFiles + " 个接着上次下（省了 " +
+                        (snapshot.resumedBytes / 1024L / 1024L) + " MB）"
+                } else {
+                    ""
+                }
                 onProgress(
                     StepProgress(
                         InstallStep.DOWNLOADING,
-                        "已完成 " + snapshot.completedFiles + " / " + snapshot.totalFiles + " 个文件",
+                        "已完成 " + snapshot.completedFiles + " / " + snapshot.totalFiles + " 个文件" + resumed,
                         done = snapshot.completedBytes,
                         total = snapshot.totalBytes,
                     ),
@@ -158,9 +167,10 @@ object OneClickInstaller {
 
         // ④ 登记实例
         onProgress(StepProgress(InstallStep.REGISTERING, "写入实例登记"))
+        val displayName = instanceName?.trim()?.takeIf { it.isNotEmpty() } ?: plan.versionId
         val instance = Instance(
             id = plan.versionId,
-            name = plan.versionId,
+            name = displayName,
             gameVersion = plan.gameVersion,
             directory = DownloadPlanner.versionDir(gameDir, plan.versionId).absolutePath,
             javaPath = java.path,

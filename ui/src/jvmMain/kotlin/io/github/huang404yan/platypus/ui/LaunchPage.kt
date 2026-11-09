@@ -68,7 +68,12 @@ import kotlinx.coroutines.Dispatchers
  * （快照状态本身线程安全），读日志的循环留在后端，界面不做轮询。
  */
 @Composable
-fun LaunchPage(backend: LauncherBackend?, initialGameRoot: String?) {
+fun LaunchPage(
+    backend: LauncherBackend?,
+    initialGameRoot: String?,
+    /** 从实例页点「去启动」时带过来的实例键；只有它能对上时才会改变默认选中项。 */
+    focusKey: String? = null,
+) {
     if (backend == null) {
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text("启动", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
@@ -117,11 +122,14 @@ fun LaunchPage(backend: LauncherBackend?, initialGameRoot: String?) {
         scanned = result
         registered = saved
         val merged = mergeInstances(saved, result?.instances.orEmpty())
-        if (selected == null || merged.none { instanceKey(it) == instanceKey(selected!!) }) {
-            selected = merged.firstOrNull()
-        } else {
-            selected = merged.firstOrNull { instanceKey(it) == instanceKey(selected!!) }
+        // 选中优先级：实例页点名要启动的那个 > 用户当前手选的 > 列表第一个。
+        val focused = focusKey?.takeIf { it.isNotBlank() }?.let { key ->
+            merged.firstOrNull { instanceKey(it) == key }
         }
+        val previous = selected?.let { current ->
+            merged.firstOrNull { instanceKey(it) == instanceKey(current) }
+        }
+        selected = focused ?: previous ?: merged.firstOrNull()
         selected?.let { memoryText = it.memoryMb.toString() }
     }
 
