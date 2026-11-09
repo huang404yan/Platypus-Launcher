@@ -70,9 +70,9 @@ fun App(initialGameRoot: String? = null, backend: LauncherBackend? = null) {
                     }
                     Page.DOWNLOAD -> DownloadsPage(initialGameRoot, backend) { page = Page.LAUNCH }
                     Page.MODS -> ModsPage(initialGameRoot, backend)
+                    Page.LINK -> LinkPage()
                     Page.SETTINGS -> SettingsPage(backend)
                     Page.ABOUT -> AboutPage()
-                    else -> PlaceholderPage(page)
                 }
             }
         }
@@ -133,11 +133,4 @@ private fun SideBar(current: Page, onSelect: (Page) -> Unit) {
     }
 }
 
-@Composable
-private fun PlaceholderPage(page: Page) {
-    Column {
-        Text(page.label, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
-        Spacer(Modifier.height(8.dp))
-        Text("还没做。", color = MaterialTheme.colorScheme.onSurfaceVariant)
-    }
-}
+
