@@ -3,6 +3,7 @@ package io.github.huang404yan.platypus.ui.download
 import io.github.huang404yan.platypus.core.download.DownloadItem
 import io.github.huang404yan.platypus.core.download.DownloadReport
 import io.github.huang404yan.platypus.core.download.HttpDownloader
+import io.github.huang404yan.platypus.core.download.RemoteChecksums
 import io.github.huang404yan.platypus.core.instance.Instance
 import io.github.huang404yan.platypus.core.instance.InstanceRepository
 import io.github.huang404yan.platypus.core.instance.LoaderKind
@@ -84,19 +85,26 @@ object FabricInstaller {
 
             step = FabricStep.LIBRARIES
             val librariesDir = DownloadPlanner.librariesDir(gameRoot)
-            val items = FabricLibraries.plan(
+            val planned = FabricLibraries.plan(
                 version = profile.versionJson,
                 librariesDir = librariesDir,
             )
-            val totalBytes = items.sumOf { if (it.size > 0) it.size else 0L }
+            // Fabric 的 profile 里有 2 个库（intermediary、fabric-loader）不带 sha1 与 size。
+            // 不补的话：包下坏了发现不了、进度条分母偏小、已下过的也判断不出能跳过。
+            // 补不到就按原样继续——少一层保险比不上整个安装失败。
+            val checksummed = RemoteChecksums().enrichWithStats(planned)
+            val items = checksummed.items
             onProgress(
                 FabricProgress(
                     step = FabricStep.LIBRARIES,
-                    detail = "下载 ${items.size} 个 Fabric 库",
-                    done = 0,
-                    total = totalBytes,
+                    detail = if (checksummed.filled > 0) {
+                        "下载 ${items.size} 个 Fabric 库（补齐 ${checksummed.filled} 个库的 sha1/体积）"
+                    } else {
+                        "下载 ${items.size} 个 Fabric 库"
+                    },
                 ),
             )
+            val totalBytes = items.sumOf { if (it.size > 0) it.size else 0L }
 
             // 目录先串行建好，避免 16 个并发线程同时 mkdirs 打架（HttpDownloader 里也防了一手）。
             items.mapNotNull { File(it.target).parentFile }.distinct().forEach { it.mkdirs() }
@@ -127,6 +135,8 @@ object FabricInstaller {
                 downloadReport = report,
                 downloadedBytes = items.sumOf { if (it.size > 0) it.size else 0L },
                 elapsedMs = Duration.between(started, Instant.now()).toMillis(),
+                checksumFilled = checksummed.filled,
+                checksumMissing = checksummed.stillMissing,
             )
         } catch (e: Exception) {
             if (e is FabricInstallException) throw e
@@ -214,6 +224,10 @@ data class FabricInstallResult(
     val downloadReport: DownloadReport,
     val downloadedBytes: Long,
     val elapsedMs: Long,
+    /** 从 maven 的 .sha1 附属文件补上校验信息的库数（实测 8 个库里有 2 个要补）。 */
+    val checksumFilled: Int = 0,
+    /** 补完仍缺校验的库数；0 表示每个库都强校验、都能判重跳过。 */
+    val checksumMissing: Int = 0,
 ) {
     val libraryFiles: Int get() = downloadReport.succeeded
 }

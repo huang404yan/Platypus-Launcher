@@ -5,6 +5,7 @@ import io.github.huang404yan.platypus.core.instance.Instance
 import io.github.huang404yan.platypus.core.instance.InstanceRepository
 import io.github.huang404yan.platypus.core.instance.LoaderKind
 import io.github.huang404yan.platypus.core.loader.FabricMeta
+import io.github.huang404yan.platypus.core.loader.ForgeMeta
 import io.github.huang404yan.platypus.core.runtime.JavaRuntime
 import io.github.huang404yan.platypus.core.runtime.JavaRuntimeService
 import io.github.huang404yan.platypus.core.runtime.findExactMajor
@@ -21,7 +22,7 @@ enum class InstallStep(val label: String) {
     DOWNLOADING("下载游戏文件"),
     JAVA_CHECK("检查 Java 运行时"),
     JAVA_INSTALL("下载 Java 运行时"),
-    LOADER_INSTALL("安装 Fabric 加载器"),
+    LOADER_INSTALL("安装加载器"),
     REGISTERING("登记实例"),
     DONE("完成"),
 }
@@ -32,6 +33,13 @@ data class StepProgress(
     val detail: String = "",
     val done: Long = 0L,
     val total: Long = 0L,
+    /**
+     * [total] 是否覆盖了这一步的全部工作。
+     *
+     * 下载阶段若有条目体积未知（没有 size 也没有 sha1 可推算），分母就少了那几项，
+     * 百分比会虚高、看着「早该下完却停在 99%」。这种时候界面该只显示文件数，不显示进度条。
+     */
+    val totalReliable: Boolean = true,
 ) {
     val fraction: Float
         get() = if (total <= 0L) 0f else (done.toDouble() / total.toDouble()).toFloat().coerceIn(0f, 1f)
@@ -55,12 +63,16 @@ data class InstallOutcome(
     val elapsedMs: Long,
     /** 装了加载器时的 Fabric 安装结果；原版安装为 null。 */
     val fabric: FabricInstallResult? = null,
+    /** 装了加载器时的 Forge 安装结果；原版安装为 null。 */
+    val forge: ForgeInstallResult? = null,
 )
 
 /**
- * 要顺带装的加载器。Forge 下一轮接进来时在这加一个分支即可，
- * 安装顺序（原版 → 补 Java → 加载器 → 登记）不用动：先有原版文件，
- * 加载器才能以 inheritsFrom 叠在它上面；加载器只走 HTTP，与 Java 无关。
+ * 要顺带装的加载器。
+ *
+ * 安装顺序（原版 → 补 Java → 加载器 → 登记）对两种加载器都一样：先有原版文件，
+ * 加载器才能以 inheritsFrom 叠在它上面。差别只在实现方式：Fabric 是拉一份 profile json
+ * 再下几个库；Forge 要跑官方 installer（所以它必须排在补 Java 之后——得有个能用的 java 进程）。
  */
 sealed interface LoaderChoice {
     /** 只装原版，不加加载器。 */
@@ -68,6 +80,9 @@ sealed interface LoaderChoice {
 
     /** Fabric；loaderVersion 留空表示装最新的 stable。 */
     data class Fabric(val loaderVersion: String? = null) : LoaderChoice
+
+    /** Forge；forgeVersion 留空表示装 recommended（没有推荐就取 latest）。 */
+    data class Forge(val forgeVersion: String? = null) : LoaderChoice
 }
 
 /**
@@ -129,6 +144,8 @@ object OneClickInstaller {
                         "已完成 " + snapshot.completedFiles + " / " + snapshot.totalFiles + " 个文件" + resumed,
                         done = snapshot.completedBytes,
                         total = snapshot.totalBytes,
+                        // 有体积未知的文件时分母不全，界面改用文件数而不是百分比
+                        totalReliable = snapshot.fractionReliable,
                     ),
                 )
             }
@@ -226,21 +243,68 @@ object OneClickInstaller {
             }
             effectiveVersionId = fabric.versionId
         }
+        var forge: ForgeInstallResult? = null
+        if (loader is LoaderChoice.Forge) {
+            val wanted = loader.forgeVersion?.trim().orEmpty()
+            onProgress(
+                StepProgress(
+                    InstallStep.LOADER_INSTALL,
+                    if (wanted.isEmpty()) "查询 Forge 推荐版本" else "安装 Forge " + wanted,
+                ),
+            )
+            try {
+                // 用刚确定下来的那个 java 跑安装器：老版本 Forge（1.16 及以前）只认 Java 8，
+                // 直接拿本机默认 java 常常跑不起来，而这里拿的正是这个游戏版本要求的精确主版本。
+                forge = ForgeInstaller.install(
+                    gameRoot = gameDir,
+                    vanillaVersion = plan.versionId,
+                    javaPath = java.path,
+                    forgeVersion = wanted.takeIf { it.isNotEmpty() },
+                ) { p ->
+                    onProgress(
+                        StepProgress(
+                            InstallStep.LOADER_INSTALL,
+                            p.step.label + if (p.detail.isBlank()) "" else "：" + p.detail,
+                            done = p.done,
+                            total = p.total,
+                        ),
+                    )
+                }
+            } catch (e: ForgeInstallException) {
+                throw InstallStepException(
+                    InstallStep.LOADER_INSTALL,
+                    "Forge " + e.step.label + "失败：" + describe(e),
+                    e,
+                )
+            } catch (e: Exception) {
+                throw InstallStepException(
+                    InstallStep.LOADER_INSTALL,
+                    "装 Forge 失败：" + describe(e),
+                    e,
+                )
+            }
+            effectiveVersionId = forge.versionId
+        }
 
         // ⑤ 登记实例
         onProgress(StepProgress(InstallStep.REGISTERING, "写入实例登记"))
-        val loaderVersion = fabric?.loaderVersion
+        val loaderVersion = fabric?.loaderVersion ?: forge?.forgeVersion
+        val loaderKind = when {
+            fabric != null -> LoaderKind.FABRIC
+            forge != null -> LoaderKind.FORGE
+            else -> LoaderKind.VANILLA
+        }
         val displayName = instanceName?.trim()?.takeIf { it.isNotEmpty() }
-            ?: if (fabric != null) {
-                FabricMeta.displayName(plan.gameVersion, loaderVersion.orEmpty())
-            } else {
-                plan.versionId
+            ?: when {
+                fabric != null -> FabricMeta.displayName(plan.gameVersion, fabric.loaderVersion)
+                forge != null -> ForgeMeta.displayName(plan.gameVersion, forge.forgeVersion)
+                else -> plan.versionId
             }
         val instance = Instance(
             id = effectiveVersionId,
             name = displayName,
             gameVersion = plan.gameVersion,
-            loader = if (fabric != null) LoaderKind.FABRIC else LoaderKind.VANILLA,
+            loader = loaderKind,
             loaderVersion = loaderVersion,
             directory = DownloadPlanner.versionDir(gameDir, effectiveVersionId).absolutePath,
             javaPath = java.path,
@@ -262,6 +326,7 @@ object OneClickInstaller {
             downloadReport = report,
             elapsedMs = System.currentTimeMillis() - startedAt,
             fabric = fabric,
+            forge = forge,
         )
     }
 
