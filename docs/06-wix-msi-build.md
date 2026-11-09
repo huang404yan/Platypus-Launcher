@@ -17,13 +17,15 @@
 | 三次（验收时，一键装前） | 64,712,812 | `2d3e8fc9d44d3690620464f66ee0b68e89de5929120430e91d291be3a334d3f2` |
 | 四次（2026-11-09 14:57，含一键装闭环） | 64,815,212 | `ed466ab324d693efe4ff9f60a89f3a7521b99287dbc5505c944ea4ce5fe92a1a` |
 | 五次（2026-11-09 15:36，含设置页） | 64,876,652 | `558b5a2529a1e910053c10cfd7026f4b6b66e1e8309affa98ff1d0673b171401` |
-| **六次（2026-11-09 16:43，含断点续传与实例页）** | **64,970,860** | `bef0246be60a98ba72f257b7d28a80b3a1e43829539203427e4e43ca869b617a` |
+| 六次（2026-11-09 16:43，含断点续传与实例页） | 64,970,860 | `bef0246be60a98ba72f257b7d28a80b3a1e43829539203427e4e43ca869b617a` |
+| **七次（2026-11-09 19:24，含 Fabric 一键装）** | **65,101,932** | `5e3d3bd7368955852141e815a9407ba8dbc0f29501119706d73e42a0bada32f5` |
 
-- 归档副本（**现行 = 上表「六次」**）：`releases/preview/windows/Platypus-Launcher-0.8.0-preview.1-win-x64.msi`，64,970,860 字节，sha256 `bef0246b...b617a`。此前那三份都早于「一键装闭环」代码，包内没有 `OneClickInstaller.class` / `MojangJavaRuntimeInstaller.class`，已移到 `dist/_old-releases/win-0909/`；「四次」不含设置页，已移到 `dist/_old-releases/win-0909-1506/`；「五次」不含断点续传与实例页，已移到 `dist/_old-releases/win-0909-1536/`。
+- 归档副本（**现行 = 上表「七次」**）：`releases/preview/windows/Platypus-Launcher-0.8.0-preview.1-win-x64.msi`，65,101,932 字节，sha256 `5e3d3bd7...da32f5`。上一版（「六次」，64,970,860 字节 / `bef0246b...b617a`）已换出。此前那三份都早于「一键装闭环」代码，包内没有 `OneClickInstaller.class` / `MojangJavaRuntimeInstaller.class`，已移到 `dist/_old-releases/win-0909/`；「四次」不含设置页，已移到 `dist/_old-releases/win-0909-1506/`；「五次」不含断点续传与实例页，已移到 `dist/_old-releases/win-0909-1536/`。
 - 「二次」那份解包后 exe 597,504 字节、sha256 `7f2ba938c55661e4bb98da02f6e85c936d78fded763931d08d5c217ed730a7ed`，与 app-image 里的 exe 是同一个（已实测）。
 - 「四次」也做过解包复核：2026-11-09 15:01 `msiexec /a` 解出 `Platypus Preview.exe` 597,504 字节，sha256 同上 `7f2ba938...0a7ed` —— 与 app-image、免安装 zip 三处一致（**已实测**）。
 - 「五次」也复核过：2026-11-09 15:38 `msiexec /a`（`dist/_unpack-msi2.cmd` 后台跑，`msiexec_exit=0`）解到 `dist/_msi-unpack2/`，共 127 M，解出 `Platypus Preview.exe` 597,504 字节，sha256 仍是 `7f2ba938...0a7ed`。包内 `ui-jvm-0.8.0-preview.1-3b736be06b44fb18e8705d234374.jar` 命中 `SettingsPageKt`，`core-0.8.0-preview.1-91c0c23e41a37a58fd58cdd028cbacf0.jar` 命中 `JsonSettingsRepository` 与 `LauncherSettings`。
 - 「六次」（现行归档）2026-11-09 16:48 复核：`dist/_unpack-msi3.cmd` 后台跑 `msiexec_exit=0`，解到 `dist/_msi-unpack3/`，`Platypus Preview.exe` 597,504 字节，sha256 仍是 `7f2ba938...0a7ed` —— jpackage 的壳不随应用代码变，app-image / zip / msi 解包三处一致（**已实测**）。包内 `ui-jvm-0.8.0-preview.1-d38215d64e691a4f3a74d82abdf85a7.jar` 命中 `InstancePageKt`（30 个类）与 `SettingsPageKt`（5 个），`core-0.8.0-preview.1-d334c0a3abec8972517a5b6da977852.jar` 命中 `LocalInstance` 与 `HttpDownloader`（5 个）。
+- **「七次」（现行归档，含 Fabric）2026-11-09 19:33 复核**：`dist/_unpack-msi4.cmd` 后台跑，输出 `msiexec_exit=0`，解到 `dist/_msi-unpack4/`（127 M），`Platypus Preview.exe` 597,504 字节、sha256 `7f2ba938c55661e4bb98da02f6e85c936d78fded763931d08d5c217ed730a7ed` —— 仍是与 app-image、zip 两处一致的同一个壳。包内 `app/` 有 `core-0.8.0-preview.1-22ab8a8f91c55738712bccd2725aaa5b.jar` 与 `ui-jvm-0.8.0-preview.1-301fb3c05dc2672d6184842ae984fb9.jar`，与 app-image 里同名同哈希（**已实测**）。
 - 解包脚本踩坑：`dist/_unpack-msi3.cmd` 第一版用 `%~dp0..\releases\...` 拼相对路径，`msiexec` 报 **1619「无法打开此安装程序包」**。改成写死绝对路径（与 `_unpack-msi2.cmd` 一致）后 `msiexec_exit=0`。`%~dp0` 展开后带的是调用方 cwd 语义，`msiexec` 不按它解析。
 - **校验 msi 请比解包出来的 exe 的 sha256，不要比 msi 文件本身的 sha256**——后者每次都变。
 
@@ -137,7 +139,7 @@ exe 字节数与 `createDistributable` 产出的 app-image 一致（597,504）�
 
 | 产物 | 路径 | 用途 |
 |---|---|---|
-| app-image zip | `releases/preview/windows/Platypus-Launcher-0.8.0-preview.1-win-x64.zip`（**63,294,137 字节**，2026-11-09 16:44 换新） | 免安装、解压即用；用户双击 exe |
-| msi | `releases/preview/windows/Platypus-Launcher-0.8.0-preview.1-win-x64.msi`（**64,970,860 字节**，2026-11-09 16:43 换新） | 正式安装、进「应用和功能」、可静默升级 |
+| app-image zip | `releases/preview/windows/Platypus-Launcher-0.8.0-preview.1-win-x64.zip`（**63,437,782 字节**，2026-11-09 19:25 换新） | 免安装、解压即用；用户双击 exe |
+| msi | `releases/preview/windows/Platypus-Launcher-0.8.0-preview.1-win-x64.msi`（**65,101,932 字节**，2026-11-09 19:24 换新） | 正式安装、进「应用和功能」、可静默升级 |
 
-两份都含「一键装闭环」「设置持久化」「断点续传」「实例页新建入口」代码（zip 用 `zipfile` 嵌套读 jar 证实命中了 `OneClickInstaller`、`MojangJavaRuntimeInstaller`、`SettingsPageKt`、`JsonSettingsRepository`、`LauncherSettings`、`HttpDownloader$FetchOutcome`、`LocalInstance`、`InstancePageKt`）。归档 sha256：zip `f366da718e39643f6d2a13d188c7b4a435afc84f4036c465d514cf885bde23be`、msi `bef0246be60a98ba72f257b7d28a80b3a1e43829539203427e4e43ca869b617a`。
+两份都含「一键装闭环」「设置持久化」「断点续传」「实例页新建入口」代码（zip 用 `zipfile` 嵌套读 jar 证实命中了 `OneClickInstaller`、`MojangJavaRuntimeInstaller`、`SettingsPageKt`、`JsonSettingsRepository`、`LauncherSettings`、`HttpDownloader$FetchOutcome`、`LocalInstance`、`InstancePageKt`）。归档 sha256：zip `ca91e9fdcc8234b842f402c89dd18937bcf9ec7b3b194d4d5d92fb1f6aba8a3f`、msi `5e3d3bd7368955852141e815a9407ba8dbc0f29501119706d73e42a0bada32f5`（2026-11-09 19:25 换新，含 Fabric；上一版 zip `f366da71...de23be` / msi `bef0246b...b617a`）。

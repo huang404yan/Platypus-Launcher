@@ -109,7 +109,7 @@ MSYS_NO_PATHCONV=1 cmd.exe /c "D:\ruanjian\kaifa\qidongqigongju\gradle-9.9.0\bin
   - **64,712,812 字节**
   - **sha256 = `2d3e8fc9d44d3690620464f66ee0b68e89de5929120430e91d291be3a334d3f2`**
   - 这是**一键装闭环之前那一版**的构建产物（本次验收当时的记录，保留不删）。
-- 归档副本（**2026-11-09 16:43 已换新**）：`releases/preview/windows/Platypus-Launcher-0.8.0-preview.1-win-x64.msi`：64,970,860 B，sha256 `bef0246be60a98ba72f257b7d28a80b3a1e43829539203427e4e43ca869b617a`。上一次（15:36 那版，含设置页但不含断点续传）已移到 `dist/_old-releases/win-0909-1536/`。
+- 归档副本（**2026-11-09 16:43 换过，19:24 又换新为含 Fabric 那版**）：`releases/preview/windows/Platypus-Launcher-0.8.0-preview.1-win-x64.msi` 现为 **65,101,932 B**，sha256 `5e3d3bd7368955852141e815a9407ba8dbc0f29501119706d73e42a0bada32f5`（16:43 那版是 64,970,860 B / `bef0246b...b617a`）。15:36 那版（含设置页但不含断点续传）已移到 `dist/_old-releases/win-0909-1536/`。
   - 中间那版 64,815,212 B / sha256 `ed466ab324d693efe4ff9f60a89f3a7521b99287dbc5505c944ea4ce5fe92a1a`（14:57，含一键装闭环、不含设置页）已移到 `dist/_old-releases/win-0909-1506/`。
   - 旧副本 64,565,356 B / sha256 `0c234da25a8f3bb17c1aa635367e5381e4afd6712b51d9c65e7bde1f53b1731b` 早于「一键装闭环」代码（`0fdd97c`），包内不含 `OneClickInstaller.class` 与 `MojangJavaRuntimeInstaller.class`，已移到 `dist/_old-releases/win-0909/`。
   - 换包后的解包复核：解出 `Platypus Preview.exe` 597,504 B，sha256 `7f2ba938c55661e4bb98da02f6e85c936d78fded763931d08d5c217ed730a7ed`，与 app-image、免安装 zip 三处一致。
