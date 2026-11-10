@@ -112,6 +112,24 @@ object ModrinthMeta {
         return sb.toString()
     }
 
+    /**
+     * 「这些文件是哪个模组的哪个版本」——检查更新用的批量查询。
+     *
+     * Modrinth 收 `{"hashes": [...], "algorithm": "sha1"}`，返回一个以 sha1 为键的对象。
+     * 一次能问多少：官方文档没写死，实践中一两百个没问题；界面按 100 个一批发。
+     */
+    fun versionFilesUrl(): String = BASE_URL + "/version_files"
+
+    /** 用 project_id 批量换 slug / 标题（缺依赖与检查更新都要把 id 变成人话）。 */
+    fun projectsUrl(ids: List<String>): String {
+        val clean = ids.map { it.trim() }.filter { it.isNotEmpty() }.distinct()
+        return BASE_URL + "/projects?ids=" + encode("[" + clean.joinToString(",") { "\"" + it + "\"" } + "]")
+    }
+
+    /** 拿某个模组最新版本的查询串要带游戏版本与加载器，否则会挑到给别的版本编译的构建。 */
+    fun latestVersionsUrl(slug: String, gameVersion: String?, loader: LoaderKind): String =
+        versionsUrl(slug, gameVersion, loader)
+
     private val json = Json { ignoreUnknownKeys = true; isLenient = true }
 
     fun parseSearch(text: String): ModrinthParse<List<ModProject>> {
@@ -167,6 +185,60 @@ object ModrinthMeta {
         return ModrinthParse.Ok(versions)
     }
 
+
+    /**
+     * 解析 /version_files 的响应：以 sha1 为键的对象，缺的键就是 Modrinth 不认识这个文件。
+     *
+     * 一个 sha1 可能对上多个版本（不同加载器打成一样的包），这里取第一个 —— 检查更新只是
+     * 「有没有更新的」，不需要列出全部命中。
+     */
+    fun parseVersionFiles(text: String): ModrinthParse<Map<String, ModVersionLookup>> {
+        if (text.isBlank()) return ModrinthParse.Failure("反查结果是空的")
+        val root = runCatching { json.parseToJsonElement(text).jsonObject }.getOrNull()
+            ?: return ModrinthParse.Failure("反查结果不是合法 JSON")
+        val result = mutableMapOf<String, ModVersionLookup>()
+        for ((hash, element) in root) {
+            val obj = element as? JsonObject ?: continue
+            val projectId = stringOf(obj, "project_id") ?: continue
+            val files = (obj["files"] as? JsonArray)?.mapNotNull { it as? JsonObject }.orEmpty()
+            val file = files.firstOrNull { boolOf(it, "primary") == true } ?: files.firstOrNull()
+            result[hash.lowercase()] = ModVersionLookup(
+                sha1 = hash.lowercase(),
+                projectId = projectId,
+                versionNumber = stringOf(obj, "version_number") ?: "",
+                fileName = file?.let { stringOf(it, "filename") }.orEmpty(),
+                gameVersions = stringListOf(obj, "game_versions"),
+                loaders = stringListOf(obj, "loaders"),
+            )
+        }
+        return ModrinthParse.Ok(result)
+    }
+
+    /** 解析 /projects?ids=[...]：返回 project_id → 项目。只有检查更新与缺依赖清单会用到。 */
+    fun parseProjects(text: String): ModrinthParse<Map<String, ModProject>> {
+        if (text.isBlank()) return ModrinthParse.Failure("项目列表是空的")
+        val array = runCatching { json.parseToJsonElement(text).jsonArray }.getOrNull()
+            ?: return ModrinthParse.Failure("项目列表不是合法 JSON")
+        val result = mutableMapOf<String, ModProject>()
+        for (element in array) {
+            val obj = element as? JsonObject ?: continue
+            val slug = stringOf(obj, "slug") ?: continue
+            val id = stringOf(obj, "id") ?: stringOf(obj, "project_id") ?: continue
+            result[id] = ModProject(
+                slug = slug,
+                title = stringOf(obj, "title") ?: slug,
+                description = stringOf(obj, "description").orEmpty(),
+                author = null,
+                downloads = longOf(obj, "downloads") ?: 0L,
+                projectId = id,
+            )
+        }
+        return ModrinthParse.Ok(result)
+    }
+
+    private fun stringListOf(obj: JsonObject, key: String): List<String> =
+        (obj[key] as? JsonArray)?.mapNotNull { (it as? JsonPrimitive)?.content }.orEmpty()
+
     /**
      * 从版本列表里挑一个该装的：优先正式版，其次 beta，最后 alpha。
      * Modrinth 返回顺序是新的在前，所以同类里取第一个即可。
@@ -219,3 +291,18 @@ object ModrinthMeta {
         return if (rounded % 1.0 == 0.0) rounded.toLong().toString() else rounded.toString()
     }
 }
+
+/**
+ * 一个「按 sha1 反查出来的版本」：本地这个文件在 Modrinth 上是哪个模组的哪个版本。
+ *
+ * 比 [ModVersionFile] 多了 [projectId] —— 检查更新时要靠它去问「这个模组最新是什么版本」。
+ */
+data class ModVersionLookup(
+    val sha1: String,
+    val projectId: String,
+    val versionNumber: String,
+    val fileName: String,
+    val gameVersions: List<String> = emptyList(),
+    val loaders: List<String> = emptyList(),
+)
+
