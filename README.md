@@ -86,6 +86,8 @@ Windows 下也可以用 `gradlew.bat`。首次构建会下载约 300 MB 依赖�
 - `docs/21-gongneng-xifen.md`：**功能细分与补全路线**（对照 PCL 自编版逐页列出差距、「有了但不好用」八条实证、补全 P1–P7 / 细分 S1–S6 / 美化 U1–U4 三阶段）
 - `docs/22-shili-geli-yu-xiangqing.md`：**实例真隔离与实例详情页**（`--gameDir` 指实例目录、libraries/assets 仍共享、旧共享 mods 复制不移动、`isolationSmoke` 的五条磁盘判据）
 - `docs/23-mods-manage.md`：**模组管理与检查更新**（启用停用改名规则、sha1 反查 Modrinth、四类更新结论、加载器跟随实例）
+- `docs/24-android-instance-detail.md`：**安卓实例详情页**（复用 `InstanceDetailsLoader` 做磁盘统计、桌面独有的探测 Java/打开目录换成复制路径、输入合并规则抽成 core 的 `InstanceEdits`）
+- `docs/25-zhenghebao-daoru.md`：**整合包导入**（`.mrpack` / MCBBS v2 先在 core 只读解析再导入、overrides 三层覆盖顺序、`safeRelativePath` 两层防越界、先装游戏再下包内文件的原因）
 
 ## 下载
 
@@ -120,7 +122,7 @@ M0（骨架）+ M1（实例扫描）+ M2（下载器）+ M3（**Windows 一键�
 
 **下载断点续传**：先写 `<文件>.part`，校验通过才转正；`.part` 有内容就发 `Range` 接着下，断网不清半成品，下次自动接上。进度条会额外显示「其中 N 个接着上次下（省了 M MB）」（`docs/14`）。
 
-单测 **299 例全过**（29 个测试类，`./gradlew :core:test`）。另有十一个无头冒烟任务（`e2eInstall` / `settingsSmoke` / `instanceFlowSmoke` / `resumeSmoke` / `deleteSmoke` / `fabricE2e` / `forgeE2e` / `neoForgeE2e` / `modsE2e` / `modUpdateE2e` / `isolationSmoke`），走的是界面按钮同一批函数；`resumeSmoke` / `fabricE2e` / `forgeE2e` / `neoForgeE2e` / `modsE2e` 需要联网，分别在空目录真装 Fabric、真跑 Forge 与 NeoForge 官方安装器、真从 Modrinth 下一个模组；`deleteSmoke` 在 `dist/_delete-smoke` 里全程造假数据，不碰真实 `.minecraft`。
+单测 **340 例全过**（32 个测试类，`./gradlew :core:test`）。另有十二个无头冒烟任务（`e2eInstall` / `settingsSmoke` / `instanceFlowSmoke` / `resumeSmoke` / `deleteSmoke` / `fabricE2e` / `modpackE2e` / `forgeE2e` / `neoForgeE2e` / `modsE2e` / `modUpdateE2e` / `isolationSmoke`），走的是界面按钮同一批函数；`resumeSmoke` / `fabricE2e` / `modpackE2e` / `forgeE2e` / `neoForgeE2e` / `modsE2e` 需要联网，分别在空目录真装 Fabric、真跑 Forge 与 NeoForge 官方安装器、真从 Modrinth 下模组、真把一个 `.mrpack` 从解析装到进主菜单；`deleteSmoke` 在 `dist/_delete-smoke` 里全程造假数据，不碰真实 `.minecraft`。
 
 **能装 Fabric 了**：下载页勾「顺带装 Fabric」→ 拉 meta.fabricmc.net 的 loader 列表（默认落在最新 stable）→ 装 profile json（只改 `id`，保留 `inheritsFrom`）→ 按 maven 坐标补全 8 个库的地址并下载 → 登记成 `1.20.1-fabric-0.20.1` 这样的实例。实测空目录全流程 4 分 29 秒进主菜单，日志首行 `Loading Minecraft 1.20.1 with Fabric Loader 0.20.1`（`docs/15`）。
 

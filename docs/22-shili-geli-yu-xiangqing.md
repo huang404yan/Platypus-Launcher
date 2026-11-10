@@ -195,7 +195,7 @@ gradle :app-desktop:isolationSmoke -PisoDir=dist/_test-mc/_nf1211 -PisoInstance=
 | `InstanceDetailsTest` | 6 | 读得出 mainClass 与 Java 版本 / 实例目录就是游戏目录 / 八个目录的件数与体积 / 没有 json 时给警告不抛异常 / json 坏了也只是警告 / 带引号的目录 |
 | `InstanceModsTest` | 11 | 实例 mods 在实例目录下 / 两个实例互不可见 / 只看得到自己的模组 / 认得出旧共享 mods / 没有旧的不误报 / 非标准布局时两者重合 / 搬是复制源文件还在 / 带上停用的模组 / 同名默认不覆盖 / 要求时覆盖 / 没有旧 mods 时报错 |
 
-全量 `:core:test`：**27 个测试类 / 272 例 / failures 0 / errors 0 / skipped 0**。
+全量 `:core:test`：**27 个测试类 / 272 例 / failures 0 / errors 0 / skipped 0**（当时的数字；写完本文后又加了三轮测试，现为 32 类 / 340 例）。
 
 ## 已知取舍
 

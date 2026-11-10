@@ -175,7 +175,7 @@ Android 的 class 都编进 dex，`jar tf` 只能看到 12 个 `classes*.dex`，
 | 启动（应用内 JVM + 图形转译） | 不存在，属 `runtime-android` 模块，即 `docs/11` 的 S1 实验 |
 | 安卓端单测 | 没有。安卓逻辑都在 composable 里，能测的部分（`LanDiscovery` / `ModInstaller` / `ModrinthMeta`）已经在 `core` 的 245 例里覆盖 |
 | 组播锁的真实效果 | **未验证**。代码按 Android 官方要求拿了锁，但没有设备证明「不拿锁收不到、拿了能收到」 |
-| 模组页的本地停用/启用 | 桌面也没有，只看不做：`.jar.disabled` 会列出来标「停用」，但没有开关去改后缀 |
+| 模组页的本地停用/启用 | **已补**（2026-11-10，`docs/23-mods-manage.md`）：勾选框一次点击改名，删除与检查更新也补齐了。安卓端编译通过、**无设备验证** |
 
 ## 9 · 下次接手先看这里
 
