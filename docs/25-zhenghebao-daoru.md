@@ -208,3 +208,22 @@ RESULT menuReached=true launchMs=10165
 ```
 
 **这不是导入器的缺陷**——真实整合包的 `files[]` 里会把依赖一起列出来，是我的验收包只放了一个模组。修法是把 fabric-api 也写进 `files[]`，顺带把「多文件包」这条路径也覆盖了（原来的断言 `fileCount == 1` 改成 `== 2`）。这件事值得记一笔，因为它说明「装完能启动」这类验收必须真启动，光比对文件落地是发现不了依赖缺失的。
+
+### 8.4 界面入口点不出来（已修）
+
+单测与无头 e2e 都过了，界面上却看不到导入入口。原因不在导入器，在下载页整页布局：`ui/src/jvmMain/kotlin/io/github/huang404yan/platypus/ui/DownloadsPage.kt` 的根 `Column` 只有 `Modifier.fillMaxSize()`，**没有 `verticalScroll`**。版本列表上方还压着目标目录、版本号、Fabric / Forge / NeoForge 三行开关，1200x900 的默认窗口下版本列表只露出一行，而 `ModpackSection` 在列表正下方——终点压根滚不到，功能等于不存在。
+
+修法：
+
+```kotlin
+Column(
+    Modifier.fillMaxSize().verticalScroll(rememberScrollState()),
+    verticalArrangement = Arrangement.spacedBy(10.dp),
+)
+```
+
+并补 `androidx.compose.foundation.rememberScrollState` / `androidx.compose.foundation.verticalScroll` 两个 import（写法照抄 `About.kt:28` 与 `SettingsPage.kt:172`）。
+
+验证：`:ui:compileKotlinJvm -PskipWix` 退出码 0；`:app-desktop:run -PskipWix` 起界面后用 `dist/_wheel.ps1` 在窗口内滚 5 格，看到版本列表（26.2 / 26.1.2 / 26.1.1 / 26.1）与完整的「导入整合包 支持 Modrinth（.mrpack）与 MCBBS v2 [选择文件...]」卡片；再滚 4 格看到 1.21.11 / 1.21.10。滚动生效。
+
+**教训**：Compose 桌面端没有隐式滚动，`LazyColumn` 里的列表能滚不代表外层 `Column` 能滚。凡是在已有页面下方追加一块新功能，都要先确认外层容器可滚——否则单测、e2e、编译全绿，用户仍然看不到。
