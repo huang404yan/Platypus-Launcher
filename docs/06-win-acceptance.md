@@ -263,7 +263,7 @@ MSYS_NO_PATHCONV=1 cmd.exe /c "D:\ruanjian\kaifa\qidongqigongju\gradle-9.9.0\bin
 
 ### F1（low，既有问题，非本次改动引入）版本号在 androidApp 里硬编码了一份
 
-- 位置：`androidApp/build.gradle.kts:19` `versionName = "0.8.0-preview.3"`（versionCode 80003）
+- 位置：`androidApp/build.gradle.kts:19` `versionName = "0.8.0-preview.4"`（versionCode 80004）
 - 现状：根 `build.gradle.kts:15` 是版本真源，androidApp 又写了同一份字面量。这次两者一致（所以构建没炸），但下次只改根版本就会不一致。文件本身带 `check(applicationId == expectedId)` 护栏，会对「包名与版本通道不符」报错，但**不会**发现「versionName 落后于根 version」。
 - 该行来自提交 `9fa2168`，**不是**本任务或 t2~t5 引入。
 - 建议（未实施）：`versionName = rootProject.version.toString()`，或加一条 `check(versionName == rootProject.version.toString())`。

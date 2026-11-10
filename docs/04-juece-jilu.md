@@ -70,7 +70,7 @@
 - 理由：渠道越多，版本矩阵与用户反馈越混乱；「孵化」既对应鸭嘴兽的卵生设定，也点明这是未定型的预览线。
 - 标识：Android applicationId 两条线各用独立包名（正式版 `.launcher`、孵化版 `.launcher.preview`）——理由见下方 D11；桌面命令行 `platypus-launcher` / `platypus-launcher-preview`；Linux 桌面文件 `platypus.desktop` / `platypus-preview.desktop`；安装包命名如 `Platypus-Launcher-0.8.0-preview.3-win-x64.msi`。
 - 版本号：正式版从 1.0.0 起按语义化进位；孵化版为 `0.x-preview.N`。
-- 当前落点：仓库现处 0.8.0-preview.3（孵化线），正式版 1.0.0 待启动链路跑通后再立。
+- 当前落点：仓库现处 0.8.0-preview.4（孵化线），正式版 1.0.0 待启动链路跑通后再立。
 
 ### D11 Android 两条线各用独立包名（2026-11-08）
 
