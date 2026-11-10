@@ -106,7 +106,7 @@ releases/preview/{android,windows,linux}/   Platypus Preview 孵化版
 
 ## 状态
 
-M0（骨架）+ M1（实例扫描）+ M2（下载器）+ M3（**Windows 一键装闭环**）已完成，当前版本 **0.8.0-preview.3**（孵化线）。
+M0（骨架）+ M1（实例扫描）+ M2（下载器）+ M3（**Windows 一键装闭环**）+ M4（**整合包导入**）已完成，当前版本 **0.8.0-preview.4**（孵化线）。
 
 **Windows 端已经能双击玩起来**：选版本 → 下载（客户端 jar / libraries / assets）→ 缺 Java 自动从 Mojang 官方运行时清单补 → 登记成实例 → 启动进主菜单，全程不需要人替启动器干活。实例内存可在启动页改（512–32768 MB）。
 
