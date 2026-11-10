@@ -59,7 +59,7 @@ facets 是**三层数组**：层内 OR、层间 AND。写成一层就退化成 O
 
 版本挑选顺序：`release` → `beta` → 第一个。不按发布日期排——Modrinth 返回的顺序已经是它自己的优先级。
 
-## 三、编排（`ui/.../ui/download/ModInstaller.kt`）
+## 三、编排（`core/.../core/mods/ModInstaller.kt`）
 
 三步：`VERSIONS`（查询版本）→ `DOWNLOAD`（下载模组）→ `VERIFY`（校验文件）。
 

@@ -93,8 +93,8 @@ Exception in thread "main" java.lang.module.ResolutionException: Module minecraf
 | --- | --- | --- |
 | core | `core/src/main/kotlin/io/github/huang404yan/platypus/core/loader/ForgeMeta.kt` | 纯逻辑：promotions 解析、安装器坐标、`versionId`、`displayName`、从 id 反推 forge 版本、最小 `launcher_profiles.json` 常量 |
 | core 测试 | `core/src/test/kotlin/.../core/loader/ForgeMetaTest.kt` | 10 例，含 1.20.1 / 1.20.4 / 1.20.6 / 1.7.10 四个真实响应夹具 |
-| ui | `ui/src/jvmMain/kotlin/io/github/huang404yan/platypus/ui/download/ForgeInstaller.kt` | 编排：查版本 → 下安装器 → 备档案 → 起子进程 → 校验 json → 补 client jar |
-| ui | `.../ui/download/OneClickInstaller.kt` | `LoaderChoice` 加 `Forge` 分支，与 Fabric 共用同一套五步流程 |
+| core | `core/src/main/kotlin/io/github/huang404yan/platypus/core/install/ForgeInstaller.kt` | 编排：查版本 → 下安装器 → 备档案 → 起子进程 → 校验 json → 补 client jar |
+| core | `.../core/install/OneClickInstaller.kt` | `LoaderChoice` 加 `Forge` 分支，与 Fabric 共用同一套五步流程 |
 | ui | `.../ui/DownloadsPage.kt` | 新增 `ForgeRow`，与 `FabricRow` 共用抽出来的 `LoaderPickerRow` |
 | 验收 | `app-desktop/src/test/.../desktop/ForgeE2e.kt` | 无头全流程，退出码与 `FabricE2e` 同义 |
 

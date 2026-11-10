@@ -161,8 +161,8 @@ GET https://meta.fabricmc.net/v2/versions/loader/1.20.1/0.20.1/profile/json
 | core（纯 Kotlin，无网络） | `core/.../core/loader/FabricMeta.kt`（~300 行） | URL 拼装、版本号命名与反解、`FabricParse` 结果壳、loader 列表/profile 解析、`FabricFiles.writeProfile`、`FabricLibraries` 补 url + `plan` |
 | core 改 | `core/.../core/version/VersionMeta.kt:117-126` | `Library` 增加平铺字段 `url/sha1/size/md5`，**全部带默认值**，Mojang json 的反序列化不受影响 |
 | core 改 | `core/.../core/instance/InstanceScanner.kt:101` | 认 `1.20.1-fabric-x.y.z` 这种版本号 |
-| ui（联网与编排） | `ui/.../ui/download/FabricInstaller.kt`（222 行） | `listLoaders` / `install` / `installedLoaders` / `register`；`FabricStep` 四步 + `FabricProgress` + `FabricInstallException` |
-| ui 改 | `ui/.../ui/download/OneClickInstaller.kt` | 新增 `sealed interface LoaderChoice { Vanilla, Fabric(loaderVersion) }`；`InstallStep.LOADER_INSTALL`；`InstallOutcome.fabric` |
+| core（联网与编排） | `core/.../core/install/FabricInstaller.kt`（235 行） | `listLoaders` / `install` / `installedLoaders` / `register`；`FabricStep` 四步 + `FabricProgress` + `FabricInstallException` |
+| core 改 | `core/.../core/install/OneClickInstaller.kt` | 新增 `sealed interface LoaderChoice { Vanilla, Fabric(loaderVersion) }`；`InstallStep.LOADER_INSTALL`；`InstallOutcome.fabric` |
 | ui 改 | `ui/.../ui/DownloadsPage.kt` | `FabricRow`（勾选 + loader 列表 + stable/beta 标记）、`refreshLoaders`、按钮文案随勾选变 |
 | ui 改 | `ui/.../ui/InstancePage.kt:810` | `describeStep` 补 `LOADER_INSTALL` 分支（`when` 必须穷尽） |
 
@@ -414,7 +414,7 @@ MSYS_NO_PATHCONV=1 cmd.exe /c "D:\ruanjian\kaifa\qidongqigongju\gradle-9.9.0\bin
 | sha1 | `GET <jar url>.sha1` | maven 的标准附属文件。纯文本 40 位十六进制；有的仓库会跟一个文件名，所以按空白切第一段再校验字符集 |
 | 体积 | `HEAD` 读 `Content-Length` | 被拒或不给长度时退化成 `GET` + `Range: bytes=0-0`，从 `Content-Range` 的 `bytes 0-0/<总长>` 里取 |
 
-调用点在 `FabricInstaller.install`（`ui/.../ui/download/FabricInstaller.kt:95`）：
+调用点在 `FabricInstaller.install`（`core/.../core/install/FabricInstaller.kt:95`）：
 
 ```kotlin
 val checksummed = RemoteChecksums().enrichWithStats(planned)

@@ -28,7 +28,7 @@
 | `core/src/main/kotlin/io/github/huang404yan/platypus/core/runtime/JavaRuntimeManifest.kt` | 纯 Kotlin：解析 Mojang 官方 runtime 索引与单组件 manifest，产出「要建哪些目录、要下哪些文件、java 落在哪」的 [`JavaRuntimePlan`]。只认 `downloads.raw`（见下） |
 | `core/src/main/kotlin/io/github/huang404yan/platypus/core/instance/JsonInstanceRepository.kt` | `InstanceRepository` 的文件实现：单个 `<gameRoot>/platypus/instances.json`，Mutex 串行，写走「临时文件 + 改名」 |
 | `app-desktop/src/main/kotlin/io/github/huang404yan/platypus/desktop/runtime/MojangJavaRuntimeInstaller.kt` | 真正干活的下载器：拉索引 → 选组件 → 拉 manifest → 建目录 → `HttpDownloader` 按 sha1 下载 → 校验 `bin/java.exe` 存在 |
-| `ui/src/jvmMain/kotlin/io/github/huang404yan/platypus/ui/download/OneClickInstaller.kt` | 五步流水线本体：[PLANNING → DOWNLOADING → JAVA_CHECK → JAVA_INSTALL → REGISTERING → DONE]，任何一步失败都抛带 `step` 的 `InstallStepException` |
+| `core/src/main/kotlin/io/github/huang404yan/platypus/core/install/OneClickInstaller.kt` | 五步流水线本体：[PLANNING → DOWNLOADING → JAVA_CHECK → JAVA_INSTALL → REGISTERING → DONE]，任何一步失败都抛带 `step` 的 `InstallStepException` |
 | `app-desktop/src/test/kotlin/io/github/huang404yan/platypus/desktop/E2eInstall.kt` | 开发期无头验收驱动（test 源集，不进发行包），见第三节 |
 | `core/src/test/.../instance/InstanceRepositoryTest.kt`、`core/src/test/.../runtime/JavaRuntimeManifestTest.kt` | 11 个新单测 |
 
@@ -40,7 +40,7 @@
 | `core/.../core/runtime/JavaRuntime.kt` | `JavaRuntimeService` 新增 `ensureRuntime(major, component, onProgress)`，默认实现退回 `ensure`。多带一个 `component` 是因为主版本号只是投影：Mojang 清单里 `java-runtime-beta` 与 `java-runtime-gamma` **实测都是 17.0.15** |
 | `app-desktop/.../runtime/DesktopJavaRuntimeService.kt` | `ensureRuntime` 现在会真的下：探测命中直接返回，否则 `MojangJavaRuntimeInstaller(gameRoot).ensure(...)`；装完 `probe()` 拿 vendor，探不动就用文件路径兜底。另加构造参数 `scanGlobalLaunchers: Boolean = true`（第 46 行） |
 | `app-desktop/.../desktop/DesktopServices.kt` | `create(gameRoot)` 委托 `create(gameRoot, instanceIndex)`；装配 `JsonInstanceRepository`，索引落在 gameRoot 下（无 gameRoot 时退 `<user.home>/.platypus`） |
-| `ui/.../ui/download/VanillaInstaller.kt` | `InstallPlan` 多带 `gameVersion` / `javaMajorVersion` / `javaComponent`，由版本 json 的 `javaVersion` 填，缺失时按 `GameJavaRules.requiredMajor` 兜底 |
+| `core/.../core/install/VanillaInstaller.kt` | `InstallPlan` 多带 `gameVersion` / `javaMajorVersion` / `javaComponent`，由版本 json 的 `javaVersion` 填，缺失时按 `GameJavaRules.requiredMajor` 兜底 |
 | `ui/.../ui/DownloadsPage.kt` | 改成「一键安装」：五步清单 + 进度条 + 速度 + 已用时 + 失败定位到具体步骤 + 完成后「去启动」卡片；可取消（已下文件不丢） |
 | `ui/.../ui/LaunchPage.kt` | 加内存输入框 + 「保存到实例」；启动前先 `saveMemory()` 再 `launchGame()`；「自动补 Java N」按钮走 `ensureRuntime(major, javaComponentOf(instance))` |
 | `ui/.../ui/App.kt` | `Page.DOWNLOAD` 的 `onInstalled` 直接跳启动页；实例页合并「登记的」与「扫描到的」，卡片显示内存与登记状态 |

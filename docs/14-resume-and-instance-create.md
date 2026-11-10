@@ -56,7 +56,7 @@ val resumedBytes: Long = 0L,
 
 它们是 `completedFiles` / `completedBytes` 的**子集**，不额外累加，语义是「其中有多少是接着上次没下完的部分」。`HttpDownloader` 里用 `AtomicInteger` / `AtomicLong` 统计，只有成功且 `outcome.resumedBytes > 0` 才计入。
 
-界面在 `ui/.../ui/download/OneClickInstaller.kt:100-102` 把它翻成人话：进度文案追加「，其中 N 个接着上次下（省了 M MB）」。用户一眼能看出这次不是从头再来。
+界面在 `core/.../core/install/OneClickInstaller.kt:144-152` 把它翻成人话：进度文案追加「，其中 N 个接着上次下（省了 M MB）」。用户一眼能看出这次不是从头再来。
 
 ### 测试
 
