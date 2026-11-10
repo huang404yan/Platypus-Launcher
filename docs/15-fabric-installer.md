@@ -357,10 +357,11 @@ com.mojang.authlib.exceptions.InvalidCredentialsException: Status: 401
 ## 九、还没做到的
 
 1. **Forge / NeoForge 不在这轮**。`LoaderChoice` 已经留了位置（`OneClickInstaller.kt:65`），Forge 需要额外跑 installer jar（`--installClient` 或新版 `--install`），不是纯 HTTP 拼 url 能解决的。
-2. **进度条分母少算 2.5 MB**。`FabricLibraries.plan` 用 json 里的 `size` 求和，第 7/8 项没有 `size` 就按 0 算，所以进度会先到 100% 再停几秒。修法有两条（都未验证）：下完 6 个有 size 的之后发 HEAD 探 `Content-Length`；或者干脆用「文件数」当分母而不是字节数。
-3. **两个无 sha1 的库没做内容校验**。`intermediary-1.20.1.jar` 与 `fabric-loader-0.20.1.jar` 只能验「下完了、非空」。Fabric maven 提供 `<jar>.sha1` 附属文件，可以补一次 GET 拿 sha1——未实现。
-4. **没有真的装一个模组验证**。本文的通过标准是「进主菜单 + 加载器初始化」（任务书允许），没有下载任何 mod jar 放进 `mods/`。所以「`mods/` 目录能被扫描、模组能被加载」这一层**未验证**。
-5. **界面没做过真机点击测试**。`FabricRow` 的勾选框、loader 列表展开、按钮文案切换，只有编译通过 + 代码审查，**没有截图或人工点击记录**。无头 e2e 走的是 `OneClickInstaller.install(loader = LoaderChoice.Fabric(...))`，绕过了所有 Compose 代码。
+2. ~~**进度条分母少算 2.5 MB**~~ —— **已修（2026-11-10）**。见第十一节。
+3. ~~**两个无 sha1 的库没做内容校验**~~ —— **已修（2026-11-10）**。见第十一节。
+4. ~~**没有真的装一个模组验证**~~ —— **已补（2026-11-09，见 `docs/18-mods-page.md` 第五节）**。`:app-desktop:modsE2e` 从 Modrinth 真下 `sodium-fabric-0.5.13+mc1.20.1.jar`（971,552 B，sha1 校验通过）落进 `mods/`，再用 `ModScanner` 回读确认元数据（id=sodium / 0.5.13+mc1.20.1 / loader=FABRIC / enabled=true / problem=-）。**但那是独立的模组页验收，没有和 Fabric 安装串成一条「装 Fabric → 装模组 → 一起启动」的链路**，这一层仍算没串过。
+5. ~~**界面没做过真机点击测试**~~ —— **已补（2026-11-10）**。见下。
+5a. 界面实测（2026-11-10，`dist/_shots/v1-top.png` / `v2-typed.png` / `v3-loaderlist.png`）：窗口标题「鸭嘴兽·孵化版 0.8.0-preview.3」，1200x900。在版本号框键入 `1.20.1` 后三行加载器同时刷新成 `顺带装 Fabric  0.20.1（255 可选）` / `顺带装 Forge  47.4.28（官方安装器，约 3 分钟）` / `顺带装 NeoForge  这个版本没有 NeoForge`；点「选 loader 版本」展开成 `收起`，列表首项 0.20.1 标 `stable`，其后 0.20.0 / 0.19.5 / 0.19.4 标 `beta`。这也是当初那个「CancellationException 被当成拉取失败」bug 修好之后的确认——现在是真拉到了 255 个 loader 版本，不再是红字。
 6. **loader 列表没有缓存**。`LaunchedEffect(versionText)` 每换一次版本号就拉一次网（实测 1.2–2 秒），没有内存或磁盘缓存，离线时这一栏会显示「loader 列表拉取失败」。
 7. **没有「已装过这个 loader」的判断**。`FabricInstaller.installedLoaders()` 写好了但界面没用它——重复对同一个版本点「安装 Fabric」会重下一遍（文件会跳过，但列表会再拉一次）。
 8. **没有模组商店、没有光影（Iris/OptiFine）**。这些都不在本轮范围。
@@ -397,3 +398,60 @@ MSYS_NO_PATHCONV=1 cmd.exe /c "D:\ruanjian\kaifa\qidongqigongju\gradle-9.9.0\bin
 ```
 
 退出码：`0` 进主菜单；`2` 安装失败；`3` 启动失败；`4` 超时未进主菜单；`5` `skipOrig` 但缺原版 jar；`6` `skipOrig` 但本机没有 Java 17。
+
+---
+
+## 十一、补齐 sha1 与进度分母（2026-11-10）
+
+第九节第 2、3 条在这个日期修掉了，用的就是当初写的两条修法里的第一条。
+
+### 11.1 怎么做的
+
+新增 `core/.../core/download/RemoteChecksums.kt`（158 行），两条通道：
+
+| 要什么 | 怎么拿 | 说明 |
+| --- | --- | --- |
+| sha1 | `GET <jar url>.sha1` | maven 的标准附属文件。纯文本 40 位十六进制；有的仓库会跟一个文件名，所以按空白切第一段再校验字符集 |
+| 体积 | `HEAD` 读 `Content-Length` | 被拒或不给长度时退化成 `GET` + `Range: bytes=0-0`，从 `Content-Range` 的 `bytes 0-0/<总长>` 里取 |
+
+调用点在 `FabricInstaller.install`（`ui/.../ui/download/FabricInstaller.kt:95`）：
+
+```kotlin
+val checksummed = RemoteChecksums().enrichWithStats(planned)
+```
+
+`enrichWithStats` 只对**真正缺项**发请求——Mojang 的库自带 sha1 与 size，一个请求都不发；Fabric 那 8 个库里只有第 7、8 项（`intermediary`、`fabric-loader`）缺，所以只发 4 个请求（2 个 `.sha1` + 2 个 `HEAD`）。各条目并发跑，单个失败只保留原值，**不让整个安装失败**。
+
+返回值 `EnrichResult(items, filled, stillMissing)`：`filled` 决定界面要不要显示「补齐 N 个库的 sha1/体积」，`stillMissing` 是补完仍缺校验的条目数。
+
+### 11.2 实测（2026-11-10 10:46，`:app-desktop:fabricE2e -PskipOrig=true`）
+
+```
+FABRIC LIBRARIES 下载 8 个 Fabric 库（补齐 2 个库的 sha1/体积）
+FABRIC LIBRARIES 0.20.1 库 0/8 → 1/8 → 3/8 → 4/8 → 5/8 → 6/8 → 7/8 → 8/8
+FABRIC OK in 5068 ms; versionId=1.20.1-fabric-0.20.1 libs=8 bytes=4497555
+```
+
+关键在最后那个 `bytes=4497555`：**修之前这里是 1,935,310**（只算 json 里声明了 `size` 的 6 个库），现在是 8 个库的真实总和，和第一节表格里「真实落盘 4,497,555 B」一致。分母对上了，进度条不会再先冲 100% 再停几秒。
+
+`stillMissing` 这一轮是 0——8 个库全部带上了 sha1 与 size，下载器对每一个都会强校验并能在已存在时跳过。
+
+这条跑法用的是既有的 `dist/_fabric-e2e-run2`（8 个库都已落盘），所以 8/8 几乎瞬间走完；启动阶段因为 `-Pe2eTimeoutMs=1` 故意设成 1 毫秒而超时，不属于安装问题。要验「进主菜单」请照第九节末尾用默认超时重跑。
+
+### 11.3 单测
+
+`core/.../core/download/RemoteChecksumsTest.kt`，**11 例**，全部用本地 `com.sun.net.httpserver.HttpServer` 起假 maven，**不联网**：
+
+| 用例 | 验的什么 |
+| --- | --- |
+| `sha1 附属文件能拉下来并解析` | 正常 GET `<url>.sha1` |
+| `附属文件带文件名时也能解析出 sha1` | `<sha1>  <文件名>` 这种格式 |
+| `没有附属文件时返回 null 不抛异常` | 404 时安静返回 null |
+| `HEAD 能给体积` | `Content-Length` 正常 |
+| `HEAD 被拒时退化成 Range 探测体积` | HEAD 回 405 时走 `Range: bytes=0-0` |
+| `HEAD 与 Range 都不认时按整份 Content-Length 算体积` | 服务器无视 Range 回 200 |
+| `不存在的构件返回 -1` | 探测失败返回 -1 而不是抛 |
+| `只给缺的条目发请求 已带 sha1 与 size 的不动` | 请求计数，证明不会对 Mojang 的库白跑网络 |
+| `补不到时保留原值并计入 stillMissing` | 失败降级语义 |
+| `parseSha1 只认 40 位十六进制` | 长度 / 字符集 |
+| `空列表不炸` | 空输入 |
