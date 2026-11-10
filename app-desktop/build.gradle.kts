@@ -204,6 +204,40 @@ tasks.register<JavaExec>("fabricE2e") {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// 开发期整合包导入验收（需要联网）
+//
+// 现场按 mrpack 规范造一个真包（含两层 overrides），走 ModpackImporter.import：
+// 解析 → 装原版 + Fabric（复用 OneClickInstaller）→ 下包内文件 → 解 overrides →
+// 登记实例 → 启动进主菜单。包内模组指向 Modrinth 上的真文件，sha1 真的会校验。
+//
+//   gradle :app-desktop:modpackE2e -PmodpackDir=dist/_modpack-e2e
+//
+// 退出码：0 通过 / 2 解析 / 3 导入 / 4 产物校验 / 5 没进主菜单。
+// ─────────────────────────────────────────────────────────────────────────────
+tasks.register<JavaExec>("modpackE2e") {
+    group = "verification"
+    description = "无头验收：造 mrpack → 导入 → 启动进主菜单（开发期用，需联网）"
+    dependsOn(tasks.named("testClasses"))
+    mainClass.set("io.github.huang404yan.platypus.desktop.ModpackE2eKt")
+    classpath = sourceSets["test"].runtimeClasspath
+    workingDir = rootProject.projectDir
+    jvmArgs("-Dfile.encoding=UTF-8")
+
+    argumentProviders.add(
+        CommandLineArgumentProvider {
+            val dir = providers.gradleProperty("modpackDir").orElse("dist/_modpack-e2e").get()
+            val packDir = providers.gradleProperty("modpackPackDir").orElse("dist/_modpack-e2e-packs").get()
+            val timeout = providers.gradleProperty("e2eTimeoutMs").orElse("300000").get()
+            listOf(
+                rootProject.file(dir).absolutePath,
+                rootProject.file(packDir).absolutePath,
+                timeout,
+            )
+        },
+    )
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // 开发期 Forge 一键装验收（需要联网）
 //
 // 与 fabricE2e 同形，只是把 LoaderChoice.Fabric 换成 LoaderChoice.Forge：

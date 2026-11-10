@@ -806,6 +806,16 @@ fun DownloadsPage(
             }
         }
 
+        // 整合包导入与一键装共用上面的「目标目录 / 默认内存」，但进度与步骤各自独立：
+        // 导入包含「下载包内文件」「解 overrides」两段，混进一键装的步骤列表会多出永远不会亮的灯。
+        ModpackSection(
+            enabled = !busy,
+            gameDir = gameDirText,
+            defaultMemoryMb = defaultMemoryMb,
+            backend = backend,
+            onImported = onInstalled,
+        )
+
         if (message.isNotBlank()) {
             DownloadHint(message, error = phase is InstallPhase.Failed)
         }
