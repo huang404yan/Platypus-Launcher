@@ -31,6 +31,8 @@ import io.github.huang404yan.platypus.core.instance.DirUsage
 import io.github.huang404yan.platypus.core.instance.Instance
 import io.github.huang404yan.platypus.core.instance.InstanceDetails
 import io.github.huang404yan.platypus.core.instance.InstanceDetailsLoader
+import io.github.huang404yan.platypus.core.instance.InstanceEditResult
+import io.github.huang404yan.platypus.core.instance.InstanceEdits
 import io.github.huang404yan.platypus.core.instance.formatBytes
 import io.github.huang404yan.platypus.core.runtime.GameJavaRules
 import io.github.huang404yan.platypus.core.runtime.JavaRuntime
@@ -88,19 +90,17 @@ internal fun InstanceDetailPanel(
             notice = "后端未装配：改不了实例设置。"
             return
         }
-        val parsed = memoryText.trim().toIntOrNull()
-        if (parsed == null) {
-            notice = "内存要填整数，单位 MB。"
-            return
+        // 输入合并规则在 core 的 InstanceEdits 里，安卓详情页用的是同一个函数：
+        // 两端写同一份 instances.json，规则分开写迟早会对不上。
+        val result = when (val edited = InstanceEdits.fromInput(instance, memoryText, jvmArgsText, javaPath)) {
+            is InstanceEditResult.Invalid -> {
+                notice = edited.message
+                return
+            }
+            is InstanceEditResult.Ok -> edited
         }
-        val memoryMb = Instance.clampMemoryMb(parsed)
-        val args = jvmArgsText.split('\n').map { it.trim() }.filter { it.isNotEmpty() }
-        val updated = instance.copy(
-            javaPath = javaPath.trim().ifBlank { null },
-            memoryMb = memoryMb,
-            extraJvmArgs = args,
-            registered = true,
-        )
+        val updated = result.instance
+        val memoryMb = updated.memoryMb
         saving = true
         scope.launch {
             val error = withContext(Dispatchers.IO) {
@@ -111,9 +111,23 @@ internal fun InstanceDetailPanel(
                 notice = "保存失败：" + (error.message ?: error.toString())
                 return@launch
             }
-            notice = "已保存：" + memoryMb + " MB" +
-                if (args.isEmpty()) "" else "，" + args.size + " 个 JVM 参数"
-            onNotice("已保存 " + instance.name + " 的设置。")
+            notice = if (result.memoryWasClamped) {
+                // 说清楚「你填的数没生效，是这个范围钳制的结果」，否则用户以为填的生效了
+                "已按允许范围（" + Instance.MIN_MEMORY_MB + "–" + Instance.MAX_MEMORY_MB + " MB）改成 " + memoryMb + " MB。"
+            } else {
+                InstanceEdits.savedMessage(result)
+            }
+            // 保存成功后调用方会立刻把详情页关掉（InstancePage 的 onNotice 里 detailKey = null），
+            // 上面那句 notice 用户根本来不及看见 —— 真机点过一次：填 99999 保存，界面直接跳回列表，
+            // 只看到 32768，不知道是自己填错还是被启动器截断了。所以回列表那句必须带同样的信息。
+            onNotice(
+                "已保存 " + instance.name + " 的设置。" +
+                    if (result.memoryWasClamped) {
+                        "内存超出允许范围（" + Instance.MIN_MEMORY_MB + "–" + Instance.MAX_MEMORY_MB + " MB），已改成 " + memoryMb + " MB。"
+                    } else {
+                        ""
+                    }
+            )
         }
     }
 

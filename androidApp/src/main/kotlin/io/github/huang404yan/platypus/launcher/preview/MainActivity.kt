@@ -55,8 +55,11 @@ import androidx.core.content.ContextCompat
 import io.github.huang404yan.platypus.core.Brand
 import io.github.huang404yan.platypus.core.instance.Instance
 import io.github.huang404yan.platypus.core.instance.InstanceScanner
+import io.github.huang404yan.platypus.core.instance.JsonInstanceRepository
 import io.github.huang404yan.platypus.core.instance.LoaderKind
 import io.github.huang404yan.platypus.core.instance.ScanResult
+import io.github.huang404yan.platypus.core.instance.instanceKey
+import io.github.huang404yan.platypus.core.instance.mergeInstances
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -193,20 +196,48 @@ private fun InstancePage() {
     var root by remember { mutableStateOf(defaultGameRoot()) }
     var result by remember { mutableStateOf<ScanResult?>(null) }
     var scanning by remember { mutableStateOf(false) }
+    var selected by remember { mutableStateOf<Instance?>(null) }
 
     fun scan() {
         val path = root.trim()
         if (path.isEmpty() || !granted) return
         scanning = true
         scope.launch {
-            val r = withContext(Dispatchers.IO) { InstanceScanner.scan(File(path)) }
+            val r = withContext(Dispatchers.IO) {
+                val dir = File(path)
+                // 扫描结果 + 本启动器登记过的实例合并：同一条目录以登记的那份为准，
+                // 这样改过的内存与 Java 路径不会在下次扫描时被打回默认值。
+                val registered = runCatching {
+                    JsonInstanceRepository(JsonInstanceRepository.defaultIndexFile(dir)).list()
+                }.getOrNull().orEmpty()
+                val scanned = InstanceScanner.scan(dir)
+                scanned.copy(instances = mergeInstances(registered, scanned.instances))
+            }
             result = r
             scanning = false
+            // 详情页开着时重扫，跟着刷成最新那份（否则保存完还显示旧值）
+            selected = selected?.let { old -> r.instances.firstOrNull { instanceKey(it) == instanceKey(old) } }
         }
     }
 
     LaunchedEffect(granted) {
         if (granted) scan()
+    }
+
+    val open = selected
+    if (open != null) {
+        InstanceDetailScreen(
+            instance = open,
+            gameRoot = root,
+            onBack = { selected = null },
+            onSaved = { saved ->
+                selected = saved
+                result = result?.let { r ->
+                    r.copy(instances = mergeInstances(listOf(saved), r.instances.filterNot { instanceKey(it) == instanceKey(saved) }))
+                }
+            },
+        )
+        return
     }
 
     Column(
@@ -215,7 +246,7 @@ private fun InstancePage() {
     ) {
         Text("实例", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
         Text(
-            "扫描手机上的游戏目录，把 versions/ 下的每个版本识别成实例。只读。",
+            "扫描手机上的游戏目录，把 versions/ 下的每个版本识别成实例。点一个看详情、改内存。",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -282,7 +313,9 @@ private fun InstancePage() {
                     )
                 } else {
                     LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        items(current.instances) { instance -> InstanceCard(instance) }
+                        items(current.instances) { instance ->
+                            InstanceCard(instance, onClick = { selected = instance })
+                        }
                     }
                 }
             }
@@ -291,9 +324,9 @@ private fun InstancePage() {
 }
 
 @Composable
-private fun InstanceCard(instance: Instance) {
+private fun InstanceCard(instance: Instance, onClick: () -> Unit) {
     Card(
-        Modifier.fillMaxWidth(),
+        Modifier.fillMaxWidth().clickable(onClick = onClick),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
     ) {
         Row(
