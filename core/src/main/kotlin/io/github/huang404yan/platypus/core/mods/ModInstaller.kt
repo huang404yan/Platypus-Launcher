@@ -121,6 +121,41 @@ object ModInstaller {
         )
     }
 
+    /**
+     * POST 一小段 JSON 并读回文本。
+     *
+     * 只有 /version_files 用它：Modrinth 的反查接口是 POST，且请求体就是一串 sha1，
+     * 用不到完整的序列化框架。响应体大小有限（只回命中的那些），30 秒读超时够。
+     */
+    internal fun postJson(url: String, body: String): String {
+        val connection = try {
+            @Suppress("DEPRECATION")
+            java.net.URL(url).openConnection() as java.net.HttpURLConnection
+        } catch (e: Exception) {
+            throw IOException("连不上 " + url + "：" + (e.message ?: e::class.simpleName))
+        }
+        return try {
+            connection.requestMethod = "POST"
+            connection.doOutput = true
+            connection.connectTimeout = 15_000
+            connection.readTimeout = 30_000
+            connection.instanceFollowRedirects = true
+            connection.setRequestProperty("User-Agent", ModrinthMeta.DEFAULT_USER_AGENT)
+            connection.setRequestProperty("Accept", "application/json")
+            connection.setRequestProperty("Content-Type", "application/json")
+            connection.outputStream.use { it.write(body.toByteArray(Charsets.UTF_8)) }
+            val code = connection.responseCode
+            if (code !in 200..299) throw IOException("Modrinth 返回 HTTP " + code + "：" + url)
+            connection.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
+        } catch (e: IOException) {
+            throw e
+        } catch (e: Exception) {
+            throw IOException("读 " + url + " 失败：" + (e.message ?: e::class.simpleName))
+        } finally {
+            connection.disconnect()
+        }
+    }
+
     internal fun fetchText(url: String): String {
         val connection = try {
             @Suppress("DEPRECATION")

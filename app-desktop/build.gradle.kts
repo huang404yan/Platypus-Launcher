@@ -308,6 +308,38 @@ tasks.register<JavaExec>("modsE2e") {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// 开发期 模组管理验收（P2，需要联网）：启用 / 停用 / 检查更新 / 删除 一圈真跑
+//
+//   gradle :app-desktop:modUpdateE2e -PupdDir=dist/_test-mc/_nf1211/versions/neoforge-21.1.265
+//          [-Pgv=1.21.1] [-PupdLoader=neoforge] [-PupdMod=iris]
+//
+// 默认装 iris：它有硬前置 Sodium，能顺手验证「缺前置」这条链路。
+// 跑完会把碰过的文件清干净，目录恢复原样。日志落在 dist/_e2e-logs/mod-update-e2e-*.log。
+// ─────────────────────────────────────────────────────────────────────────────
+tasks.register<JavaExec>("modUpdateE2e") {
+    group = "verification"
+    description = "无头验收：模组启用/停用/检查更新/删除（开发期用，需联网）"
+    dependsOn(tasks.named("testClasses"))
+    mainClass.set("io.github.huang404yan.platypus.desktop.ModUpdateE2eKt")
+    classpath = sourceSets["test"].runtimeClasspath
+    workingDir = rootProject.projectDir
+    jvmArgs("-Dfile.encoding=UTF-8")
+
+    argumentProviders.add(
+        CommandLineArgumentProvider {
+            val dir = providers.gradleProperty("updDir").orNull
+                ?: error("缺少 -PupdDir=<实例目录>（建议 dist/_test-mc/_nf1211/versions/neoforge-21.1.265）")
+            listOf(
+                rootProject.file(dir).absolutePath,
+                providers.gradleProperty("gv").orElse("1.21.1").get(),
+                providers.gradleProperty("updLoader").orElse("neoforge").get(),
+                providers.gradleProperty("updMod").orElse("iris").get(),
+            )
+        },
+    )
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // 实例隔离验收（P1）：证明游戏把存档 / 模组 / 日志写进实例自己的目录
 //
 //   gradle :app-desktop:isolationSmoke -PisoDir=dist/_test-mc/_nf1211 [-PisoInstance=neoforge-21.1.265]

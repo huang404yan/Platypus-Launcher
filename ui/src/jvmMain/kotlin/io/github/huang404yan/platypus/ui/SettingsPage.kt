@@ -34,6 +34,15 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
+/** 「启动」二级项的 id，与 Navigation.kt 里 PAGE_SUB_TABS 的定义对应。 */
+const val SETTINGS_TAB_LAUNCH = "launch"
+
+/** 「界面」二级项的 id。 */
+const val SETTINGS_TAB_UI = "ui"
+
+/** 「其他」二级项的 id。 */
+const val SETTINGS_TAB_OTHER = "other"
+
 /**
  * 设置页：启动器级别的三件事——离线用户名、默认游戏目录、默认内存。
  *
@@ -43,9 +52,21 @@ import kotlinx.coroutines.withContext
  *
  * 读写都走 [io.github.huang404yan.platypus.core.settings.SettingsRepository]，
  * 界面只管输入与提示，不碰文件。
+ *
+ * 二级导航把这一页按「改了会影响什么」拆开：启动（目录与内存）、界面（现在只有只读信息）、
+ * 其他（文件位置、上次保存、填回默认值）。以前三个卡片一屏到底，用户分不清
+ * 「默认内存」和「实例内存」不是一回事 —— 拆开后在「启动」里挨着目录放，
+ * 说明文字就能贴着控件讲清楚。
+ *
+ * 保存按钮不在 tab 里，而在这三层外面：三个 tab 改的是同一份 JSON，
+ * 分成三个保存按钮反而会出现「这个 tab 存了、那个没存」。
  */
 @Composable
-fun SettingsPage(backend: LauncherBackend?) {
+fun SettingsPage(
+    backend: LauncherBackend?,
+    /** [SETTINGS_TAB_LAUNCH] / [SETTINGS_TAB_UI] / [SETTINGS_TAB_OTHER]；由 App.kt 从侧边栏传进来。 */
+    subTab: String = SETTINGS_TAB_LAUNCH,
+) {
     if (backend == null) {
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text("设置", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
@@ -158,10 +179,58 @@ fun SettingsPage(backend: LauncherBackend?) {
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
 
+        when (subTab) {
+            SETTINGS_TAB_UI -> InterfaceTab()
+            SETTINGS_TAB_OTHER -> OtherTab(
+                loadedFrom = loadedFrom,
+                savedAt = savedAt,
+                loaded = loaded,
+                onResetDefaults = { resetDefaults() },
+            )
+            else -> LaunchTab(
+                username = username,
+                onUsernameChange = { username = it },
+                nameProblem = nameProblem,
+                gameRoot = gameRoot,
+                onGameRootChange = { gameRoot = it },
+                memoryText = memoryText,
+                onMemoryChange = { memoryText = it },
+                loaded = loaded,
+            )
+        }
+
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            Button(onClick = { save() }, enabled = loaded) { Text("保存") }
+            OutlinedButton(onClick = { resetDefaults() }, enabled = loaded) { Text("填回默认值") }
+        }
+
+        if (notice.isNotBlank()) {
+            Text(
+                notice,
+                style = MaterialTheme.typography.bodySmall,
+                color = if (noticeIsError) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
+            )
+        }
+    }
+}
+
+/** 「启动」：进游戏时会用到的那几项。 */
+@Composable
+private fun LaunchTab(
+    username: String,
+    onUsernameChange: (String) -> Unit,
+    nameProblem: String?,
+    gameRoot: String,
+    onGameRootChange: (String) -> Unit,
+    memoryText: String,
+    onMemoryChange: (String) -> Unit,
+    loaded: Boolean,
+) {
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         SettingCard("离线用户名", "进游戏时显示的名字。离线 UUID 由名字算出来，换名字等于换一个玩家身份。") {
             OutlinedTextField(
                 value = username,
-                onValueChange = { username = it },
+                onValueChange = onUsernameChange,
                 modifier = Modifier.fillMaxWidth(),
                 label = { Text("离线用户名") },
                 singleLine = true,
@@ -186,7 +255,7 @@ fun SettingsPage(backend: LauncherBackend?) {
         ) {
             OutlinedTextField(
                 value = gameRoot,
-                onValueChange = { gameRoot = it },
+                onValueChange = onGameRootChange,
                 modifier = Modifier.fillMaxWidth(),
                 label = { Text("游戏目录（.minecraft）") },
                 singleLine = true,
@@ -195,10 +264,14 @@ fun SettingsPage(backend: LauncherBackend?) {
             )
         }
 
-        SettingCard("新实例默认内存", "在下载页一键装完时会按这个值登记新实例。之后可以在启动页单独改。") {
+        SettingCard(
+            "新实例默认内存",
+            "在下载页一键装完时会按这个值登记新实例。之后可以在这个实例的「详情」里单独改 —— " +
+                "这里只是初值，改这里不会动已经建好的实例。",
+        ) {
             OutlinedTextField(
                 value = memoryText,
-                onValueChange = { memoryText = it },
+                onValueChange = onMemoryChange,
                 modifier = Modifier.fillMaxWidth(),
                 label = { Text("内存（MB）") },
                 singleLine = true,
@@ -213,35 +286,83 @@ fun SettingsPage(backend: LauncherBackend?) {
                 },
             )
         }
+    }
+}
 
-        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            Button(onClick = { save() }, enabled = loaded) { Text("保存") }
-            OutlinedButton(onClick = { resetDefaults() }, enabled = loaded) { Text("填回默认值") }
+/**
+ * 「界面」：现在全是只读信息。
+ *
+ * 没有真控件可放 —— 主题、字号、动画开关属于阶段三（美化 U1–U4），
+ * 与其在这里摆一排点不动的开关，不如把「当前是什么样、去哪儿改」讲清楚。
+ */
+@Composable
+private fun InterfaceTab() {
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        SettingCard("当前界面", "下面这些暂时不可调，阶段三会做成可选项。") {
+            Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                InfoLine("主题", "跟随界面的默认配色（紫调 Material 3），深浅色还没做")
+                InfoLine("字号", "Material 3 默认五档，未提供整体缩放")
+                InfoLine("导航", "左侧一级栏 + 选中项的二级项；二级项的选中状态随页面切换保留到本次运行结束")
+                InfoLine("窗口", "启动后可以随意拉伸；内容区按可用宽度自适应")
+            }
         }
-
-        if (notice.isNotBlank()) {
+        SettingCard("为什么这里是空的", "没做的设置项不摆控件。") {
             Text(
-                notice,
-                style = MaterialTheme.typography.bodySmall,
-                color = if (noticeIsError) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
-            )
-        }
-
-        if (loadedFrom.isNotBlank()) {
-            Text(
-                "设置文件：" + loadedFrom,
+                "往下要补的是：深浅色切换、整体字号、减少动画（无障碍）。" +
+                    "这些要么牵动整套配色，要么要逐个页面调，做在功能补齐之后才不会返工。",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
-        if (savedAt > 0L) {
+    }
+}
+
+/** 「其他」：文件在哪、上次什么时候存的、怎么恢复默认。 */
+@Composable
+private fun OtherTab(
+    loadedFrom: String,
+    savedAt: Long,
+    loaded: Boolean,
+    onResetDefaults: () -> Unit,
+) {
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        SettingCard("设置文件", "纯 JSON，可以直接用编辑器改；改坏了删掉它就会回到默认值。") {
             Text(
-                "上次保存：" + java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.getDefault())
-                    .format(java.util.Date(savedAt)),
+                if (loadedFrom.isBlank()) "还没读到路径（可能是后端把设置存在别处）。" else loadedFrom,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Text(
+                if (savedAt > 0L) {
+                    "上次保存：" + java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.getDefault())
+                        .format(java.util.Date(savedAt))
+                } else {
+                    "这次运行还没保存过。"
+                },
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
+        SettingCard("恢复默认值", "只是把输入框填回默认，要点「保存」才写进文件。") {
+            OutlinedButton(onClick = onResetDefaults, enabled = loaded) { Text("填回默认值") }
+        }
+    }
+}
+
+@Composable
+private fun InfoLine(label: String, value: String) {
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(
+            label,
+            style = MaterialTheme.typography.labelMedium,
+            fontWeight = FontWeight.SemiBold,
+            modifier = Modifier.padding(end = 2.dp),
+        )
+        Text(
+            value,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
     }
 }
 

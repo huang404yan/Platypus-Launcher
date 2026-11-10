@@ -18,6 +18,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -56,9 +57,20 @@ fun App(initialGameRoot: String? = null, backend: LauncherBackend? = null) {
         // 实例页点「去启动」时带上这个实例：只交一个 key，不把整个对象塞给启动页当长期状态。
         var focusKey by remember { mutableStateOf<String?>(null) }
 
+        // 每页选中了哪个二级项。存在这里而不是页面里：页面切走就被销毁了，
+        // 记在页面里的话，去下载页看一眼再回来，设置页会跳回第一个 tab。
+        val subSelection = remember { mutableStateMapOf<String, String>() }
+        fun subTabOf(target: Page): String =
+            subSelection[target.name] ?: defaultSubTab(target)
+
         LaunchedEffect(Unit) { println("[ui] initial page=$page") }
         Row(Modifier.fillMaxSize()) {
-            SideBar(current = page, onSelect = { page = it })
+            SideBar(
+                current = page,
+                currentSub = subTabOf(page),
+                onSelect = { page = it },
+                onSelectSub = { sub -> subSelection[page.name] = sub },
+            )
             Box(
                 Modifier.weight(1f).fillMaxHeight().padding(24.dp),
             ) {
@@ -69,9 +81,9 @@ fun App(initialGameRoot: String? = null, backend: LauncherBackend? = null) {
                         page = Page.LAUNCH
                     }
                     Page.DOWNLOAD -> DownloadsPage(initialGameRoot, backend) { page = Page.LAUNCH }
-                    Page.MODS -> ModsPage(initialGameRoot, backend)
+                    Page.MODS -> ModsPage(initialGameRoot, backend, subTabOf(Page.MODS))
                     Page.LINK -> LinkPage()
-                    Page.SETTINGS -> SettingsPage(backend)
+                    Page.SETTINGS -> SettingsPage(backend, subTabOf(Page.SETTINGS))
                     Page.ABOUT -> AboutPage()
                 }
             }
@@ -79,8 +91,20 @@ fun App(initialGameRoot: String? = null, backend: LauncherBackend? = null) {
     }
 }
 
+/**
+ * 左侧导航。
+ *
+ * 两级：一级项常驻，选中的那个下面展开它自己的二级项（PCL 的 PageSetupLeft 那种）。
+ * 只有选中项展开而不是全部展开，是因为七个一级项已经占掉大半屏高；全部展开会把
+ * 「更多」和「关于」挤到看不见的地方。
+ */
 @Composable
-private fun SideBar(current: Page, onSelect: (Page) -> Unit) {
+private fun SideBar(
+    current: Page,
+    currentSub: String,
+    onSelect: (Page) -> Unit,
+    onSelectSub: (String) -> Unit,
+) {
     Surface(
         modifier = Modifier.width(220.dp).fillMaxHeight(),
         color = MaterialTheme.colorScheme.surfaceVariant,
@@ -117,6 +141,30 @@ private fun SideBar(current: Page, onSelect: (Page) -> Unit) {
                         color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
+                if (selected) {
+                    PAGE_SUB_TABS[item].orEmpty().forEach { sub ->
+                        val active = sub.id == currentSub
+                        Row(
+                            Modifier
+                                .fillMaxWidth()
+                                .padding(start = 10.dp, top = 1.dp, bottom = 1.dp)
+                                .clickable { onSelectSub(sub.id) }
+                                .padding(horizontal = 10.dp, vertical = 7.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                "· " + sub.label,
+                                style = MaterialTheme.typography.bodySmall,
+                                fontWeight = if (active) FontWeight.SemiBold else FontWeight.Normal,
+                                color = if (active) {
+                                    MaterialTheme.colorScheme.primary
+                                } else {
+                                    MaterialTheme.colorScheme.onSurfaceVariant
+                                },
+                            )
+                        }
+                    }
+                }
             }
             Spacer(Modifier.weight(1f))
             Text(
@@ -132,5 +180,3 @@ private fun SideBar(current: Page, onSelect: (Page) -> Unit) {
         }
     }
 }
-
-

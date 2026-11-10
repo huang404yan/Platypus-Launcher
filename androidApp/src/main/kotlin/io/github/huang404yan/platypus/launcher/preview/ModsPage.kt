@@ -11,13 +11,16 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -37,9 +40,14 @@ import io.github.huang404yan.platypus.core.instance.instanceKey
 import io.github.huang404yan.platypus.core.mods.InstanceMods
 import io.github.huang404yan.platypus.core.mods.InstanceModsSnapshot
 import io.github.huang404yan.platypus.core.mods.ModEntry
+import io.github.huang404yan.platypus.core.mods.ModFileOps
 import io.github.huang404yan.platypus.core.mods.ModInstallProgress
 import io.github.huang404yan.platypus.core.mods.ModInstaller
 import io.github.huang404yan.platypus.core.mods.ModProject
+import io.github.huang404yan.platypus.core.mods.ModScanner
+import io.github.huang404yan.platypus.core.mods.ModUpdateChecker
+import io.github.huang404yan.platypus.core.mods.ModUpdateResult
+import io.github.huang404yan.platypus.core.mods.ModUpdateStatus
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -84,6 +92,21 @@ internal fun ModsPage() {
     var progress by remember { mutableStateOf<ModInstallProgress?>(null) }
     var installingSlug by remember { mutableStateOf("") }
 
+    // P2 的四件事，与桌面端一一对应：检查更新、更新单条、启用停用、删除
+    var updates by remember { mutableStateOf<List<ModUpdateResult>>(emptyList()) }
+    var checkingUpdates by remember { mutableStateOf(false) }
+    var updatingFile by remember { mutableStateOf("") }
+    var opError by remember { mutableStateOf("") }
+    var opNotice by remember { mutableStateOf("") }
+
+    /**
+     * 加载器跟着实例走：换了实例就把选择对齐到那个实例的加载器。
+     *
+     * 记 [loaderInstanceKey] 而不是每次 rescan 都覆盖，是因为用户手动轮换过加载器时，
+     * 刷一下列表不该把选择改回去。原版实例没有加载器，[loaderOf] 返回 null 时不动当前选择。
+     */
+    var loaderInstanceKey by remember { mutableStateOf("") }
+
     val current = instances.firstOrNull { instanceKey(it) == selectedKey }
 
     /** 扫游戏目录里的实例，尽量保住当前选择。 */
@@ -115,6 +138,12 @@ internal fun ModsPage() {
         if (target == null) {
             snapshot = null
             return
+        }
+        // 加载器跟着实例对齐，规则同桌面端：只在这个实例还没对齐过时动，别覆盖用户手选的
+        val key = instanceKey(target)
+        if (loaderInstanceKey != key) {
+            loaderInstanceKey = key
+            loaderOf(target.loader)?.let { loader = it }
         }
         scanning = true
         try {
@@ -223,6 +252,131 @@ internal fun ModsPage() {
         }
     }
 
+    /** 启用 / 停用：只改文件名，.jar ↔ .jar.disabled。改错了再点一次。 */
+    suspend fun toggleEnabled(entry: ModEntry, enabled: Boolean) {
+        val target = current ?: run {
+            opError = "先选一个实例。"
+            return
+        }
+        opNotice = ""
+        opError = ""
+        try {
+            val renamed = withContext(Dispatchers.IO) {
+                ModFileOps.setEnabled(ModScanner.modsDir(File(target.directory.trim().trim('"'))), entry.fileName, enabled)
+            }
+            opNotice = (if (enabled) "已启用 " else "已停用 ") + renamed.name
+            // 改名之后旧的选择与更新记录都对不上，重扫最省事
+            rescanMods()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            opError = e.message ?: e.toString()
+        }
+    }
+
+    /** 删一个模组。**不进回收站**，所以界面必须二次确认。 */
+    suspend fun deleteMod(entry: ModEntry) {
+        val target = current ?: run {
+            opError = "先选一个实例。"
+            return
+        }
+        opNotice = ""
+        opError = ""
+        try {
+            val removed = withContext(Dispatchers.IO) {
+                ModFileOps.delete(ModScanner.modsDir(File(target.directory.trim().trim('"'))), entry.fileName)
+            }
+            opNotice = if (removed) "已删除 " + entry.fileName else "文件本来就不在了：" + entry.fileName
+            updates = updates.filterNot { it.fileName == entry.fileName }
+            rescanMods()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            opError = e.message ?: e.toString()
+        }
+    }
+
+    /** 检查更新：本地 jar 的 sha1 一批问 Modrinth，按四类结论回填。 */
+    suspend fun checkUpdates() {
+        val target = current ?: run {
+            opError = "先选一个实例。"
+            return
+        }
+        if (gameVersion.isBlank()) {
+            opError = "先填游戏版本：不知道给哪个版本查更新，会把别的版本的包当成「最新」。"
+            return
+        }
+        checkingUpdates = true
+        opNotice = ""
+        opError = ""
+        try {
+            val found = withContext(Dispatchers.IO) {
+                ModUpdateChecker.check(
+                    modsDir = ModScanner.modsDir(File(target.directory.trim().trim('"'))),
+                    gameVersion = gameVersion.trim().ifBlank { null },
+                    loader = loader ?: LoaderKind.FABRIC,
+                ) { opNotice = it }
+            }
+            updates = found
+            val outdated = found.count { it.status == ModUpdateStatus.OUTDATED }
+            opNotice = if (found.isEmpty()) {
+                "没有可检查的 .jar（停用的模组不算）。"
+            } else {
+                "查了 " + found.size + " 个，可更新 " + outdated + " 个。"
+            }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            updates = emptyList()
+            opError = e.message ?: e.toString()
+        } finally {
+            checkingUpdates = false
+        }
+    }
+
+    /** 把一条 OUTDATED 换成新版本。旧文件先停用而不是删掉：新版有问题还能开回来。 */
+    suspend fun updateOne(result: ModUpdateResult) {
+        val target = current ?: return
+        val latest = result.latest ?: return
+        // 项目详情没查回来时 slug 退回 project_id —— Modrinth 两种都认
+        val slug = result.project?.slug ?: result.lookup?.projectId ?: return
+        updatingFile = result.fileName
+        opNotice = ""
+        opError = ""
+        try {
+            val installed = withContext(Dispatchers.IO) {
+                ModInstaller.installFile(File(target.directory.trim().trim('"')), slug, latest)
+            }
+            val modsDir = ModScanner.modsDir(File(target.directory.trim().trim('"')))
+            val disableNote = withContext(Dispatchers.IO) {
+                runCatching {
+                    // 新文件名与旧文件同名说明是同一个包，不需要停用
+                    if (installed.file.name == result.fileName) {
+                        null
+                    } else {
+                        ModFileOps.setEnabled(modsDir, result.fileName, false)
+                    }
+                }.fold(
+                    onSuccess = { renamed: File? ->
+                        if (renamed == null) "" else "旧版已停用（改名成 " + renamed.name + "），想回退就删掉新版再启用它。"
+                    },
+                    onFailure = { "旧版没停用：" + (it.message ?: "") },
+                )
+            }
+            opNotice = "已更新到 " + installed.version + "：" + installed.file.name + "。" + disableNote
+            updates = updates.map {
+                if (it.fileName == result.fileName) it.copy(lookup = it.lookup, latest = latest) else it
+            }
+            checkUpdates()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            opError = "更新失败：" + (e.message ?: e.toString())
+        } finally {
+            updatingFile = ""
+        }
+    }
+
     LaunchedEffect(Unit) {
         granted = hasFileAccess(context)
         if (granted) rescan()
@@ -298,9 +452,13 @@ internal fun ModsPage() {
                                     selectedKey = key
                                     // 换实例等于换游戏版本，之前带出来的版本要跟着换
                                     gameVersion = ""
+                                    loaderInstanceKey = ""
                                     results = emptyList()
                                     searched = false
                                     notice = ""
+                                    updates = emptyList()
+                                    opNotice = ""
+                                    opError = ""
                                     scope.launch { rescanMods() }
                                 },
                                 contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
@@ -409,17 +567,31 @@ internal fun ModsPage() {
         }
 
         item {
-            Text(
-                when {
-                    snap == null -> "先选一个实例。"
-                    snap.scan.exists ->
-                        "这个实例已装 " + snap.scan.totalCount + " 个（启用 " + snap.scan.mods.size +
-                            " · 停用 " + snap.scan.disabled.size + "）"
-                    else -> "这个实例还没有 mods/（装第一个时自动建）。"
-                },
-                style = MaterialTheme.typography.titleSmall,
-                fontWeight = FontWeight.SemiBold,
-            )
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    when {
+                        snap == null -> "先选一个实例。"
+                        snap.scan.exists ->
+                            "这个实例已装 " + snap.scan.totalCount + " 个（启用 " + snap.scan.mods.size +
+                                " · 停用 " + snap.scan.disabled.size + "）"
+                        else -> "这个实例还没有 mods/（装第一个时自动建）。"
+                    },
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.weight(1f),
+                )
+                if (snap != null) {
+                    OutlinedButton(
+                        onClick = { scope.launch { checkUpdates() } },
+                        enabled = !checkingUpdates && !scanning,
+                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                    ) { Text(if (checkingUpdates) "检查中…" else "检查更新", style = MaterialTheme.typography.labelSmall) }
+                }
+            }
         }
         if (snap != null) {
             item {
@@ -431,8 +603,26 @@ internal fun ModsPage() {
             }
         }
 
+        if (opError.isNotBlank()) {
+            item { Text(opError, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
+        }
+        if (opNotice.isNotBlank()) {
+            item { Text(opNotice, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+        }
+
         val installed = snap?.let { it.scan.mods + it.scan.disabled }.orEmpty()
-        items(installed, key = { it.path }) { entry -> InstalledModRow(entry) }
+        items(installed, key = { it.path }) { entry ->
+            val update = updates.firstOrNull { it.fileName == entry.fileName }
+            InstalledModRow(
+                entry = entry,
+                update = update,
+                busy = updatingFile.isNotBlank() || checkingUpdates,
+                updating = updatingFile == entry.fileName,
+                onToggleEnabled = { enabled -> scope.launch { toggleEnabled(entry, enabled) } },
+                onDelete = { scope.launch { deleteMod(entry) } },
+                onUpdate = { result -> scope.launch { updateOne(result) } },
+            )
+        }
 
         if (searched) {
             item {
@@ -461,12 +651,41 @@ private fun loaderLabel(kind: LoaderKind): String = when (kind) {
     else -> "不限"
 }
 
+/** 实例记着的加载器 → 搜索用的加载器。原版实例没有加载器，返回 null 表示不动当前选择。 */
+private fun loaderOf(kind: LoaderKind): LoaderKind? = when (kind) {
+    LoaderKind.VANILLA, LoaderKind.OTHER -> null
+    else -> kind
+}
+
+/**
+ * 一条已装模组。
+ *
+ * 勾选框就是启用/停用（.jar ↔ .jar.disabled），删除要二次确认——模组文件不进回收站，
+ * 点一下真没了。这两件事以前在手机上只能靠用户自己开文件管理器做。
+ */
 @Composable
-private fun InstalledModRow(entry: ModEntry) {
+private fun InstalledModRow(
+    entry: ModEntry,
+    update: ModUpdateResult?,
+    busy: Boolean,
+    updating: Boolean,
+    onToggleEnabled: (Boolean) -> Unit,
+    onDelete: () -> Unit,
+    onUpdate: (ModUpdateResult) -> Unit,
+) {
+    var confirmDelete by remember { mutableStateOf(false) }
     Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
         Column(Modifier.fillMaxWidth().padding(10.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Checkbox(checked = entry.enabled, onCheckedChange = { onToggleEnabled(it) })
                 Text(entry.title, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
+                if (update != null && update.status == ModUpdateStatus.OUTDATED) {
+                    Text(
+                        "有新版本 " + (update.latestVersion ?: ""),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                }
                 Text(
                     if (entry.enabled) fmtBytes(entry.sizeBytes) else "停用",
                     style = MaterialTheme.typography.labelSmall,
@@ -477,6 +696,12 @@ private fun InstalledModRow(entry: ModEntry) {
                 buildString {
                     append(entry.fileName)
                     entry.loader?.let { append(" · ").append(loaderLabel(it)) }
+                    if (!entry.enabled) append(" · 停用中（不会加载）")
+                    update?.let {
+                        if (it.status == ModUpdateStatus.UP_TO_DATE) append(" · 已是最新 ").append(it.currentVersion)
+                        if (it.status == ModUpdateStatus.NOT_ON_MODRINTH) append(" · Modrinth 不认识这个文件")
+                        if (it.status == ModUpdateStatus.NO_COMPATIBLE_VERSION) append(" · 没有适配当前版本的更新")
+                    }
                 },
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -484,7 +709,38 @@ private fun InstalledModRow(entry: ModEntry) {
             entry.problem?.let {
                 Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error)
             }
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("", modifier = Modifier.weight(1f))
+                if (update != null && update.status == ModUpdateStatus.OUTDATED) {
+                    OutlinedButton(onClick = { onUpdate(update) }, enabled = !busy) {
+                        Text(if (updating) "更新中…" else "更新到 " + (update.latestVersion ?: "新版"))
+                    }
+                }
+                TextButton(onClick = { confirmDelete = true }, enabled = !confirmDelete) { Text("删除") }
+            }
         }
+    }
+    if (confirmDelete) {
+        AlertDialog(
+            onDismissRequest = { confirmDelete = false },
+            title = { Text("删除这个模组文件？") },
+            text = {
+                Text(
+                    "会直接删掉 " + entry.fileName + "，不进回收站。只是暂时不想用的话，把左边的勾去掉就行。",
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        confirmDelete = false
+                        onDelete()
+                    },
+                ) { Text("删除文件") }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmDelete = false }) { Text("取消") }
+            },
+        )
     }
 }
 
