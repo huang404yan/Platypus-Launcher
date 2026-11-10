@@ -174,9 +174,11 @@ tasks.register<JavaExec>("resumeSmoke") {
 // 补 Java → 登记实例 → 启动进主菜单。日志落在 dist/_e2e-logs/fabric-*.log。
 //
 //   gradle :app-desktop:fabricE2e -PfabricDir=dist/_fabric-e2e [-Pgv=1.20.1]
-//          [-PfabricLoader=0.16.14] [-PskipOrig=true]
+//          [-PfabricLoader=0.16.14] [-PskipOrig=true] [-PinstallMod=sodium]
 //
 // skipOrig=true 时假定该目录里原版已经装好，只走 FabricInstaller 那一段。
+// installMod 给了就从 Modrinth 真装一个模组进实例目录的 mods/ 再启动，
+// 用来验「装 Fabric → 装模组 → 一起启动」这条链路（缺省不装）。
 // ─────────────────────────────────────────────────────────────────────────────
 tasks.register<JavaExec>("fabricE2e") {
     group = "verification"
@@ -198,6 +200,7 @@ tasks.register<JavaExec>("fabricE2e") {
                 providers.gradleProperty("e2eUser").orElse("Dev").get(),
                 providers.gradleProperty("e2eTimeoutMs").orElse("300000").get(),
                 providers.gradleProperty("skipOrig").orElse("false").get(),
+                providers.gradleProperty("installMod").orElse("").get(),
             )
         },
     )
