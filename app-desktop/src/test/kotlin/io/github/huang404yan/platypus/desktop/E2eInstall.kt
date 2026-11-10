@@ -9,9 +9,9 @@ import io.github.huang404yan.platypus.core.launch.LaunchEvent
 import io.github.huang404yan.platypus.core.launch.LaunchRequest
 import io.github.huang404yan.platypus.desktop.runtime.DesktopGameRuntime
 import io.github.huang404yan.platypus.desktop.runtime.DesktopJavaRuntimeService
-import io.github.huang404yan.platypus.ui.download.InstallStep
-import io.github.huang404yan.platypus.ui.download.InstallStepException
-import io.github.huang404yan.platypus.ui.download.OneClickInstaller
+import io.github.huang404yan.platypus.core.install.InstallStep
+import io.github.huang404yan.platypus.core.install.InstallStepException
+import io.github.huang404yan.platypus.core.install.OneClickInstaller
 import java.io.File
 import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
