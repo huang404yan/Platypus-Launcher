@@ -12,9 +12,9 @@ import io.github.huang404yan.platypus.core.modpack.ModpackKind
 import io.github.huang404yan.platypus.core.runtime.JavaRuntime
 import io.github.huang404yan.platypus.desktop.runtime.DesktopGameRuntime
 import io.github.huang404yan.platypus.desktop.runtime.DesktopJavaRuntimeService
-import io.github.huang404yan.platypus.ui.download.ModpackImportException
-import io.github.huang404yan.platypus.ui.download.ModpackImporter
-import io.github.huang404yan.platypus.ui.download.ModpackStep
+import io.github.huang404yan.platypus.core.install.ModpackImportException
+import io.github.huang404yan.platypus.core.install.ModpackImporter
+import io.github.huang404yan.platypus.core.install.ModpackStep
 import java.io.File
 import java.security.MessageDigest
 import java.time.LocalDateTime

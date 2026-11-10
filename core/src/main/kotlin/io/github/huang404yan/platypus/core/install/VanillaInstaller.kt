@@ -1,4 +1,4 @@
-package io.github.huang404yan.platypus.ui.download
+package io.github.huang404yan.platypus.core.install
 
 import io.github.huang404yan.platypus.core.download.DownloadItem
 import io.github.huang404yan.platypus.core.download.DownloadProgress
