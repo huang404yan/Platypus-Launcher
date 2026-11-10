@@ -359,7 +359,7 @@ com.mojang.authlib.exceptions.InvalidCredentialsException: Status: 401
 1. **Forge / NeoForge 不在这轮**。`LoaderChoice` 已经留了位置（`OneClickInstaller.kt:65`），Forge 需要额外跑 installer jar（`--installClient` 或新版 `--install`），不是纯 HTTP 拼 url 能解决的。
 2. ~~**进度条分母少算 2.5 MB**~~ —— **已修（2026-11-10）**。见第十一节。
 3. ~~**两个无 sha1 的库没做内容校验**~~ —— **已修（2026-11-10）**。见第十一节。
-4. ~~**没有真的装一个模组验证**~~ —— **已补（2026-11-09，见 `docs/18-mods-page.md` 第五节）**。`:app-desktop:modsE2e` 从 Modrinth 真下 `sodium-fabric-0.5.13+mc1.20.1.jar`（971,552 B，sha1 校验通过）落进 `mods/`，再用 `ModScanner` 回读确认元数据（id=sodium / 0.5.13+mc1.20.1 / loader=FABRIC / enabled=true / problem=-）。**但那是独立的模组页验收，没有和 Fabric 安装串成一条「装 Fabric → 装模组 → 一起启动」的链路**，这一层仍算没串过。
+4. ~~**没有真的装一个模组验证**~~ —— **已补（2026-11-09，见 `docs/18-mods-page.md` 第五节）**。`:app-desktop:modsE2e` 从 Modrinth 真下 `sodium-fabric-0.5.13+mc1.20.1.jar`（971,552 B，sha1 校验通过）落进 `mods/`，再用 `ModScanner` 回读确认元数据（id=sodium / 0.5.13+mc1.20.1 / loader=FABRIC / enabled=true / problem=-）。但那是独立的模组页验收，当时没有和 Fabric 安装串成一条「装 Fabric → 装模组 → 一起启动」的链路。**这一层 2026-11-10 补上了，见第十二节。**
 5. ~~**界面没做过真机点击测试**~~ —— **已补（2026-11-10）**。见下。
 5a. 界面实测（2026-11-10，`dist/_shots/v1-top.png` / `v2-typed.png` / `v3-loaderlist.png`）：窗口标题「鸭嘴兽·孵化版 0.8.0-preview.3」，1200x900。在版本号框键入 `1.20.1` 后三行加载器同时刷新成 `顺带装 Fabric  0.20.1（255 可选）` / `顺带装 Forge  47.4.28（官方安装器，约 3 分钟）` / `顺带装 NeoForge  这个版本没有 NeoForge`；点「选 loader 版本」展开成 `收起`，列表首项 0.20.1 标 `stable`，其后 0.20.0 / 0.19.5 / 0.19.4 标 `beta`。这也是当初那个「CancellationException 被当成拉取失败」bug 修好之后的确认——现在是真拉到了 255 个 loader 版本，不再是红字。
 6. **loader 列表没有缓存**。`LaunchedEffect(versionText)` 每换一次版本号就拉一次网（实测 1.2–2 秒），没有内存或磁盘缓存，离线时这一栏会显示「loader 列表拉取失败」。
@@ -455,3 +455,51 @@ FABRIC OK in 5068 ms; versionId=1.20.1-fabric-0.20.1 libs=8 bytes=4497555
 | `补不到时保留原值并计入 stillMissing` | 失败降级语义 |
 | `parseSha1 只认 40 位十六进制` | 长度 / 字符集 |
 | `空列表不炸` | 空输入 |
+
+---
+
+## 十二、把「装 Fabric → 装模组 → 一起启动」串成一条链路（2026-11-10）
+
+第九节第 4 条一直挂着的是：模组能装、Fabric 能装，但**两个动作是分开验收的**，没有一次跑通「装完加载器紧接着装模组，然后一起启动」。这轮把它串起来了。
+
+### 12.1 怎么改的
+
+`app-desktop/src/test/kotlin/io/github/huang404yan/platypus/desktop/FabricE2e.kt` 加第 7 个参数 `installMod`（空 = 不装），并在 `REGISTERED` 之后、`LAUNCH` 之前插入一段：调 `ModInstaller.install(gameDir = 实例目录, slug = installMod, gameVersion = 实例的游戏版本, loader = FABRIC)`，再用 `ModScanner.scan` 回读，扫不到就 `exitProcess(7)`。启动后额外打印 `MODS LOG HITS` 与 `MODS LOADED proved=`。
+
+**关键坑：模组要装进「实例目录」，不是 gameDir。** 实例隔离之后，`instance.directory`（这里是 `<gameDir>/versions/1.20.1-fabric-0.20.1`）才是游戏的工作目录，`DesktopGameRuntime` 起进程时的 `.directory(context.gameDir)` 指的就是它；`ModsPage` 走的也是 `InstanceMods` / `instance.directory`。装到 `<gameDir>/mods` 会变成「装了但游戏看不见」。这也是 `dist/_fabric-e2e-run2/mods` 一直是空目录、而实例目录下的 `mods` 才有东西的原因。
+
+对应 Gradle 侧加了 `-PinstallMod=<slug>`，缺省空串。
+
+### 12.2 实测（2026-11-10 10:55，`:app-desktop:fabricE2e -PfabricDir=dist/_fabric-e2e-run2 -Pgv=1.20.1 -PskipOrig=true -PinstallMod=sodium`）
+
+```
+[10:55:46.418] FABRIC OK in 3910 ms; versionId=1.20.1-fabric-0.20.1 libs=8 bytes=4497555
+[10:55:47.032] REGISTERED 1.20.1-fabric-0.20.1 loader=FABRIC loaderVersion=0.20.1
+[10:55:47.038] MODS install sodium into ...\dist\_fabric-e2e-run2\versions\1.20.1-fabric-0.20.1/mods
+[10:55:54.265] MODS OK sodium-fabric-0.5.13+mc1.20.1.jar bytes=971552 version=mc1.20.1-0.5.13-fabric sha1Checked=true
+[10:55:54.270] MODS SCAN enabled=1 disabled=0 warnings=0
+[10:55:54.272] LAUNCH start
+[10:55:54.328]   started pid=40368
+[10:56:09.966]   MENU REACHED +15691 ms: [10:56:09] [Render thread/INFO]: Setting user: Dev
+[10:56:13.118]   exited code=1 diagnosis=（游戏在加载完主菜单后被主动关闭）
+[10:56:15.122] MODS LOADED proved=true
+[10:56:15.130] RESULT menuReached=true launchMs=15691 exitCode=1
+[10:56:15.130] TOTAL ms=32690
+```
+
+游戏日志里的四条命中（`MODS LOG HITS (4)`）：
+
+```
+[10:56:02] [main/INFO]: Loading 10 mods:
+	- sodium 0.5.13+mc1.20.1
+[10:56:02] [main/INFO]: Loaded configuration file for Sodium: 42 options available, 0 override(s) found
+[10:56:11] [Render thread/INFO]: Reloading ResourceManager: vanilla, fabric (fabric-api-base, ...)
+```
+
+`Loading 10 mods:` 里的 10 个是 Fabric loader 自己带的 9 个 + 我们装的 sodium 1 个；`- sodium 0.5.13+mc1.20.1` 与 `Loaded configuration file for Sodium: 42 options available` 两行是 Sodium 真的初始化过的证据。**这条链路从「下载加载器」到「模组在游戏里跑起来」全部串通了。**
+
+`exited code=1` 是 e2e 驱动自己 `handle.stop()` 造成的（进主菜单后等 3 秒主动收尾，避免留孤儿进程），不是崩溃——同一份日志里 `LaunchDiagnosis` 给的是「游戏在加载完主菜单后被主动关闭」。
+
+### 12.3 判据的取舍
+
+`MODS LOADED proved=` 只在日志里出现模组 slug 或 `Loading N mods` 时为 true，**没有拿它当失败判据**：有的模组一句话都不打，静默加载同样是成功。真正的失败判据是 `ModScanner.scan` 扫不到刚下的 jar（退出码 7）——那是「装没装上」，与「加载没加载」是两件事。

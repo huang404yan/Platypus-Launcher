@@ -1,6 +1,8 @@
 package io.github.huang404yan.platypus.desktop
 
 import io.github.huang404yan.platypus.core.auth.OfflineProfile
+import io.github.huang404yan.platypus.core.mods.ModInstaller
+import io.github.huang404yan.platypus.core.mods.ModScanner
 import io.github.huang404yan.platypus.core.instance.Instance
 import io.github.huang404yan.platypus.core.instance.JsonInstanceRepository
 import io.github.huang404yan.platypus.core.instance.LoaderKind
@@ -33,7 +35,11 @@ import kotlin.system.exitProcess
  * [OneClickInstaller.install]——也就是 DownloadsPage 勾了「顺带装 Fabric」之后走的同一条路。
  *
  * 参数：<游戏目录> [游戏版本=1.20.1] [loader 版本=空即最新 stable] [离线用户名=Dev]
- *       [等主菜单毫秒=300000] [skipOrig=false]
+ *       [等主菜单毫秒=300000] [skipOrig=false] [装个模组=空即不装]
+ *
+ * 最后那个参数用来把「装 Fabric → 装模组 → 一起启动」串成一条链路：装完加载器后
+ * 从 Modrinth 真下一个模组进**实例目录**的 mods/（隔离后实例目录才是游戏工作目录），
+ * 再启动，日志里要能看到这个模组的痕迹才算加载过。
  *
  * skipOrig=true 时假定原版已装好，直接走 [FabricInstaller] 那条缝，用来单独验证
  * 「原版已存在时只补加载器」这一段；缺原版 jar 退出码 5，缺 Java 17 退出码 6。
@@ -45,6 +51,7 @@ fun main(args: Array<String>) {
     val username = args.getOrElse(3) { "Dev" }
     val menuTimeoutMs = args.getOrElse(4) { "300000" }.toLong()
     val skipOrig = args.getOrElse(5) { "false" }.toBoolean()
+    val installMod = args.getOrElse(6) { "" }.trim()
 
     val stamp = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss"))
     val logDir = File("dist/_e2e-logs").apply { mkdirs() }
@@ -186,6 +193,49 @@ fun main(args: Array<String>) {
         say("警告：实例 loader 不是 FABRIC，而是 " + target.loader)
     }
 
+    // ── 装一个模组（可选）：把「装 Fabric → 装模组 → 一起启动」串成一条链路 ──
+    // 注意装进的是**实例目录**而不是 gameDir：实例隔离之后，实例目录才是游戏的工作目录，
+    // ModsPage 走的也是 InstanceMods / instance.directory，两边必须一致，否则装了看不见。
+    var modJar: File? = null
+    if (installMod.isNotBlank()) {
+        val instanceDir = File(target.directory.trim().trim('"'))
+        say("MODS install " + installMod + " into " + instanceDir.absolutePath + "/mods")
+        try {
+            val modResult = runBlocking {
+                ModInstaller.install(
+                    gameDir = instanceDir,
+                    slug = installMod,
+                    gameVersion = target.gameVersion,
+                    loader = LoaderKind.FABRIC,
+                ) { p ->
+                    say("  MOD " + p.step.name + " " + p.detail)
+                }
+            }
+            modJar = modResult.file
+            say("MODS OK " + modResult.file.name + " bytes=" + modResult.downloadedBytes +
+                " version=" + modResult.version + " sha1Checked=" + (modResult.entry.problem == null))
+            if (modResult.requiredDependencies.isNotEmpty()) {
+                say("  MODS required dependencies not installed: " +
+                    modResult.requiredDependencies.joinToString(", "))
+            }
+            val modScan = ModScanner.scan(instanceDir)
+            say("MODS SCAN enabled=" + modScan.mods.size + " disabled=" + modScan.disabled.size +
+                " warnings=" + modScan.warnings.size)
+            (modScan.mods + modScan.disabled).forEach {
+                say("  " + it.fileName + " / id=" + (it.modId ?: "-") + " / loader=" +
+                    (it.loader?.name ?: "-") + " / problem=" + (it.problem ?: "-"))
+            }
+            if ((modScan.mods + modScan.disabled).none { it.fileName == modResult.file.name }) {
+                say("MODS FAILED 装完扫不到 " + modResult.file.name)
+                exitProcess(7)
+            }
+        } catch (e: Throwable) {
+            say("MODS FAILED: " + e)
+            e.stackTrace.take(8).forEach { say("  at " + it) }
+            exitProcess(7)
+        }
+    }
+
     // ── 启动（与 LaunchPage.launchGame 的组装一致） ──────────────────────────
     say("LAUNCH start")
     val launchAt = System.currentTimeMillis()
@@ -235,6 +285,25 @@ fun main(args: Array<String>) {
     }
 
     val launchMs = if (menuAt != 0L) menuAt - launchAt else -1L
+
+    // 模组是否真被加载：Fabric 启动时会把已加载的模组 id 打进日志（"Loading 1 mods:" 之类）。
+    // 只做如实记录，不拿它当失败的判据——有的模组一句话都不打，静默加载也算成功。
+    if (modJar != null) {
+        val lines = runCatching { gameLog.readLines() }.getOrDefault(emptyList())
+        val slug = installMod.lowercase()
+        val hits = lines.filter {
+            val l = it.lowercase()
+            l.contains(slug) || l.contains("loading ") && l.contains("mods")
+        }
+        say("MODS LOG HITS (" + hits.size + ")")
+        hits.take(10).forEach { say("  | " + it.take(200)) }
+        val proved = lines.any {
+            val l = it.lowercase()
+            l.contains(slug) || (l.contains("loading") && l.contains("mods"))
+        }
+        say("MODS LOADED proved=" + proved)
+    }
+
     say("FABRIC LOG LINES (" + loaderLines.size + ")")
     loaderLines.forEach { say("  | " + it) }
     say("RESULT menuReached=" + (menuAt != 0L) + " launchMs=" + launchMs + " exitCode=" + exitCode)
