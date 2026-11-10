@@ -46,7 +46,9 @@ fun <T> ModrinthParse<T>.reasonOrNull(): String? = (this as? ModrinthParse.Failu
  * Modrinth API 的 URL 构造与响应解析。
  *
  * 只做纯字符串/JSON 的事，不发请求 —— 这样解析逻辑能在 core 的单测里跑，
- * 不用联网也不用起桩服务器。发请求的那层在 ui/download/ModrinthClient.kt。
+ * 不用联网也不用起桩服务器。发请求的那层在 core/mods/ModInstaller.kt 的 fetchText。
+ *
+ * 2026-11-10 备注：原计划的 ui/download/ModrinthClient.kt 没有单独建，请求逻辑并进了 ModInstaller。
  *
  * 为什么不自己爬 CurseForge：CurseForge 的 API 需要 key，而且它要求第三方应用
  * 不得绕过广告下载；Modrinth 官方文档明确允许第三方启动器直接调 API 与 CDN，
