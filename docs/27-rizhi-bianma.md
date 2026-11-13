@@ -2,7 +2,7 @@
 
 ## 一句话
 
-游戏在中文 Windows 上按 GBK 往 stdout 写，启动器一直按 UTF-8 解，中文当场变成 `�`、字节就地丢失；现在两头都改——给 JVM 传 `-Dstdout.encoding=UTF-8` 与 `-Dfile.encoding=UTF-8` 让它按 UTF-8 输出，读侧再用 `LogLineReader` 先看字节、不像 UTF-8 才整行退回 GBK 解。
+游戏在中文 Windows 上按 GBK 往 stdout 写，启动器一直按 UTF-8 解，中文当场变成 替换符 U+FFFD、字节就地丢失；现在两头都改——给 JVM 传 `-Dstdout.encoding=UTF-8` 与 `-Dfile.encoding=UTF-8` 让它按 UTF-8 输出，读侧再用 `LogLineReader` 先看字节、不像 UTF-8 才整行退回 GBK 解。
 
 ## 为什么光改读侧不够
 
