@@ -90,6 +90,7 @@ Windows 下也可以用 `gradlew.bat`。首次构建会下载约 300 MB 依赖�
 - `docs/25-zhenghebao-daoru.md`：**整合包导入**（`.mrpack` / MCBBS v2 先在 core 只读解析再导入、overrides 三层覆盖顺序、`safeRelativePath` 两层防越界、先装游戏再下包内文件的原因）
 - `docs/26-bengkui-baogao.md`：**崩溃报告读取与归因**（按 mtime 挑最新一份、退出码与时间两道闸、只读头部 256 KB、模组规则必须排在加载器规则之前）
 - `docs/27-rizhi-bianma.md`：**日志中文不乱码**（给 JVM 传 `-Dstdout.encoding` + `-Dfile.encoding`、读侧按字节严格试 UTF-8 再退 GBK、为什么不能靠查替换符判编码、64 KB 单行上限）
+- `docs/28-mods-yilai.md`：**模组依赖求解**（Modrinth 只给 project_id、sha1 反查已装、按层 BFS + 深度/数量封顶、失败不连坐）
 
 ## 下载
 
@@ -124,7 +125,7 @@ M0（骨架）+ M1（实例扫描）+ M2（下载器）+ M3（**Windows 一键�
 
 **下载断点续传**：先写 `<文件>.part`，校验通过才转正；`.part` 有内容就发 `Range` 接着下，断网不清半成品，下次自动接上。进度条会额外显示「其中 N 个接着上次下（省了 M MB）」（`docs/14`）。
 
-单测 **364 例全过**（34 个测试类，`./gradlew :core:test`）。另有十二个无头冒烟任务（`e2eInstall` / `settingsSmoke` / `instanceFlowSmoke` / `resumeSmoke` / `deleteSmoke` / `fabricE2e` / `modpackE2e` / `forgeE2e` / `neoForgeE2e` / `modsE2e` / `modUpdateE2e` / `isolationSmoke`），走的是界面按钮同一批函数；`resumeSmoke` / `fabricE2e` / `modpackE2e` / `forgeE2e` / `neoForgeE2e` / `modsE2e` 需要联网，分别在空目录真装 Fabric、真跑 Forge 与 NeoForge 官方安装器、真从 Modrinth 下模组、真把一个 `.mrpack` 从解析装到进主菜单；`deleteSmoke` 在 `dist/_delete-smoke` 里全程造假数据，不碰真实 `.minecraft`。
+单测 **387 例全过**（35 个测试类，`./gradlew :core:test`）。另有十二个无头冒烟任务（`e2eInstall` / `settingsSmoke` / `instanceFlowSmoke` / `resumeSmoke` / `deleteSmoke` / `fabricE2e` / `modpackE2e` / `forgeE2e` / `neoForgeE2e` / `modsE2e` / `modUpdateE2e` / `isolationSmoke`），走的是界面按钮同一批函数；`resumeSmoke` / `fabricE2e` / `modpackE2e` / `forgeE2e` / `neoForgeE2e` / `modsE2e` 需要联网，分别在空目录真装 Fabric、真跑 Forge 与 NeoForge 官方安装器、真从 Modrinth 下模组、真把一个 `.mrpack` 从解析装到进主菜单；`deleteSmoke` 在 `dist/_delete-smoke` 里全程造假数据，不碰真实 `.minecraft`。
 
 **能装 Fabric 了**：下载页勾「顺带装 Fabric」→ 拉 meta.fabricmc.net 的 loader 列表（默认落在最新 stable）→ 装 profile json（只改 `id`，保留 `inheritsFrom`）→ 按 maven 坐标补全 8 个库的地址并下载 → 登记成 `1.20.1-fabric-0.20.1` 这样的实例。实测空目录全流程 4 分 29 秒进主菜单，日志首行 `Loading Minecraft 1.20.1 with Fabric Loader 0.20.1`（`docs/15`）。
 
@@ -134,6 +135,8 @@ M0（骨架）+ M1（实例扫描）+ M2（下载器）+ M3（**Windows 一键�
 
 **有模组页了**：左侧列出 `mods/` 里已装的（读 `fabric.mod.json` / `mods.toml` / `neoforge.mods.toml` 拿 id、名字、版本、加载器，坏 jar 标出来但不崩），右侧从 Modrinth 搜、选一个装进去，下载沿用 `.part` 续传 + sha1 强校验。实测装 Sodium 971 552 字节、33 秒（`docs/18`）。
 
+**模组前置会自动装齐**：Modrinth 的依赖表只给 `project_id`，装完一个模组后启动器再查两次（id → slug、slug → 版本），把前置一层层展开成依赖树，界面按层缩进列出、点一次「一次装齐」全下完。同一个库被多个模组依赖只排一次，`mods/` 里已装的先用 sha1 反查跳过，查不到/没适配/已装过的逐条说清原因。实测装 Iris 1.7.6 时自动列出 `Sodium 0.5.13` 并一并装进（2 726 899 B + 971 552 B）。深度 8 层、单次 64 个封顶，成环会停下（`docs/28`）。
+
 **能装 NeoForge 了**：官方 `maven.neoforged.net` 在本机被重置（`Connection was reset`），所以元数据与库全走 BMCLAPI 镜像；installer 的 `--mirror` 对 client 安装**无效**（`ClientInstall` 根本不引用 `getMirror()`，字节码级确认），改由启动器在跑 installer 之前把 70 个依赖库**预铺**到 `libraries/`，installer 看到文件在、sha1 对上就打 `Checksum valid` 直接跳过——实测 13822 行安装器日志里 `Checksum valid` 117 次、`Downloading library from` 0 次、超时 0 次。NeoForge 版本号到 MC 版本的映射只信 installer jar 内 `version.json` 的 `inheritsFrom`（前缀只是初筛）。实测 1.21.1 + NeoForge 21.1.265：装 54.8 秒、进主菜单 14.9 秒，日志里 `NeoForge mod loading, version 21.1.265, for MC 1.21.1`（`docs/19`）。
 
 **崩了会告诉你为什么**：游戏非正常退出时读实例 `crash-reports/` 里最新一份报告，卡片上给文件名、时间、大小、`Description:` 那句和第一个异常，可展开全文 / 复制全文 / 打开目录。两道闸防误报：退出码 0 不读、报告 mtime 必须不早于本次启动（留 5 秒余量），否则实例上次崩过会把旧报告挂成新的。归因规则新增「模组冲突或缺依赖」与「模组文件损坏」两条，且必须排在「加载器未能启动」之前——缺前置的日志后面必跟 `NoClassDefFoundError: cpw/mods` 连带噪声。日志区同时补了复制 / 导出 / 打开崩溃目录（`docs/26`）。
@@ -142,4 +145,4 @@ M0（骨架）+ M1（实例扫描）+ M2（下载器）+ M3（**Windows 一键�
 
 **联机页**：扫描局域网广播（`224.0.2.60:4445`，读 `[MOTD]`/`[AD]`）列出同网段的世界，也能手动解析 `host:port` 并复制地址。**不在启动器里「点一下就进」**——绕过游戏会丢皮肤与会话，界面里写清了原因。
 
-尚未实现：正版/微软登录（`core/auth` 只有接口）、模组依赖自动求解、跨网络联机（NAT 穿透/中转，本版没做）。
+尚未实现：正版/微软登录（`core/auth` 只有接口）、跨网络联机（NAT 穿透/中转，本版没做）、模组依赖的版本冲突求解（只认 `required`，不认 `optional` / `incompatible`）。

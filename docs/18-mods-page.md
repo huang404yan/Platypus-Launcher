@@ -1,6 +1,6 @@
 # 18 · 模组页（本地 mods/ 扫描 + Modrinth 搜索安装）
 
-记录日期：2026-11-09。本文只写**已经跑通过的事实**与**还没做到的部分**。
+记录日期：2026-11-09，2026-11-13 补依赖求解。本文只写**已经跑通过的事实**与**还没做到的部分**。
 
 > 编号说明：01–17 已占用，本轮取 18。
 
@@ -67,11 +67,33 @@ facets 是**三层数组**：层内 OR、层间 AND。写成一层就退化成 O
 - 下载走既有的 `HttpDownloader`，因此**白得三件事**：`.part` 断点续传、sha1 强校验、镜像兜底。
 - 下完立刻 `ModScanner.describe(target)` 回读，证明「文件真的在且读得出元数据」，而不是只信 HTTP 200。
 
-### 依赖：如实说没做
+### 依赖：递归展开，一次装齐
 
-Modrinth 的 `dependencies[]` 里 `dependency_type == "required"` 只给一个 `project_id`（不是 slug，也不是版本号）。要真装前置，得再 `GET /v2/projects/<id>` 拿 slug、再查它的版本列表、再递归——那就成了完整依赖求解器，还要处理环依赖与版本冲突。
+Modrinth 的 `dependencies[]` 里 `dependency_type == "required"` 只给一个 `project_id`（不是 slug，也不是版本号）。所以真装前置要补两次查询：`project_id` → slug/标题 → 该 slug 的版本列表 → 挑最佳文件。展开逻辑在 `core/.../core/mods/ModDependencyResolver.kt`，界面接线在 `ui/.../ModsPage.kt`，细节见 `docs/28`。
 
-本轮的选择：**收下 required 数量、装完如实告诉用户「还差 N 个前置模组，需要自己再装」**。假装解决了比不解决更坏。
+一句话流程：
+
+```
+装完一个模组
+  → 它自己还缺 N 个 project_id
+  → rootsOf(): id → slug → 版本 → 挑好文件，变成依赖树的根
+  → installedProjectIds(): mods/ 里已有 jar 用 sha1 反查，算「已经装了什么」
+  → solve(): 按层 BFS 递归展开，按 slug 去重，命中已装的就跳过
+  → 界面上出一张「前置依赖」卡片，按 depth 缩进列出
+  → 点「一次装齐」→ install() 按序下载，单个失败不中断，结果逐条回报
+```
+
+三条必须有的边界（都写在 `ModDependencyResolver` 的文件头）：
+
+| 边界 | 值 | 为什么 |
+| --- | --- | --- |
+| 深度封顶 | `MAX_DEPTH = 8` | 依赖成环（A 要 B、B 要 A）时必须有停下的地方 |
+| 数量封顶 | `MAX_MODS = 64` | 有些整合包式模组能牵出上百个前置 |
+| 去重键 | slug 小写 | 同一个库被十几个模组依赖是常态，重复下载会在 `mods/` 躺两份，Forge 报 duplicate mods 直接起不来 |
+
+跳过项**不能汇总成一句「装完了」**：查版本失败、没有适配当前游戏版本/加载器的文件、这个实例已经装了，三种原因分开写，界面逐条列出「标题 —— 原因（谁需要）」。
+
+装失败的那批会留在计划里（`depPlan` 只保留 `failed` 项），用户能再点一次，不用重新展开整棵树。
 
 ## 四、界面
 
@@ -120,15 +142,16 @@ Modrinth 的 `dependencies[]` 里 `dependency_type == "required"` 只给一个 `
 | --- | --- | --- |
 | `core/.../core/mods/ModScannerTest.kt` | 11 | 目录不存在 / 空目录 / 三种元数据格式 / 停用后缀 / 坏 jar / 非 jar 告警 / 排序 |
 | `core/.../core/mods/ModrinthMetaTest.kt` | 12 | 真实响应夹具（search 与 version 各一份）/ facets 三层结构 / 编码 / 下载量格式化 / primary 挑选 |
+| `core/.../core/mods/ModDependencyResolverTest.kt` | 23 | 一层/两层展开、多来源去重、成环停下、深度与数量封顶、已装跳过、查版本失败不中断、无适配版本进 skipped、`rootsOf` 8 例、安装中断不连坐 |
 
-两份都用 `ZipOutputStream` / 字符串夹具造假数据，**不联网**。
+三份都用 `ZipOutputStream` / 字符串夹具造假数据，**不联网**（依赖求解那份用 `FakeSource` 塞假 `ModDependencySource`）。
 
 ## 七、已知取舍
 
 | 取舍 | 理由 / 代价 |
 | --- | --- |
 | `mods/` 全局共用 | 遵循 Mojang 目录约定；要「每实例独立模组」得另做隔离，见第一节 |
-| 不做依赖求解 | 见第三节；界面上如实报缺 |
+| 依赖只装不升级 | 递归展开到 `MAX_DEPTH`/`MAX_MODS` 为止；已装过的按 project_id 跳过，不会替你换成更新的版本 |
 | 只装不卸 | 删除走文件管理器（用户自己删 jar 最直接）；界面里的「停用」目前只是**显示**后缀，不是按钮 |
 | 不支持从 URL 直装 | Modrinth 之外（GitHub Releases、作者网盘）没有统一元数据，本轮不做 |
 | 不查更新 | 要记录「从哪个 project/version 装的」，得在 `mods/` 旁边维护一份清单文件，留给下一轮 |
@@ -137,6 +160,5 @@ Modrinth 的 `dependencies[]` 里 `dependency_type == "required"` 只给一个 `
 
 - 模组的启用/停用按钮（现在只有扫描时的识别）
 - 更新检查（需要本地清单记录来源）
-- 依赖自动安装
 - CurseForge（条款不允许）
 - 模组冲突提示（同类优化模组互斥，如 sodium 与 optifine）

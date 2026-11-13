@@ -12,10 +12,9 @@ import java.io.IOException
 /**
  * 从 Modrinth 找一个模组并装进 `<游戏目录>/mods`。
  *
- * 为什么不做完整的依赖求解：Modrinth 的 required dependencies 只给了 project id，
- * 要再查一次 /v2/projects/<id> 才知道它是什么、该选哪个版本。这里先把「单模组安装」
- * 做扎实（选版本 → 下载 → sha1 校验 → 落到 mods/），把缺依赖如实报给用户，
- * 由用户在界面上补——比猜错版本装一堆不兼容的库好。
+ * 这里只管「单模组安装」：选版本 → 下载 → sha1 校验 → 落到 mods/。
+ * 依赖展开（Modrinth 的 required dependencies 只给 project id，得再查项目与版本）
+ * 在 ModDependencyResolver 里，见 docs/28。本对象只负责把 [installFile] 这一个文件装好。
  */
 object ModInstaller {
 
