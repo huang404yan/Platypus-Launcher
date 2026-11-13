@@ -41,6 +41,10 @@ import io.github.huang404yan.platypus.core.instance.mergeInstances
 import io.github.huang404yan.platypus.core.mods.InstanceMods
 import io.github.huang404yan.platypus.core.mods.InstanceModsSnapshot
 import io.github.huang404yan.platypus.core.mods.LegacyAdoptResult
+import io.github.huang404yan.platypus.core.mods.DependencyInstallOutcome
+import io.github.huang404yan.platypus.core.mods.DependencyPlan
+import io.github.huang404yan.platypus.core.mods.ModDependencyResolver
+import io.github.huang404yan.platypus.core.mods.ModrinthDependencySource
 import io.github.huang404yan.platypus.core.mods.ModEntry
 import io.github.huang404yan.platypus.core.mods.ModInstallProgress
 import io.github.huang404yan.platypus.core.mods.ModFileOps
@@ -72,8 +76,9 @@ const val MODS_TAB_BROWSE = "browse"
  * 隔离前留在游戏根目录 mods 里的那批模组，这里单独提示一行并给「搬进这个实例」，
  * 不静默忽略 —— 用户会以为模组被吞了。
  *
- * 只做「装单个模组」——依赖求解没做（见 ModInstaller 的注释），所以装完会提示
- * requiredDependencies 有几个，让用户自己去装，不假装解决了。
+ * 装完一个模组会顺手把它的前置依赖树递归展开（A→B→C 三层也展开），在「已装」页按层列出，
+ * 由用户点一下「一次装齐」。查不到、没适配版本、实例里已经装过的，逐条说明原因 ——
+ * 不能只说「装好啦」然后进游戏崩在加载器里。
  *
  * 二级导航（[subTab]）把这个页面拆成两件事：已装（本地清单）与浏览（联网搜、装）。
  * 以前两栏并排，右边搜完左边才看得见结果；拆开后每件事都能占满整屏，
@@ -133,9 +138,16 @@ fun ModsPage(
     /** 正在更新哪个文件（用它禁用按钮，避免连点）。 */
     var updatingFile by remember { mutableStateOf("") }
 
-    /** 装完模组后还缺的前置模组（project_id），以及它们的可读名字。 */
-    var pendingDeps by remember { mutableStateOf<List<String>>(emptyList()) }
-    var depTitles by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
+    /**
+     * 装完模组后展开的前置依赖树。
+     *
+     * 以前这里只存一串 project_id（缺什么），界面上是「还差 N 个前置」加一个按钮，
+     * 按下去才逐个装 —— 前置自己的前置没人管，装完照样崩。现在是先递归查出整棵树，
+     * 连「前置的前置」「查不到 / 没适配版本 / 已装过」都摆出来，再一次性装。
+     */
+    var depPlan by remember { mutableStateOf<DependencyPlan?>(null) }
+    /** 求解依赖树的过程中正在做什么（查询 N 个、解析 M 个），空串表示没在忙。 */
+    var depStep by remember { mutableStateOf("") }
     var depsInstalling by remember { mutableStateOf(false) }
 
     /** 扫游戏目录里的实例清单，尽量保住当前选择。 */
@@ -361,50 +373,44 @@ fun ModsPage(
         }
     }
 
-    /** 把装模组时报出来的前置模组一次装齐。 */
+    /**
+     * 把已经展开好的依赖树一次装齐。
+     *
+     * 装之前这棵树是 [ModDependencyResolver.solve] 查出来的（见 [install]），所以这里
+     * 不再重复查版本，只下载。单个失败不中断整棵树：一个前置的版本被作者撤了，
+     * 不该让其余九个白装；失败项留在 [DependencyInstallOutcome.failed] 里如实显示。
+     */
     suspend fun installDependencies() {
+        val plan = depPlan ?: return
         val target = instances.firstOrNull { instanceKey(it) == selectedKey } ?: return
-        if (gameVersion.isBlank()) {
-            opError = "先填游戏版本，否则装进来的前置模组跟你的游戏对不上。"
-            return
-        }
-        val kind = loader ?: LoaderKind.FABRIC
         val dir = File(target.directory.trim().trim('"'))
         depsInstalling = true
+        depStep = ""
         opNotice = ""
         opError = ""
+        var outcome: DependencyInstallOutcome? = null
         try {
-            val projects = withContext(Dispatchers.IO) {
-                runCatching { ModUpdateChecker.resolveProjects(pendingDeps) }.getOrNull().orEmpty()
+            outcome = withContext(Dispatchers.IO) {
+                ModDependencyResolver.install(
+                    gameDir = dir,
+                    plan = plan,
+                    onStep = { depStep = it },
+                    onProgress = { progress = it },
+                )
             }
-            val done = mutableListOf<String>()
-            val failed = mutableListOf<String>()
-            for (id in pendingDeps) {
-                val slug = projects[id]?.slug
-                if (slug.isNullOrBlank()) {
-                    failed += (depTitles[id] ?: id) + "（Modrinth 查不到这个项目）"
-                    continue
-                }
-                try {
-                    val r = withContext(Dispatchers.IO) {
-                        ModInstaller.install(dir, slug, gameVersion.trim().ifBlank { null }, kind)
-                    }
-                    done += r.entry.title
-                } catch (e: CancellationException) {
-                    throw e
-                } catch (e: Exception) {
-                    failed += (depTitles[id] ?: slug) + "（" + (e.message ?: "失败") + "）"
-                }
-            }
+            val done = outcome.installed
+            val failed = outcome.failed
             opNotice = buildString {
                 if (done.isNotEmpty()) {
-                    append("装了 ").append(done.size).append(" 个前置：").append(done.joinToString("、")).append("。")
+                    append("装了 ").append(done.size).append(" 个：")
+                        .append(done.joinToString("、") { it.title }).append("。")
                 }
                 if (failed.isNotEmpty()) {
                     if (isNotEmpty()) append(" ")
-                    append("还有 ").append(failed.size).append(" 个没装上：").append(failed.joinToString("；"))
+                    append("还有 ").append(failed.size).append(" 个没装上：")
+                    append(failed.joinToString("；") { it.mod.title + "（" + it.reason + "）" })
                 }
-                if (failed.isEmpty()) pendingDeps = emptyList()
+                if (failed.isEmpty() && plan.skipped.isEmpty()) append("前置都装齐了。")
             }
             rescanMods()
         } catch (e: CancellationException) {
@@ -413,6 +419,60 @@ fun ModsPage(
             opError = "装前置失败：" + (e.message ?: e.toString())
         } finally {
             depsInstalling = false
+            depStep = ""
+            progress = null
+            // 装成功的那批不再需要提示；有失败就把它们留在计划里，让用户能再点一次
+            val failed = outcome?.failed.orEmpty()
+            depPlan = if (failed.isEmpty()) null else plan.copy(
+                mods = failed.map { it.mod },
+                skipped = emptyList(),
+            )
+        }
+    }
+
+    /**
+     * 展开「装完这个模组还差什么」的依赖树。
+     *
+     * 只查询、不下载，所以结果可以先摆在界面上让用户看一眼再决定。递归展开是必须的：
+     * Sodium 要 Fabric API，而 Fabric API 自己不缺东西；但很多模组是 A→B→C 三层，
+     * 只装直接前置的话进游戏照样崩。
+     */
+    suspend fun solveDependencies(
+        rootTitle: String,
+        missing: List<String>,
+        instanceDir: File,
+        kind: LoaderKind,
+    ) {
+        if (missing.isEmpty()) return
+        depStep = "查前置…"
+        try {
+            val plan = withContext(Dispatchers.IO) {
+                val source = ModrinthDependencySource(gameVersion.trim().ifBlank { null }, kind)
+                val (roots, skippedRoots) = ModDependencyResolver.rootsOf(missing, source) { depStep = it }
+                // 已经装过的（含刚装进去的那个根）不再下一遍：mods/ 里躺两份同名库，Forge 会直接起不来
+                val installedIds = ModDependencyResolver.installedProjectIds(ModScanner.modsDir(instanceDir))
+                val solved = ModDependencyResolver.solve(roots, installedIds, source) { depStep = it }
+                // 根这一层自己带着「谁缺它」的信息：rootsOf 只拿得到一串 project_id，
+                // 不知道是哪个模组报出来的，这里补上，卡片上才不会只显示一串包名。
+                solved.copy(
+                    mods = solved.mods.map { mod ->
+                        if (mod.depth == 0) mod.copy(requiredBy = listOf(rootTitle)) else mod
+                    },
+                    skipped = skippedRoots.map { if (it.requiredBy.isBlank()) it.copy(requiredBy = rootTitle) else it } +
+                        solved.skipped,
+                )
+            }
+            depPlan = plan
+            if (plan.mods.isEmpty() && plan.skipped.isEmpty()) {
+                depStep = ""
+            }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            // 查不出依赖不该把「装好啦」这条提示也吞掉，单独说一句
+            opNotice = (opNotice + " ").trim() + rootTitle + " 的前置没查出来：" + (e.message ?: e.toString())
+        } finally {
+            depStep = ""
         }
     }
 
@@ -479,21 +539,12 @@ fun ModsPage(
                 if (result.requiredDependencies.isEmpty()) {
                     "。"
                 } else {
-                    "。还差 " + result.requiredDependencies.size + " 个前置模组。"
+                    "。它还要 " + result.requiredDependencies.size + " 个前置，正在展开整棵依赖树，展开后去「已装」页一次装齐。"
                 }
-            // 把前置模组记下来，「已装」页会显示成一个可点的清单。
-            // Modrinth 给的是 project_id，这里顺手换成可读名字，免得界面上出现一串随机 ID。
-            pendingDeps = result.requiredDependencies
-            depTitles = if (pendingDeps.isEmpty()) {
-                emptyMap()
-            } else {
-                withContext(Dispatchers.IO) {
-                    runCatching {
-                        ModUpdateChecker.resolveProjects(pendingDeps).mapValues { it.value.title }
-                    }.getOrNull().orEmpty()
-                }
-            }
+            // 把整棵前置依赖树展开，「已装」页会摆出来让人一次性装齐。
+            // 只展开直接前置是不够的：前置自己还可能有前置，漏一层进游戏照样崩。
             rescanMods()
+            solveDependencies(result.entry.title, result.requiredDependencies, instanceDir, kind)
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
@@ -613,11 +664,11 @@ fun ModsPage(
                 updatingFile = updatingFile,
                 onCheckUpdates = { scope.launch { checkUpdates() } },
                 onUpdate = { result -> scope.launch { updateOne(result) } },
-                pendingDeps = pendingDeps,
-                depTitles = depTitles,
+                depPlan = depPlan,
+                depStep = depStep,
                 depsInstalling = depsInstalling,
                 onInstallDeps = { scope.launch { installDependencies() } },
-                onDismissDeps = { pendingDeps = emptyList() },
+                onDismissDeps = { depPlan = null },
             )
         }
     }
@@ -648,8 +699,8 @@ private fun InstalledTab(
     updatingFile: String,
     onCheckUpdates: () -> Unit,
     onUpdate: (ModUpdateResult) -> Unit,
-    pendingDeps: List<String>,
-    depTitles: Map<String, String>,
+    depPlan: DependencyPlan?,
+    depStep: String,
     depsInstalling: Boolean,
     onInstallDeps: () -> Unit,
     onDismissDeps: () -> Unit,
@@ -693,9 +744,10 @@ private fun InstalledTab(
         if (updateProgress.isNotBlank() || updateError.isNotBlank()) {
             ModHint(if (updateError.isNotBlank()) "检查更新失败：" + updateError else updateProgress, error = updateError.isNotBlank())
         }
-        if (pendingDeps.isNotEmpty()) {
-            MissingDepsRow(
-                titles = pendingDeps.map { depTitles[it] ?: it },
+        if (depPlan != null) {
+            DependencyPlanCard(
+                plan = depPlan,
+                step = depStep,
                 busy = depsInstalling,
                 onInstall = onInstallDeps,
                 onDismiss = onDismissDeps,
@@ -1013,10 +1065,17 @@ private fun InstalledModRow(
     }
 }
 
-/** 还缺的前置模组：列出来，给一个「一次装齐」。装不上会逐条说原因。 */
+/**
+ * 展开好的前置依赖树：按层缩进列出要装什么，被跳过的说清为什么，再给一个「一次装齐」。
+ *
+ * 为什么要按层列而不是只说「还差 3 个」：前置还可能有前置，用户看着一串扁平的包名
+ * 分不清哪个是自己要的、哪个是被捎带的；装失败时也需要知道是哪一层断了。
+ * 跳过的项（已装过 / 没有适配版本 / 查不到）单独一段，否则用户会以为「点了装齐」就一定齐。
+ */
 @Composable
-private fun MissingDepsRow(
-    titles: List<String>,
+private fun DependencyPlanCard(
+    plan: DependencyPlan,
+    step: String,
     busy: Boolean,
     onInstall: () -> Unit,
     onDismiss: () -> Unit,
@@ -1024,19 +1083,56 @@ private fun MissingDepsRow(
     Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
         Column(Modifier.fillMaxWidth().padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Text(
-                "还差 " + titles.size + " 个前置模组",
+                "前置依赖 · " + plan.mods.size + " 个要保持顺序安装",
                 style = MaterialTheme.typography.bodySmall,
                 fontWeight = FontWeight.SemiBold,
             )
+            plan.mods.forEach { mod ->
+                Text(
+                    // 每层缩进两个全角空格，depth 0 就是用户自己点的那个
+                    "　".repeat(mod.depth.coerceAtLeast(0)) +
+                        (if (mod.depth > 0) "└ " else "") +
+                        mod.title + " " + mod.file.versionNumber,
+                    style = MaterialTheme.typography.labelSmall,
+                )
+                if (mod.requiredBy.isNotEmpty()) {
+                    Text(
+                        "　".repeat(mod.depth + 1) + "被 " + mod.requiredBy.joinToString("、") + " 需要",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+            if (plan.skipped.isNotEmpty()) {
+                Text(
+                    "跳过 " + plan.skipped.size + " 个：",
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                plan.skipped.forEach { dep ->
+                    Text(
+                        "· " + dep.title + " —— " + dep.reason +
+                            if (dep.requiredBy.isNotBlank()) "（" + dep.requiredBy + " 需要）" else "",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+            plan.warnings.forEach { warning ->
+                Text("· " + warning, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error)
+            }
             Text(
-                titles.joinToString("、") + "。不带前置启动会崩，或者进游戏后功能是空的。",
+                "不带前置启动会崩，或者进游戏后功能是空的。",
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+            if (step.isNotBlank()) {
+                Text(step, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("", modifier = Modifier.weight(1f))
                 TextButton(onClick = onDismiss, enabled = !busy) { Text("先不管") }
-                OutlinedButton(onClick = onInstall, enabled = !busy) {
+                OutlinedButton(onClick = onInstall, enabled = !busy && plan.mods.isNotEmpty()) {
                     Text(if (busy) "安装中…" else "一次装齐")
                 }
             }
