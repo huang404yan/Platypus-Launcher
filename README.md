@@ -91,6 +91,7 @@ Windows 下也可以用 `gradlew.bat`。首次构建会下载约 300 MB 依赖�
 - `docs/26-bengkui-baogao.md`：**崩溃报告读取与归因**（按 mtime 挑最新一份、退出码与时间两道闸、只读头部 256 KB、模组规则必须排在加载器规则之前）
 - `docs/27-rizhi-bianma.md`：**日志中文不乱码**（给 JVM 传 `-Dstdout.encoding` + `-Dfile.encoding`、读侧按字节严格试 UTF-8 再退 GBK、为什么不能靠查替换符判编码、64 KB 单行上限）
 - `docs/28-mods-yilai.md`：**模组依赖求解**（Modrinth 只给 project_id、sha1 反查已装、按层 BFS + 深度/数量封顶、失败不连坐）
+- `docs/29-guangying-ziyuanbao.md`：**光影与资源包**（光影查 `loaders=["iris","optifine"]`、资源包查 `["minecraft"]`、元数据读不出只记 problem 不吞、文件夹形态拒绝停用的原因）
 
 ## 下载
 
@@ -125,7 +126,7 @@ M0（骨架）+ M1（实例扫描）+ M2（下载器）+ M3（**Windows 一键�
 
 **下载断点续传**：先写 `<文件>.part`，校验通过才转正；`.part` 有内容就发 `Range` 接着下，断网不清半成品，下次自动接上。进度条会额外显示「其中 N 个接着上次下（省了 M MB）」（`docs/14`）。
 
-单测 **387 例全过**（35 个测试类，`./gradlew :core:test`）。另有十二个无头冒烟任务（`e2eInstall` / `settingsSmoke` / `instanceFlowSmoke` / `resumeSmoke` / `deleteSmoke` / `fabricE2e` / `modpackE2e` / `forgeE2e` / `neoForgeE2e` / `modsE2e` / `modUpdateE2e` / `isolationSmoke`），走的是界面按钮同一批函数；`resumeSmoke` / `fabricE2e` / `modpackE2e` / `forgeE2e` / `neoForgeE2e` / `modsE2e` 需要联网，分别在空目录真装 Fabric、真跑 Forge 与 NeoForge 官方安装器、真从 Modrinth 下模组、真把一个 `.mrpack` 从解析装到进主菜单；`deleteSmoke` 在 `dist/_delete-smoke` 里全程造假数据，不碰真实 `.minecraft`。
+单测 **410 例全过**（37 个测试类，`./gradlew :core:test`）。另有十二个无头冒烟任务（`e2eInstall` / `settingsSmoke` / `instanceFlowSmoke` / `resumeSmoke` / `deleteSmoke` / `fabricE2e` / `modpackE2e` / `forgeE2e` / `neoForgeE2e` / `modsE2e` / `modUpdateE2e` / `isolationSmoke`），走的是界面按钮同一批函数；`resumeSmoke` / `fabricE2e` / `modpackE2e` / `forgeE2e` / `neoForgeE2e` / `modsE2e` 需要联网，分别在空目录真装 Fabric、真跑 Forge 与 NeoForge 官方安装器、真从 Modrinth 下模组、真把一个 `.mrpack` 从解析装到进主菜单；`deleteSmoke` 在 `dist/_delete-smoke` 里全程造假数据，不碰真实 `.minecraft`。
 
 **能装 Fabric 了**：下载页勾「顺带装 Fabric」→ 拉 meta.fabricmc.net 的 loader 列表（默认落在最新 stable）→ 装 profile json（只改 `id`，保留 `inheritsFrom`）→ 按 maven 坐标补全 8 个库的地址并下载 → 登记成 `1.20.1-fabric-0.20.1` 这样的实例。实测空目录全流程 4 分 29 秒进主菜单，日志首行 `Loading Minecraft 1.20.1 with Fabric Loader 0.20.1`（`docs/15`）。
 
@@ -142,6 +143,8 @@ M0（骨架）+ M1（实例扫描）+ M2（下载器）+ M3（**Windows 一键�
 **崩了会告诉你为什么**：游戏非正常退出时读实例 `crash-reports/` 里最新一份报告，卡片上给文件名、时间、大小、`Description:` 那句和第一个异常，可展开全文 / 复制全文 / 打开目录。两道闸防误报：退出码 0 不读、报告 mtime 必须不早于本次启动（留 5 秒余量），否则实例上次崩过会把旧报告挂成新的。归因规则新增「模组冲突或缺依赖」与「模组文件损坏」两条，且必须排在「加载器未能启动」之前——缺前置的日志后面必跟 `NoClassDefFoundError: cpw/mods` 连带噪声。日志区同时补了复制 / 导出 / 打开崩溃目录（`docs/26`）。
 
 **日志里的中文不再是方块**：以前游戏按 GBK 往 stdout 写、启动器按 UTF-8 解，中文全变成 一串替换符，字节当场丢失。现在两头都改：给 JVM 传 `-Dstdout.encoding=UTF-8` 与 `-Dfile.encoding=UTF-8`（JDK 18+ 只认前者、17 及更早只认后者），读侧再补一个「先严格试 UTF-8、不合法就整行退回 GBK」的 `LogLineReader`。实测 1.20.1 + Forge 47 模组环境，导出日志 35 137 B / 244 行 / `U+FFFD` 计数 0，原先那条全是方块的声音设备名已经完整显示为「扬声器 (适用于 I2S 音频的英特尔® 智音技术)」（`docs/27`）。
+
+**光影和资源包也能装了**：左侧导航多一项「光影资源包」，下面分「光影」「资源包」两个二级页。已装的从 `shaderpacks/` 与 `resourcepacks/` 扫出来，勾选框就是启停（改文件名 `.zip` ↔ `.zip.disabled`），删除要二次确认；文件夹形态的包明确拒绝停用——对目录改名游戏照样认，假装停用只会让人困惑。搜装走 Modrinth：光影用 `loaders=["iris","optifine"]`、资源包用 `["minecraft"]`，都不带 categories facet。实测搜 `complementary` 装进 `shaderpacks/`，落盘 `ComplementaryReimagined_r5.9.3.zip` 553 397 B，已装列表同时列出旧的文件夹形态包并标「· 文件夹」。
 
 **联机页**：扫描局域网广播（`224.0.2.60:4445`，读 `[MOTD]`/`[AD]`）列出同网段的世界，也能手动解析 `host:port` 并复制地址。**不在启动器里「点一下就进」**——绕过游戏会丢皮肤与会话，界面里写清了原因。
 
