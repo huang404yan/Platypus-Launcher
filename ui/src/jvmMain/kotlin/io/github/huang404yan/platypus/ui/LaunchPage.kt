@@ -14,6 +14,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -23,6 +25,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -43,6 +46,8 @@ import io.github.huang404yan.platypus.core.instance.InstanceScanner
 import io.github.huang404yan.platypus.core.instance.ScanResult
 import io.github.huang404yan.platypus.core.instance.instanceKey
 import io.github.huang404yan.platypus.core.instance.mergeInstances
+import io.github.huang404yan.platypus.core.launch.CrashReport
+import io.github.huang404yan.platypus.core.launch.CrashReports
 import io.github.huang404yan.platypus.core.launch.GameHandle
 import io.github.huang404yan.platypus.core.launch.LaunchDiagnosis
 import io.github.huang404yan.platypus.core.launch.LaunchEvent
@@ -52,7 +57,12 @@ import io.github.huang404yan.platypus.core.runtime.JavaRuntime
 import io.github.huang404yan.platypus.core.runtime.findExactMajor
 import io.github.huang404yan.platypus.core.settings.normalizeOfflineUsername
 import io.github.huang404yan.platypus.core.version.parseVersionJson
+import java.awt.Desktop
+import java.awt.Toolkit
+import java.awt.datatransfer.StringSelection
 import java.io.File
+import java.time.LocalDateTime
+import java.time.format.DateTimeFormatter
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -109,6 +119,11 @@ fun LaunchPage(
     val buffer = remember { LogBuffer() }
     var handle by remember { mutableStateOf<GameHandle?>(null) }
     var menuReached by remember { mutableStateOf(false) }
+    // 日志区按钮的一次性反馈（复制/导出成功或失败），不做气泡通知，一行字够了
+    var notice by remember { mutableStateOf("") }
+    // 本次启动的开始时刻：退出后只认比它新的 crash-report，
+    // 否则实例上一次崩过的话，这次正常退出也会把旧报告当成新的挂出来。
+    var startedAt by remember { mutableStateOf(0L) }
 
     /** 扫描目录 + 读登记，登记的排在前面。 */
     suspend fun rescan() {
@@ -233,6 +248,7 @@ fun LaunchPage(
         menuReached = false
         stageText = ""
         handle = null
+        startedAt = System.currentTimeMillis()
         phase = LaunchPhase.Starting
         val request = LaunchRequest(
             instance = instance,
@@ -258,10 +274,18 @@ fun LaunchPage(
                         }
                         is LaunchEvent.Exited -> {
                             stageText = ""
+                            // 事件回调本来就在 IO 线程，这里同步读一次崩溃报告（最多 256 KB）即可，
+                            // 不额外开协程：退出这一刻界面正等着出结论，异步读会让卡片晚一拍才出现。
+                            // 两道闸：退出码为 0 说明游戏自己退干净了；报告还得比本次启动新。
+                            val crash = if (event.code == 0) null else runCatching {
+                                CrashReports.read(File(instance.directory))
+                                    ?.takeIf { it.modifiedAt >= startedAt - CRASH_MTIME_SLACK_MS }
+                            }.getOrNull()
                             phase = LaunchPhase.Exited(
                                 code = event.code,
                                 diagnosis = event.diagnosis,
                                 reachedMenu = LaunchDiagnosis.reachedMenu(buffer.tail(1_000)),
+                                crash = crash,
                             )
                         }
                     }
@@ -315,7 +339,12 @@ fun LaunchPage(
     val merged = mergeInstances(registered, scanned?.instances.orEmpty())
     val exactJava = requiredMajor?.let { major -> (javaPhase as? JavaPhase.Done)?.runtimes?.findExactMajor(major) }
 
-    Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+    // 整页可滚动：崩溃卡片一出现，内容高度会超过窗口，原来用 weight(1f) 撑的日志区
+    // 会被压成一条线（实测 1330 px 高的窗口里只剩 8 px），工具条上的复制/导出全看不见。
+    Column(
+        Modifier.fillMaxSize().verticalScroll(rememberScrollState()),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
         Text("启动", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
         Text(
             "选一个实例、调好内存、选一个 Java，点「启动」。离线模式，不登录任何账号。",
@@ -471,13 +500,56 @@ fun LaunchPage(
 
         StatusLine(phase = phase, stageText = stageText, menuReached = menuReached)
 
-        // ⑤ 日志
+        // ⑤ 崩溃报告：退出后才有，读不到就不占位置
+        (phase as? LaunchPhase.Exited)?.crash?.let { crash ->
+            CrashCard(
+                crash = crash,
+                instanceDir = selected?.let { File(it.directory) },
+                onNotice = { notice = it },
+            )
+        }
+
+        // ⑥ 日志
         val listState = rememberLazyListState()
         LaunchedEffect(logs.size) {
             if (logs.isNotEmpty()) listState.scrollToItem(logs.size - 1)
         }
+        Row(
+            Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            Text(
+                if (logs.isEmpty()) "日志" else "日志 · " + logs.size + " 行",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Spacer(Modifier.weight(1f))
+            TextButton(
+                onClick = { notice = copyText(logs.joinToString("\n"), "日志") },
+                enabled = logs.isNotEmpty(),
+            ) { Text("复制") }
+            TextButton(
+                onClick = { notice = exportLogs(selected?.let { File(it.directory) }, logs) },
+                enabled = logs.isNotEmpty() && selected != null,
+            ) { Text("导出") }
+            TextButton(
+                onClick = { notice = openCrashDir(selected?.let { File(it.directory) }) },
+                enabled = selected != null,
+            ) { Text("打开崩溃报告目录") }
+        }
+        if (notice.isNotBlank()) {
+            Text(
+                notice,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+
+        // 固定高度而不是 weight(1f)：外层已经是可滚动 Column，weight 在滚动容器里拿不到
+        // 有界高度；日志列表本身用 LazyColumn，也必须有个确定的上界才能滚动。
         Surface(
-            Modifier.fillMaxWidth().weight(1f),
+            Modifier.fillMaxWidth().height(240.dp),
             color = MaterialTheme.colorScheme.surfaceVariant,
             shape = RoundedCornerShape(8.dp),
         ) {
@@ -506,6 +578,68 @@ fun LaunchPage(
 
 private const val MAX_VISIBLE_LINES = 500
 
+/**
+ * 允许报告比启动时刻早一点：文件系统时间戳精度、以及崩溃写盘到进程真正退出之间的几十毫秒。
+ * 取 5 秒 —— 比它早的报告一定来自更早的一次启动。
+ */
+private const val CRASH_MTIME_SLACK_MS = 5_000L
+
+/** 复制到剪贴板；失败不抛，返回一行提示。 */
+private fun copyText(text: String, label: String): String {
+    if (text.isBlank()) return label + "是空的，没有可复制的内容。"
+    val ok = runCatching {
+        Toolkit.getDefaultToolkit().systemClipboard.setContents(StringSelection(text), null)
+    }.isSuccess
+    return if (ok) "已复制" + label + "（" + text.length + " 字符）" else "复制失败，请手动选中再复制。"
+}
+
+/** 导出日志到实例目录下 logs/platypus-时间.log，返回一行提示。 */
+private fun exportLogs(instanceDir: File?, logs: List<String>): String {
+    if (instanceDir == null) return "没有选中实例，无法确定导出位置。"
+    if (logs.isEmpty()) return "日志是空的，没有可导出的内容。"
+    val dir = File(instanceDir, "logs")
+    if (!dir.exists() && !dir.mkdirs()) return "建不了目录：" + dir.absolutePath
+    val name = "platypus-" + LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss")) + ".log"
+    val target = File(dir, name)
+    return runCatching {
+        target.writeText(logs.joinToString("\n"), Charsets.UTF_8)
+        "已导出到 " + target.absolutePath
+    }.getOrElse { "导出失败：" + (it.message ?: it.javaClass.simpleName) }
+}
+
+/** 打开实例目录下的 crash-reports/；目录不存在时先不创建，直接提示。 */
+private fun openCrashDir(instanceDir: File?): String {
+    if (instanceDir == null) return "没有选中实例，无法定位崩溃报告目录。"
+    val dir = CrashReports.dirOf(instanceDir)
+    if (!dir.exists()) return "这个实例还没有 crash-reports 目录（没崩过，或报告被清掉了）。"
+    val ok = runCatching {
+        if (Desktop.isDesktopSupported() && Desktop.getDesktop().isSupported(Desktop.Action.OPEN)) {
+            Desktop.getDesktop().open(dir)
+            true
+        } else false
+    }.getOrDefault(false)
+    return if (ok) "已打开 " + dir.absolutePath else "打不开资源管理器，路径是：" + dir.absolutePath
+}
+
+/**
+ * 报告文件读出来给「复制全文 / 查看全文」用；读失败返回一句说明，不抛。
+ * 只取前 256 KB —— 卡死循环的 mod 能把 crash-report 写到几十 MB，界面里逐行铺开会直接卡住。
+ */
+private fun File.readTextSafe(): String = runCatching {
+    val text = readText(Charsets.UTF_8)
+    if (text.length > 256 * 1024) text.take(256 * 1024) + "\n…（已截断，全文见文件本身）" else text
+}.getOrElse { "读取失败：" + (it.message ?: it.javaClass.simpleName) }
+
+private fun formatStamp(millis: Long): String =
+    LocalDateTime.ofInstant(java.time.Instant.ofEpochMilli(millis), java.time.ZoneId.systemDefault())
+        .format(DateTimeFormatter.ofPattern("MM-dd HH:mm:ss"))
+
+private fun humanBytes(bytes: Long): String = when {
+    bytes >= 1024L * 1024L -> String.format("%.1f MB", bytes / 1024.0 / 1024.0)
+    bytes >= 1024L -> String.format("%.1f KB", bytes / 1024.0)
+    else -> bytes.toString() + " B"
+}
+
 /** Java 探测的四种状态；探测失败不能当成「没有 Java」。 */
 private sealed interface JavaPhase {
     data object Idle : JavaPhase
@@ -522,7 +656,16 @@ private sealed interface LaunchPhase {
     data object Idle : LaunchPhase
     data object Starting : LaunchPhase
     data class Running(val pid: Long) : LaunchPhase
-    data class Exited(val code: Int, val diagnosis: String?, val reachedMenu: Boolean) : LaunchPhase
+    /**
+     * [crash] 是退出后从实例目录 crash-reports/ 里读到的最新一份报告。
+     * 读不到（没装模组、Java 崩在写报告之前、目录被清理过）时保持 null，界面不显示崩溃卡片。
+     */
+    data class Exited(
+        val code: Int,
+        val diagnosis: String?,
+        val reachedMenu: Boolean,
+        val crash: CrashReport? = null,
+    ) : LaunchPhase
     data class Failed(val message: String) : LaunchPhase
 }
 
@@ -544,6 +687,76 @@ private class LogBuffer {
 
     private companion object {
         const val CAPACITY = 5_000
+    }
+}
+
+/**
+ * 崩溃报告卡片：只显示摘要（文件、时间、Description、第一个异常），
+ * 整份报告留给「打开目录」去看 —— 界面上摊开 256 KB 栈对用户没有意义。
+ */
+@Composable
+private fun CrashCard(crash: CrashReport, instanceDir: File?, onNotice: (String) -> Unit) {
+    var expanded by remember(crash.file.path) { mutableStateOf(false) }
+    Card(
+        Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer),
+    ) {
+        Column(
+            Modifier.fillMaxWidth().padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            Text(
+                "崩溃报告 · " + crash.fileName,
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.onErrorContainer,
+            )
+            Text(
+                formatStamp(crash.modifiedAt) + " · " + humanBytes(crash.bytes),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onErrorContainer,
+            )
+            if (crash.description.isNotBlank()) {
+                Text(
+                    "Description: " + crash.description,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onErrorContainer,
+                )
+            }
+            if (crash.exception.isNotBlank()) {
+                Text(
+                    crash.exception,
+                    style = MaterialTheme.typography.bodySmall,
+                    fontFamily = FontFamily.Monospace,
+                    color = MaterialTheme.colorScheme.onErrorContainer,
+                )
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                TextButton(onClick = { expanded = !expanded }) {
+                    Text(if (expanded) "收起全文" else "查看全文")
+                }
+                TextButton(onClick = { onNotice(copyText(crash.file.readTextSafe(), "崩溃报告全文")) }) {
+                    Text("复制全文")
+                }
+                TextButton(
+                    enabled = instanceDir != null,
+                    onClick = { onNotice(openCrashDir(instanceDir)) },
+                ) { Text("打开目录") }
+            }
+            if (expanded) {
+                Surface(
+                    Modifier.fillMaxWidth().heightIn(max = 220.dp),
+                    color = MaterialTheme.colorScheme.surface,
+                    shape = RoundedCornerShape(6.dp),
+                ) {
+                    LazyColumn(Modifier.fillMaxSize().padding(8.dp)) {
+                        items(crash.file.readTextSafe().lines()) { line ->
+                            Text(line, style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace)
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 
