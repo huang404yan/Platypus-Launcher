@@ -37,6 +37,7 @@ enum class Page(val label: String) {
     INSTANCE("实例"),
     DOWNLOAD("下载"),
     MODS("模组"),
+    PACKS("光影资源包"),
     LINK("联机"),
     SETTINGS("设置"),
     ABOUT("关于"),
@@ -82,6 +83,7 @@ fun App(initialGameRoot: String? = null, backend: LauncherBackend? = null) {
                     }
                     Page.DOWNLOAD -> DownloadsPage(initialGameRoot, backend) { page = Page.LAUNCH }
                     Page.MODS -> ModsPage(initialGameRoot, backend, subTabOf(Page.MODS))
+                    Page.PACKS -> PacksPage(initialGameRoot, backend, subTabOf(Page.PACKS))
                     Page.LINK -> LinkPage()
                     Page.SETTINGS -> SettingsPage(backend, subTabOf(Page.SETTINGS))
                     Page.ABOUT -> AboutPage()

@@ -188,6 +188,38 @@ class ModrinthMetaTest {
     }
 
     @Test
+    fun `光影搜索的 project_type facet 换成 shader`() {
+        val url = ModrinthMeta.searchUrl("complementary", "1.20.1", LoaderKind.VANILLA, projectType = ModrinthMeta.PROJECT_TYPE_SHADER)
+        val facets = java.net.URLDecoder.decode(url.substringAfter("facets="), "UTF-8")
+        assertTrue(facets.contains("project_type:shader"), facets)
+        // 光影没有 fabric/forge 之分，不能带上加载器 facet，否则一条都搜不到
+        assertTrue(!facets.contains("categories:"), facets)
+    }
+
+    @Test
+    fun `资源包搜索用 resourcepack 类型`() {
+        val url = ModrinthMeta.searchUrl("fresh", "1.20.1", LoaderKind.VANILLA, projectType = ModrinthMeta.PROJECT_TYPE_RESOURCEPACK)
+        val facets = java.net.URLDecoder.decode(url.substringAfter("facets="), "UTF-8")
+        assertTrue(facets.contains("project_type:resourcepack"), facets)
+    }
+
+    @Test
+    fun `直接给 loaders 列表时不再走加载器枚举`() {
+        // 光影在 Modrinth 上标的是 iris / optifine，不是 fabric
+        val url = ModrinthMeta.versionsUrl("complementary-reimagined", "1.20.1", LoaderKind.VANILLA, listOf("iris", "optifine"))
+        val decoded = java.net.URLDecoder.decode(url, "UTF-8")
+        assertTrue(decoded.contains("loaders=[\"iris\",\"optifine\"]"), decoded)
+        assertTrue(!decoded.contains("fabric"), decoded)
+    }
+
+    @Test
+    fun `不传 loaders 时仍按加载器枚举拼`() {
+        val url = ModrinthMeta.versionsUrl("sodium", "1.20.1", LoaderKind.FABRIC, null)
+        val decoded = java.net.URLDecoder.decode(url, "UTF-8")
+        assertTrue(decoded.contains("loaders=[\"fabric\"]"), decoded)
+    }
+
+    @Test
     fun `编码把中文与空格都转成百分号`() {
         assertEquals("a%20b", ModrinthMeta.encode("a b"))
         assertEquals("sodium", ModrinthMeta.encode("sodium"))
