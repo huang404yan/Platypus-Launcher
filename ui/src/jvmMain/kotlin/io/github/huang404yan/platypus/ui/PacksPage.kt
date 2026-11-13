@@ -250,6 +250,9 @@ fun PacksPage(
         }
     }
 
+    /** 首次组合走完没有。用来区分「首屏」和「切二级页」两种重扫。 */
+    var booted by remember { mutableStateOf(false) }
+
     LaunchedEffect(Unit) {
         val repository = backend?.settings
         if (repository != null) {
@@ -262,12 +265,38 @@ fun PacksPage(
             rescanInstances()
             rescanPacks()
         }
+        booted = true
+    }
+
+    /*
+     * 切换「光影 / 资源包」时必须重扫一次。
+     *
+     * 只靠上面那个 LaunchedEffect(Unit) 不够：它的 key 是 Unit，二级页切换只会重组、不会重启它，
+     * 于是资源包页会一直挂着光影页扫出来的清单（实测：切到「资源包」后，标题写「资源包包」，
+     * 已装列表里躺着三个光影包、路径还是 .../shaderpacks）。
+     *
+     * 顺手把上一次的搜索结果清掉，否则搜「complementary」的结果会跟着跑到资源包页去。
+     */
+    LaunchedEffect(kind) {
+        if (!booted) return@LaunchedEffect
+        results = emptyList()
+        searched = false
+        searchError = ""
+        notice = ""
+        opNotice = ""
+        opError = ""
+        rescanPacks()
     }
 
     val current = snapshot
 
     Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Text(kind.label + "包", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
+        // 别拼 kind.label + "包"：「资源包」+「包」会变成「资源包包」（实测出来的）
+        Text(
+            if (kind == PackKind.RESOURCE_PACK) "资源包" else "光影包",
+            style = MaterialTheme.typography.headlineSmall,
+            fontWeight = FontWeight.SemiBold,
+        )
         Text(
             if (subTab == PACKS_TAB_RESOURCEPACKS) {
                 "从 Modrinth 搜资源包，装进选中实例的 resourcepacks/。"
