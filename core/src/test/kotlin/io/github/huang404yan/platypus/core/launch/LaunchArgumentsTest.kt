@@ -140,6 +140,42 @@ class LaunchArgumentsTest {
     }
 
     @Test
+    fun `日志编码参数两条都在，且排在 -Xmx 之后`() {
+        // 中文 Windows 上游戏默认按 GBK 写 stdout，读侧按 UTF-8 解就全是 U+FFFD。
+        // JDK 18+ 认 stdout.encoding、Java 17 及更早只认 file.encoding，两个都得传。
+        val jvm = LaunchArguments.build(vanilla, context()).jvmArgs
+        assertTrue(jvm.contains("-Dstdout.encoding=UTF-8"))
+        assertTrue(jvm.contains("-Dfile.encoding=UTF-8"))
+        assertTrue(jvm.indexOf("-Dstdout.encoding=UTF-8") > 0)
+    }
+
+    @Test
+    fun `没有 jvm 参数的老版本也有日志编码参数`() {
+        // 1.5.2 这类 json 里没有 arguments.jvm，走的是自己补 -cp 的分支，
+        // 编码参数在那条分支之前加上，所以照样出现。
+        val meta = version(
+            """
+            {
+              "id": "1.5.2",
+              "mainClass": "net.minecraft.client.Minecraft",
+              "minecraftArguments": "--username @D@{auth_player_name}"
+            }
+            """.trimIndent(),
+        )
+        val jvm = LaunchArguments.build(meta, context()).jvmArgs
+        assertTrue(jvm.contains("-Dstdout.encoding=UTF-8"))
+        assertTrue(jvm.contains("-Dfile.encoding=UTF-8"))
+    }
+
+    @Test
+    fun `用户仍能用额外参数把编码改回去`() {
+        // JVM 对重复的 -D 是后者覆盖前者，所以放在 json 与 extraJvmArgs 之前才不会挡住用户。
+        val command = LaunchArguments.build(vanilla, context().copy(extraJvmArgs = listOf("-Dfile.encoding=GBK")))
+        assertEquals("-Dfile.encoding=GBK", command.jvmArgs.last())
+        assertTrue(command.jvmArgs.count { it.startsWith("-Dfile.encoding=") } == 2)
+    }
+
+    @Test
     fun `额外 jvm 参数与游戏参数追加在最后`() {
         val command = LaunchArguments.build(
             vanilla,
