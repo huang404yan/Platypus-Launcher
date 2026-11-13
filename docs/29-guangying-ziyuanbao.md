@@ -86,6 +86,28 @@ private val DISABLED_SUFFIXES = listOf(".zip.disabled", ".zip.bak", ".disabled")
 
 ---
 
+## 五之二、切「光影 / 资源包」为什么还要重扫一次
+
+这一页被人点出来过两个 bug，都记在这里免得再踩：
+
+1. 标题写成 `kind.label + "包"` —— 「资源包」拼上「包」变成「资源包包」。改成按 `PackKind` 直接给全名。
+2. 首屏那个 `LaunchedEffect(Unit)` 的 key 是 `Unit`，**二级页切换只重组、不重启它**，于是切到「资源包」后 `rescanPacks()` 不再跑：路径还写 `.../shaderpacks`、列表还是三个光影包。
+
+修法是加 `booted` 标记加一个 `LaunchedEffect(kind)`：
+
+```kotlin
+var booted by remember { mutableStateOf(false) }
+LaunchedEffect(kind) {
+    if (!booted) return@LaunchedEffect   // 首屏交给上面那个 LaunchedEffect(Unit)
+    results = emptyList(); searched = false   // 顺手清掉上一页的搜索结果
+    rescanPacks()
+}
+```
+
+清搜索结果这半句不是顺手写的：搜 `complementary` 的结果会跟着跑到资源包页去，看上去像资源包搜出了光影。
+
+---
+
 ## 六、实测证据（2026-11-13）
 
 | 项 | 实测 |
@@ -95,12 +117,17 @@ private val DISABLED_SUFFIXES = listOf(".zip.disabled", ".zip.bak", ".disabled")
 | 界面安装 | 点「装进 shaderpacks/」→ 落盘 `D:\ruanjian\youxi\pcl2ziyong\.minecraft\versions\1.20.1-Forge_47.4.28\shaderpacks\ComplementaryReimagined_r5.9.3.zip`，**553 397 B**，界面提示「已装 ComplementaryReimagined_r5.9.3.zip（r5.9.3，540 KB）」 |
 | 已装列表 | 「已装 · 3 个」，三行分别 540 KB / 9.3 MB·文件夹 / 540 KB；文件夹形态那行显示「· 文件夹」 |
 | 旧包兼容 | 该实例原有 `ComplementaryUnbound_r5.9.3.zip` 与解压出来的同名文件夹都被正确列出，后者标「· 文件夹」 |
+| 勾选停用 | 点第一行勾选框 → 落盘真的改名成 `ComplementaryReimagined_r5.9.3.zip.disabled`；再点回来恢复成 `.zip`，双向都通 |
+| 文件夹拒绝停用 | 点文件夹形态那行 → 目录不变，红字「文件夹形态的包不支持直接停用（改名后游戏照样认这个目录）」 |
+| 切二级页重扫 | 从「光影」点「资源包」→ 标题变「资源包」、路径变 `...\resourcepacks`、列表换成资源包自己的清单（修复前挂着光影的清单，见第七节） |
+| 资源包搜索 | 搜 `fresh`（游戏版本 1.20.1）→ 命中 Fresh Animations（作者 FreshLX，5199.9 万次下载） |
+| 资源包安装 | 点「装进 resourcepacks/」→ 落盘 `FreshAnimations_v1.11.2_1.20+.zip`，**742 790 B**，已装列表从 1 个变 2 个 |
+| 包内描述 | `pack.mcmeta` 的 `description` 原文是 `§a■ 1.11.2 BASE§8\n■ By FreshLX`，界面显示成去掉颜色码的「■ 1.11.2 BASE ■ By FreshLX」（换行折成空格） |
 
 ---
 
 ## 七、还没做到
 
-- **勾选停用那一下没在界面里验成**：点 Checkbox 后 `shaderpacks` 目录没有变化。怀疑是点空了（截图坐标 (479,1030) vs 屏幕坐标 (519,1070)），`PackFileOps.setEnabled` 本身有 8 例单测覆盖改名逻辑，但**「界面勾一下真的改名」这条还没有实测证据**，下次开窗口第一件事补验。
 - 只有桌面端（jvmMain）做了这一页，**安卓端没有**。
 - 不读光影包内部信息（比如作者、版本号），只靠文件名与 Modrinth 返回的 `versionNumber`。
 - 不支持「从本地 zip 导入」——只能从 Modrinth 装。
