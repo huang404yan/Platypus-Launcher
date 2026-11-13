@@ -12,10 +12,10 @@ import io.github.huang404yan.platypus.core.launch.LaunchContext
 import io.github.huang404yan.platypus.core.launch.LaunchDiagnosis
 import io.github.huang404yan.platypus.core.launch.LaunchEvent
 import io.github.huang404yan.platypus.core.launch.LaunchRequest
+import io.github.huang404yan.platypus.core.launch.LogLineReader
 import io.github.huang404yan.platypus.core.launch.NativesExtractor
 import io.github.huang404yan.platypus.core.launch.VersionResolver
 import io.github.huang404yan.platypus.core.version.VersionJson
-import java.io.BufferedReader
 import java.io.File
 import java.util.Collections
 import java.util.concurrent.TimeUnit
@@ -133,14 +133,20 @@ class DesktopGameRuntime(
         file
     }.getOrNull()
 
-    /** 逐行读日志，同时留在环形缓冲里供退出归因使用。 */
+    /**
+     * 逐行读日志，同时留在环形缓冲里供退出归因使用。
+     *
+     * 走 [LogLineReader] 而不是 `BufferedReader(reader(Charsets.UTF_8))`：游戏在中文 Windows 上
+     * 是按 GBK 写 stdout 的，按 UTF-8 解会把每行中文变成 U+FFFD，字节一丢就再也拿不回来。
+     * 这里先看字节、再挑编码解（UTF-8 优先，不像 UTF-8 才退回 GBK）。
+     */
     private fun pump(
         process: Process,
         handle: DesktopGameHandle,
         onLine: (String) -> Unit,
     ) {
         runCatching {
-            BufferedReader(process.inputStream.reader(Charsets.UTF_8)).use { reader ->
+            LogLineReader(process.inputStream).use { reader ->
                 while (true) {
                     val line = reader.readLine() ?: break
                     handle.append(line)

@@ -81,6 +81,7 @@ object LaunchArguments {
         val jsonJvm = version.arguments?.jvm.orEmpty()
         val jvm = buildList {
             add("-Xmx" + context.memoryMb + "M")
+            addAll(chineseLogArgs())
             if (jsonJvm.isEmpty()) {
                 // 1.6 及更早的版本 json 里根本没有 jvm 参数，这两条必须自己补。
                 add("-Djava.library.path=" + context.nativesDir.path)
@@ -103,6 +104,21 @@ object LaunchArguments {
         }
         return LaunchCommand(mainClass = version.mainClass, jvmArgs = jvm, gameArgs = game)
     }
+
+    /**
+     * 让游戏把中文日志按 UTF-8 吐出来的两条参数。
+     *
+     * 背景：游戏在中文 Windows 上按系统代码页（GBK）往 stdout 写中文，我们按 UTF-8 读，
+     * 界面上那几行就变成一串 U+FFFD。读侧改不了这件事——字节在写的那一刻就已经丢了。
+     *
+     * 为什么要同时传两条：JDK 18 起才有 `stdout.encoding`（`file.encoding` 被改成只读），
+     * 而 Java 17 及更早只认 `file.encoding`。两个都传才能跨版本通吃，
+     * 不认识的 JDK 会把它当成一个没人读的系统属性，没有副作用。
+     *
+     * 位置在 -Xmx 之后、json 参数与 [LaunchContext.extraJvmArgs] 之前：
+     * JVM 对重复的 -D 是后者覆盖前者，用户想改回 GBK 仍然能用额外参数盖掉。
+     */
+    fun chineseLogArgs(): List<String> = listOf("-Dstdout.encoding=UTF-8", "-Dfile.encoding=UTF-8")
 
     /** 老的 minecraftArguments 用空格分隔；值里不会出现空格，简单切即可。 */
     fun splitPlainArguments(text: String): List<String> =
