@@ -22,6 +22,10 @@ val PAGE_SUB_TABS: Map<Page, List<SubTab>> = mapOf(
         SubTab("installed", "已装"),
         SubTab("browse", "浏览"),
     ),
+    Page.PACKS to listOf(
+        SubTab("shaders", "光影"),
+        SubTab("resourcepacks", "资源包"),
+    ),
     Page.SETTINGS to listOf(
         SubTab("launch", "启动"),
         SubTab("ui", "界面"),

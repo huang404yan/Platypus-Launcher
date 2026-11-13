@@ -85,9 +85,10 @@ object ModrinthMeta {
         loader: LoaderKind = LoaderKind.FABRIC,
         limit: Int = DEFAULT_SEARCH_LIMIT,
         offset: Int = 0,
+        projectType: String = PROJECT_TYPE_MOD,
     ): String {
         val facets = mutableListOf<String>()
-        facets += "[\"project_type:mod\"]"
+        facets += "[\"project_type:" + projectType + "\"]"
         loaderName(loader)?.let { facets += "[\"categories:" + it + "\"]" }
         gameVersion?.trim()?.takeIf { it.isNotEmpty() }?.let { facets += "[\"versions:" + it + "\"]" }
         val sb = StringBuilder(BASE_URL)
@@ -101,15 +102,30 @@ object ModrinthMeta {
         return sb.toString()
     }
 
-    /** 某个模组在指定游戏版本 + 加载器下的全部文件（Modrinth 默认按发布时间倒序）。 */
-    fun versionsUrl(slug: String, gameVersion: String?, loader: LoaderKind): String {
+    /**
+     * 某个模组在指定游戏版本 + 加载器下的全部文件（Modrinth 默认按发布时间倒序）。
+     *
+     * [loaders] 给了就用它，否则退回 [loaderName]。为什么要这个口子：光影在 Modrinth 上标的
+     * 加载器是 `iris` / `optifine`，资源包标的是 `minecraft`，两者都不是 [LoaderKind] 里的值。
+     */
+    fun versionsUrl(
+        slug: String,
+        gameVersion: String?,
+        loader: LoaderKind,
+        loaders: List<String>? = null,
+    ): String {
         val sb = StringBuilder(BASE_URL)
         sb.append("/project/").append(encode(slug.trim())).append("/version")
         val params = mutableListOf<String>()
         gameVersion?.trim()?.takeIf { it.isNotEmpty() }?.let {
             params += "game_versions=" + encode("[\"" + it + "\"]")
         }
-        loaderName(loader)?.let { params += "loaders=" + encode("[\"" + it + "\"]") }
+        val loaderNames = loaders?.map { it.trim() }?.filter { it.isNotEmpty() }.orEmpty()
+        if (loaderNames.isNotEmpty()) {
+            params += "loaders=" + encode("[" + loaderNames.joinToString(",") { "\"" + it + "\"" } + "]")
+        } else {
+            loaderName(loader)?.let { params += "loaders=" + encode("[\"" + it + "\"]") }
+        }
         if (params.isNotEmpty()) sb.append("?").append(params.joinToString("&"))
         return sb.toString()
     }
@@ -131,6 +147,11 @@ object ModrinthMeta {
     /** 拿某个模组最新版本的查询串要带游戏版本与加载器，否则会挑到给别的版本编译的构建。 */
     fun latestVersionsUrl(slug: String, gameVersion: String?, loader: LoaderKind): String =
         versionsUrl(slug, gameVersion, loader)
+
+    /** 搜索时按项目类型过滤的取值：模组 / 光影 / 资源包（Modrinth 的 project_type 只有这几种）。 */
+    const val PROJECT_TYPE_MOD = "mod"
+    const val PROJECT_TYPE_SHADER = "shader"
+    const val PROJECT_TYPE_RESOURCEPACK = "resourcepack"
 
     private val json = Json { ignoreUnknownKeys = true; isLenient = true }
 
