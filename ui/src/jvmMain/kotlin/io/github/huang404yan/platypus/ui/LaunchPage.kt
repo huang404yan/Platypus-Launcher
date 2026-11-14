@@ -3,6 +3,7 @@ package io.github.huang404yan.platypus.ui
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -22,6 +23,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -120,6 +122,14 @@ fun LaunchPage(
     var savedUsername by remember { mutableStateOf("") }
     var phase by remember { mutableStateOf<LaunchPhase>(LaunchPhase.Idle) }
     var stageText by remember { mutableStateOf("") }
+    // 启动阶段的假进度（准备版本文件 0.05 → 解压原生库 0.15 → 起进程 0.2）。
+    // 浮层上的进度条就吃这个数：它不是真实百分比，但能让「点了之后有没有动静」有个可见的回答。
+    var stageFraction by remember { mutableStateOf(0f) }
+    // 浮层上点了「取消启动」。这里只记一个意愿，不直接砍协程：
+    // DesktopGameRuntime.launch 在 withContext 里同步起进程，中途取消会让 withContext 抛异常、
+    // 已经起来的 java 进程再也拿不到句柄，只能等用户自己去任务管理器结束它。
+    // 所以改成「先记下来，等 launch 返回句柄时立刻 stop()」。
+    var launchCancelRequested by remember { mutableStateOf(false) }
 
     val logs = remember { mutableStateListOf<String>() }
     val buffer = remember { LogBuffer() }
@@ -236,6 +246,7 @@ fun LaunchPage(
     }
 
     fun launchGame() {
+        launchCancelRequested = false
         val instance = saveMemory() ?: return
         val java = selectedJava ?: run {
             // 按钮正常情况下是禁用的，但内存保存失败或并发改动仍可能走到这里：
@@ -267,6 +278,7 @@ fun LaunchPage(
         buffer.clear()
         menuReached = false
         stageText = ""
+        stageFraction = 0f
         handle = null
         startedAt = System.currentTimeMillis()
         phase = LaunchPhase.Starting
@@ -280,9 +292,14 @@ fun LaunchPage(
             try {
                 val started = backend.gameRuntime.launch(request) { event ->
                     when (event) {
-                        is LaunchEvent.Stage -> stageText = event.name
+                        is LaunchEvent.Stage -> {
+                            stageText = event.name
+                            // 只前进不后退：解压原生库会边解边报 0.15，回退会让进度条来回抖。
+                            if (event.fraction > stageFraction) stageFraction = event.fraction
+                        }
                         is LaunchEvent.Started -> {
                             stageText = "已启动"
+                            stageFraction = 1f
                             phase = LaunchPhase.Running(event.pid)
                         }
                         is LaunchEvent.LogLine -> {
@@ -312,6 +329,15 @@ fun LaunchPage(
                     }
                 }
                 handle = started
+                // 用户在浮层上点了「取消启动」：进程这时才拿到句柄，立刻停它。
+                if (launchCancelRequested) {
+                    launchCancelRequested = false
+                    runCatching { started.stop() }
+                    handle = null
+                    stageText = ""
+                    stageFraction = 0f
+                    if (phase is LaunchPhase.Running) phase = LaunchPhase.Idle
+                }
             } catch (t: Throwable) {
                 phase = LaunchPhase.Failed(t.message ?: t.javaClass.simpleName)
             }
@@ -362,6 +388,8 @@ fun LaunchPage(
 
     // PCL 的启动页是左栏选版本 + 大号启动按钮、右栏放设置与日志（PageLaunchLeft.xaml）。
     // 照这个分法：左栏回答「现在要启动哪一个」，右栏回答「启动过程中与之后发生了什么」。
+    // 浮层要盖住整页，所以外面套一层 Box；它只在「正在启动」时出现，跑起来就撤掉。
+    Box(Modifier.fillMaxSize()) {
     Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
         LaunchSidePanel(
             merged = merged,
@@ -599,6 +627,18 @@ fun LaunchPage(
             }
         }
     }
+        if (phase is LaunchPhase.Starting) {
+            LaunchOverlay(
+                instanceName = selected?.name.orEmpty(),
+                stageText = stageText,
+                fraction = stageFraction,
+                onCancel = {
+                    launchCancelRequested = true
+                    stageText = "正在取消"
+                },
+            )
+        }
+    }
 }
 
 private const val MAX_VISIBLE_LINES = 500
@@ -779,6 +819,90 @@ private fun CrashCard(crash: CrashReport, instanceDir: File?, onNotice: (String)
                             Text(line, style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace)
                         }
                     }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * 启动中浮层，照 PCL 的 `PanLaunching` 做（`PageLaunchLeft.xaml:76-158`）。
+ *
+ * 为什么需要它：点「启动」之后，准备版本文件、整理 classpath、解压原生库这些步骤
+ * 都要几秒到十几秒，期间界面除了按钮变灰没有任何反馈 —— 用户会以为没点着，然后连点。
+ * 浮层把「现在到哪一步了」顶到屏幕中央，并顺手给一个取消入口。
+ *
+ * 与 PCL 的差别：那边的进度条是两列 Grid 按列宽比例画、信息区固定四行（步骤/登录方式/进度/速度），
+ * 我方没有正版登录也没有下载阶段，所以只留「当前步骤」一行；进度用 LinearProgressIndicator，
+ * fraction 来自 LaunchEvent.Stage 的阶段值（0.05 → 0.2 → 1.0），不是真实百分比。
+ */
+@Composable
+private fun LaunchOverlay(
+    instanceName: String,
+    stageText: String,
+    fraction: Float,
+    onCancel: () -> Unit,
+) {
+    // 遮罩挡住下面的按钮：这期间再点一次「启动」没有意义，PCL 也是把 IsHitTestVisible 关掉的。
+    Box(
+        Modifier.fillMaxSize()
+            .background(Color.Black.copy(alpha = 0.45f))
+            .clickable(enabled = false) {},
+        contentAlignment = Alignment.Center,
+    ) {
+        Surface(
+            Modifier.width(320.dp),
+            color = MaterialTheme.colorScheme.surface,
+            shape = RoundedCornerShape(12.dp),
+            shadowElevation = 8.dp,
+        ) {
+            Column(
+                Modifier.fillMaxWidth().padding(20.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Text(
+                    "正在启动游戏",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                if (instanceName.isNotBlank()) {
+                    Text(
+                        instanceName,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                LinearProgressIndicator(
+                    progress = { fraction.coerceIn(0f, 1f) },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        "当前步骤",
+                        Modifier.width(72.dp),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Text(
+                        stageText.ifBlank { "准备中" },
+                        Modifier.weight(1f),
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        "启动进度",
+                        Modifier.width(72.dp),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Text(
+                        (fraction.coerceIn(0f, 1f) * 100).toInt().toString() + " %",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+                OutlinedButton(onClick = onCancel, modifier = Modifier.fillMaxWidth()) {
+                    Text("取消启动")
                 }
             }
         }

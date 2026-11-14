@@ -1,5 +1,7 @@
 package io.github.huang404yan.platypus.desktop
 
+import io.github.huang404yan.platypus.core.install.JsonServerRepository
+import io.github.huang404yan.platypus.core.install.ServerRepository
 import io.github.huang404yan.platypus.core.instance.InstanceRepository
 import io.github.huang404yan.platypus.core.instance.JsonInstanceRepository
 import io.github.huang404yan.platypus.core.launch.GameRuntime
@@ -27,6 +29,8 @@ class DesktopServices private constructor(
     override val instances: InstanceRepository,
     /** 启动器设置。 */
     override val settings: SettingsRepository,
+    /** 服务端登记（与实例索引平级）。 */
+    override val servers: ServerRepository,
 ) : LauncherBackend {
     companion object {
         /**
@@ -44,7 +48,14 @@ class DesktopServices private constructor(
             gameRuntime = DesktopGameRuntime(),
             instances = JsonInstanceRepository(instanceIndex ?: defaultInstanceIndex(gameRoot)),
             settings = JsonSettingsRepository(settingsFile(gameRoot)),
+            servers = JsonServerRepository(defaultServerIndex(gameRoot)),
         )
+
+        /** 服务端索引与实例索引同层：有游戏目录时 <gameRoot>/platypus/servers.json。 */
+        private fun defaultServerIndex(gameRoot: File?): File {
+            if (gameRoot != null) return JsonServerRepository.defaultIndexFile(gameRoot)
+            return JsonServerRepository.defaultIndexFile(fallbackHome())
+        }
 
         private fun defaultInstanceIndex(gameRoot: File?): File {
             if (gameRoot != null) return JsonInstanceRepository.defaultIndexFile(gameRoot)

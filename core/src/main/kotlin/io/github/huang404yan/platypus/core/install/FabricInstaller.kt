@@ -17,6 +17,7 @@ import io.github.huang404yan.platypus.core.loader.parseFabricProfile
 import io.github.huang404yan.platypus.core.version.DownloadPlanner
 import io.github.huang404yan.platypus.core.version.VersionJson
 import io.github.huang404yan.platypus.core.version.parseVersionJson
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -138,6 +139,9 @@ object FabricInstaller {
                 checksumFilled = checksummed.filled,
                 checksumMissing = checksummed.stillMissing,
             )
+        } catch (e: CancellationException) {
+            // 用户点了「取消」：这不是安装失败，别包成 FabricInstallException 让界面报红。
+            throw e
         } catch (e: Exception) {
             if (e is FabricInstallException) throw e
             throw FabricInstallException(step, e.message ?: e::class.simpleName ?: "未知错误", e)

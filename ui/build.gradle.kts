@@ -19,5 +19,10 @@ kotlin {
             implementation(compose.components.resources)
             api(project(":core"))
         }
+        // 界面里的进程级 runner 与格式化函数是普通 Kotlin 代码，不需要 composable 测试框架。
+        // 建这个源集是为了让「切页保活」「进度怎么显示」这类逻辑有单测盯着。
+        jvmTest.dependencies {
+            implementation(kotlin("test"))
+        }
     }
 }

@@ -14,6 +14,7 @@ import io.github.huang404yan.platypus.core.modpack.ModpackMeta
 import io.github.huang404yan.platypus.core.modpack.ModpackOverrides
 import io.github.huang404yan.platypus.core.modpack.ModpackParse
 import io.github.huang404yan.platypus.core.runtime.JavaRuntimeService
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.ByteArrayOutputStream
@@ -261,6 +262,9 @@ object ModpackImporter {
                         ),
                     )
                 }
+            } catch (e: CancellationException) {
+                // 取消不是「下载中断」，交给上层按取消处理。
+                throw e
             } catch (e: Exception) {
                 throw ModpackImportException(
                     ModpackStep.DOWNLOADING_FILES,

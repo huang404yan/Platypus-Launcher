@@ -126,7 +126,7 @@ fun App(initialGameRoot: String? = null, backend: LauncherBackend? = null) {
                         DOWNLOAD_TAB_SHADERS ->
                             PacksPage(initialGameRoot, backend, PackKind.SHADER, tick)
                         // 服务端不登记实例，所以没有「装完去启动」的回调
-                        DOWNLOAD_TAB_SERVER -> ServerPage(initialGameRoot)
+                        DOWNLOAD_TAB_SERVER -> ServerPage(initialGameRoot, backend)
                         else -> DownloadsPage(initialGameRoot, backend, tick) { page = Page.LAUNCH }
                     }
                     Page.LINK -> LinkPage { address ->
