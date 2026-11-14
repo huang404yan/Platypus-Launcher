@@ -78,26 +78,31 @@ ModUpdateChecker.hashAll(jars)                    // 本地算 sha1
 
 ```
 装一个模组成功
-  → result.requiredDependencies 非空
-  → solveDependencies(根标题, 缺的 project_id, 实例目录, 加载器)
-      ├─ ModrinthDependencySource(游戏版本, 加载器)   ← 版本+加载器锁死在这一层
-      ├─ rootsOf()
-      ├─ installedProjectIds()  ← 已装的不再下一遍
-      └─ solve()
-  → depPlan 非空 → 界面上出现 DependencyPlanCard
+  → solveDependencies(根标题, result.requiredDependencies, 实例目录, 加载器, result.optionalDependencies)
+      ├─ 必需前置为空、只有可选 → suggestOptional()
+      │     └─ 只为「作者建议一起装」那一行做准备，不产生安装计划
+      └─ 必需前置非空
+            ├─ ModrinthDependencySource(游戏版本, 加载器)   ← 版本+加载器锁死在这一层
+            ├─ rootsOf()
+            ├─ installedProjectIds()  ← 已装的不再下一遍
+            └─ solve()  ← 必需树展开完再回头解析可选依赖
+  → depPlan 非空（mods / skipped / optional 至少一段有内容）→ 界面上出现 DependencyPlanCard
 ```
+
+`ModInstallResult` 因此多带一个 `optionalDependencies`：没有它，「装完一个只标了 optional 的模组」这条路会把提示整个丢掉——以前 `missing.isEmpty()` 直接 return。
 
 版本与加载器固定在 `ModrinthDependencySource` 这一层，因为依赖树里**每一层都必须和根模组吃同一套条件**——给 1.20.1 Fabric 的模组去装一个 1.21 的库，装完照样起不来。
 
 卡片内容：
 
-- 标题「前置依赖 · N 个要保持顺序安装」；
+- 标题「前置依赖 · N 个要保持顺序安装」（只有可选依赖时不写这行，否则会变成「前置依赖 · 0 个」）；
 - 每个模组按 `depth` 缩进，前缀 `└ `，右边跟版本号；
 - `requiredBy` 非空时缩进一层写「被 X、Y 需要」；
 - 跳过项单独一段：「跳过 N 个：· 标题 —— 原因（谁需要）」；
+- 可选依赖单独一段：「可选依赖 · N 个（不装也能启动）：· 标题 版本 —— 谁建议一起装」，见 8.4 节；
 - warnings 用 error 色；
-- 固定提示「不带前置启动会崩，或者进游戏后功能是空的。」；
-- 按钮「先不管」/「一次装齐」。
+- 固定提示「不带前置启动会崩，或者进游戏后功能是空的；标了可选的不装不影响启动。」；
+- 按钮「先不管」/「一次装齐」（只看 `plan.mods`；只有可选依赖时整颗「一次装齐」不出现——留个灰按钮比不留更让人疑惑）。
 
 ---
 
@@ -148,18 +153,35 @@ skipped=0  warnings=0
 
 ### 8.3 单测
 
-`ModDependencyResolverTest.kt` 23 例，用 `FakeSource` 塞假 `ModDependencySource`（带 `projectCalls` / `versionCalls` 计数），**不联网**：
+`ModDependencyResolverTest.kt` 31 例（含 8.4 那 8 例），用 `FakeSource` 塞假 `ModDependencySource`（带 `projectCalls` / `versionCalls` 计数），**不联网**：
 
 没有前置时只有根 / 一层展开 / 前置的前置也展开 / 多来源只排一次并记两个来源 / 成环能停 / 已装跳过 / 查版本抛异常不中断 / 无适配版本进 skipped / 查不到项目退回 project_id / 项目查询整体失败不崩 / 深度超限停止 / 数量超限停止 / 安装中途失败不影响后面 / 全成功 complete 为真 / 按序报进度 / 空白依赖不拼坏字符串 / `rootsOf` 8 例。
 
-全量 `:core:test` 实测 **35 个测试类 / 387 例 / 0 失败 0 错误 0 跳过**（旧基线 33 类 350 例）。
+全量 `:core:test` 实测 **40 个测试类 / 459 例 / 0 失败 0 错误 0 跳过**（旧基线 40 类 448 例）。
+
+### 8.4 可选依赖（2026-11-14）
+
+解析层（`ModrinthMeta`）：`ModVersionFile` 与 `ModVersionLookup` 各加 `optionalDependencies: List<String> = emptyList()`，`parseVersions` / `parseVersionFiles` 里 `filter { dependency_type == "optional" } → mapNotNull project_id → distinct()`。
+
+求解层（`ModDependencyResolver`）：
+
+- `OptionalDependency(projectId, slug, title, file, suggestedBy)`，`DependencyPlan.optional` 默认空表，`dependencyCount` 不变（可选不算「缺前置」）；
+- `solve()` 里可选依赖走**独立队列** `optionalQueue`，等必需树全部展开完再解析——这样「它是不是已经在必需树里了」才判断得准；**不递归展开可选依赖自己的前置**，否则等于把「可选」当「必需」用；
+- `MAX_OPTIONAL = 24`：一个模组挂四十个可选项时，卡片不能撑成一屏；
+- 已装过 / 已在必需树里 / 同 slug 重复 —— 三种都跳过，不占「跳过」区；
+- 查版本抛异常或没适配版本：**静默略过**，可选依赖本来就能不装，写进跳过区反而让人以为装错了；
+- 新增公开入口 `suggestOptional(rootTitle, projectIds, source, installedProjectIds, plannedSlugs, onStep)`：给「没有必需前置、只有可选依赖」那条路用（`solve()` 在那条路上没有根可展开）。
+
+界面层（`ModsPage.kt`）：`ModInstallResult` 多带 `optionalDependencies`，`install()` 把它一并传给 `solveDependencies`；装上后提示分三档——有必需前置写「正在展开整棵依赖树」，只有可选写「它自己就能跑，作者另外标了 N 个建议一起装的」，都没有就只写「。」
+
+`:core:test` 全量 **40 个测试类 / 459 例 / 0 失败 0 错误**（加 optional 之前是 40 类 448 例：`ModDependencyResolverTest` +5 例 solve 路径、+3 例 suggestOptional、`ModrinthMetaTest` +3 例）。`:ui:compileKotlinJvm` BUILD SUCCESSFUL。界面点击验证还没做。
 
 ---
 
 ## 九、还没做到
 
 - **不解决版本冲突**：A 要 B 的 1.x、C 要 B 的 2.x 时，按先来的装，后一个记「查版本失败」或装成同一份——没有真正的约束求解。
-- **不处理 `optional` 依赖**：Modrinth 的 `dependency_type` 有 `required` / `optional` / `incompatible` / `embedded`，这里**只认 `required`**。
+- **`embedded` 依赖仍然完全忽略**：Modrinth 的 `dependency_type` 四类里，`required` / `optional` / `incompatible` 现在都解析了，只剩 `embedded`（jar 内已自带那份库）没有分支，也不需要——它本来就不该被单独下载。
 - **依赖求解不处理 `incompatible`**：这一层只管「缺什么要补」；互斥声明后来由模组页的「查冲突」单独检查（`docs/30`），两条线各管一头，不在求解阶段拦。
 - **已装的不升级**：命中 `installedProjectIds` 直接跳过，哪怕装的是旧版。
 - **没有「取消安装」按钮**：页面切走才会因协程取消停下。

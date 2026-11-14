@@ -117,6 +117,7 @@ object ModInstaller {
             version = file.versionNumber,
             downloadedBytes = if (target.length() > 0) target.length() else 0L,
             requiredDependencies = file.requiredDependencies,
+            optionalDependencies = file.optionalDependencies,
         )
     }
 
@@ -205,4 +206,6 @@ data class ModInstallResult(
     val version: String,
     val downloadedBytes: Long,
     val requiredDependencies: List<String> = emptyList(),
+    /** 作者标了「可选」的 project_id：不装也能启动，只用来在卡片上提示一句。 */
+    val optionalDependencies: List<String> = emptyList(),
 )

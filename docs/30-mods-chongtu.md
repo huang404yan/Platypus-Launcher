@@ -77,7 +77,7 @@ Modrinth 的四类依赖是 `required` / `optional` / `incompatible` / `embedded
 ]
 ```
 
-断言 `incompatibleDependencies == ["4ZqxOvjD", "S1tndFDa"]`、`requiredDependencies == ["9s6osm5g"]`，`optional` 两边都不进。
+断言 `incompatibleDependencies == ["4ZqxOvjD", "S1tndFDa"]`、`requiredDependencies == ["9s6osm5g"]`；`optional` 两个列表都不进，它有自己的一份 `optionalDependencies`（见 `docs/28` 8.4 节），冲突判定不看它。
 
 ### 4.2 比对层：cross 是纯函数
 

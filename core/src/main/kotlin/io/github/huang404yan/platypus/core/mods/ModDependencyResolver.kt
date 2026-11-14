@@ -31,11 +31,29 @@ data class SkippedDependency(
     val requiredBy: String = "",
 )
 
+/**
+ * 作者标成「可选」的依赖：文件已经挑好，但**不排进安装计划**。
+ *
+ * 之所以单独一个类型而不是塞进 [DependencyPlan.mods]：可选依赖不装也能启动，
+ * 一旦混进 mods，[install] 会照单全下、界面也会把它算进「前置都装齐了」。
+ * 它存在的意义只是让卡片能写一句「作者建议一起装 X」。
+ */
+data class OptionalDependency(
+    val projectId: String,
+    val slug: String,
+    val title: String,
+    val file: ModVersionFile,
+    /** 谁建议装它。同一个人重复建议只留第一条。 */
+    val suggestedBy: String = "",
+)
+
 /** 一棵展开好的依赖树。按 [mods] 的顺序装即可（根在前，前置在后）。 */
 data class DependencyPlan(
     val mods: List<PlannedMod>,
     val skipped: List<SkippedDependency> = emptyList(),
     val warnings: List<String> = emptyList(),
+    /** 可选依赖：只提示，不装。见 [OptionalDependency]。 */
+    val optional: List<OptionalDependency> = emptyList(),
 ) {
     /** 除根之外真正被捎带装的个数。 */
     val dependencyCount: Int get() = mods.count { it.depth > 0 }
@@ -113,6 +131,9 @@ object ModDependencyResolver {
     /** 一次最多装多少个模组（含根）。 */
     const val MAX_MODS = 64
 
+    /** 一次最多列多少个可选依赖。它们不下载，但每个都要查一次版本，同样得封顶。 */
+    const val MAX_OPTIONAL = 24
+
     /**
      * 展开依赖树。只查询、不下载、不写盘，所以可以先给用户看计划再决定装不装。
      *
@@ -130,6 +151,8 @@ object ModDependencyResolver {
         val warnings = mutableListOf<String>()
         val indexBySlug = mutableMapOf<String, Int>()
         val queue = ArrayDeque<Request>()
+        // 可选依赖单独排队：等必需树全部展开完再查，这样「它是不是已经在必需树里了」才判断得准
+        val optionalQueue = ArrayDeque<Request>()
 
         for (root in roots) {
             val key = root.slug.lowercase()
@@ -145,6 +168,9 @@ object ModDependencyResolver {
             }
             for (depId in root.file.requiredDependencies) {
                 queue += Request(depId, root.title, 1)
+            }
+            for (depId in root.file.optionalDependencies) {
+                optionalQueue += Request(depId, root.title, 1)
             }
         }
 
@@ -227,10 +253,93 @@ object ModDependencyResolver {
                 for (depId in file.requiredDependencies) {
                     queue += Request(depId, title, request.depth + 1)
                 }
+                // 可选依赖不再往下展开：作者的「可选」通常只挂在自己的直接关系上，
+                // 递归下去会把整张图都拖进来，那等于把「可选」当「必需」用。
+                for (depId in file.optionalDependencies) {
+                    optionalQueue += Request(depId, title, request.depth + 1)
+                }
             }
         }
 
-        return DependencyPlan(mods = plan, skipped = skipped, warnings = warnings)
+        val optional = resolveOptional(
+            requests = optionalQueue.map { it.projectId to it.requiredBy },
+            plannedSlugs = indexBySlug.keys,
+            installedProjectIds = installedProjectIds,
+            source = source,
+            onStep = onStep,
+        )
+        return DependencyPlan(mods = plan, skipped = skipped, warnings = warnings, optional = optional)
+    }
+
+    /**
+     * 单独把一串「作者建议一起装」的 project_id 变成提示项。
+     *
+     * 给「这个模组没有必需前置、只标了可选依赖」那条路用：此时 [solve] 里没有根可展开，
+     * 但用户仍然该看到「作者建议一起装 Sodium」。
+     */
+    suspend fun suggestOptional(
+        rootTitle: String,
+        projectIds: List<String>,
+        source: ModDependencySource,
+        installedProjectIds: Set<String> = emptySet(),
+        plannedSlugs: Set<String> = emptySet(),
+        onStep: (String) -> Unit = {},
+    ): List<OptionalDependency> = resolveOptional(
+        requests = projectIds.map { it to rootTitle },
+        plannedSlugs = plannedSlugs,
+        installedProjectIds = installedProjectIds,
+        source = source,
+        onStep = onStep,
+    )
+
+    /**
+     * 把可选依赖换成「挑好文件的提示项」。
+     *
+     * 三条不做的事，都是为了不让「可选」变成负担：不递归展开它的前置、查不到就静默略过
+     * （可选依赖本来就可以不装，没必要占「跳过」的眼球）、已经装了的也不再提。
+     */
+    private suspend fun resolveOptional(
+        requests: List<Pair<String, String>>,
+        plannedSlugs: Set<String>,
+        installedProjectIds: Set<String>,
+        source: ModDependencySource,
+        onStep: (String) -> Unit,
+    ): List<OptionalDependency> {
+        if (requests.isEmpty()) return emptyList()
+        // 同一个可选依赖可能被十几个模组建议，只查一次
+        val picked = requests
+            .filter { it.first.isNotBlank() }
+            .distinctBy { it.first }
+            .take(MAX_OPTIONAL)
+        if (picked.isEmpty()) return emptyList()
+        val ids = picked.map { it.first }.distinct()
+        onStep("解析 " + ids.size + " 个可选依赖")
+        val projects = runCatching { source.projects(ids) }.getOrNull().orEmpty()
+        val result = mutableListOf<OptionalDependency>()
+        for ((projectId, suggestedBy) in picked) {
+            if (projectId in installedProjectIds) continue
+            val project = projects[projectId]
+            val slug = project?.slug?.takeIf { it.isNotBlank() } ?: projectId
+            // 必需树里已经有了：再列一遍等于让用户以为还缺东西
+            if (slug.lowercase() in plannedSlugs) continue
+            if (result.any { it.slug.equals(slug, ignoreCase = true) }) continue
+            val versions: List<ModVersionFile> = try {
+                source.versionsOf(slug)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                continue
+            }
+            val file = ModrinthMeta.pickBest(versions) ?: continue
+            result += OptionalDependency(
+                projectId = projectId,
+                slug = slug,
+                title = project?.title?.takeIf { it.isNotBlank() } ?: slug,
+                file = file,
+                suggestedBy = suggestedBy,
+            )
+        }
+        return result
     }
 
     private data class Request(val projectId: String, val requiredBy: String, val depth: Int)
