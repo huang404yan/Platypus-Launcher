@@ -36,6 +36,13 @@ data class LauncherSettings(
      * settings.json 里，不进仓库也不进安装包。申请步骤见 docs/41。
      */
     val microsoftClientId: String = "",
+    /**
+     * 配色方案：`auto` 跟随版本（孵化版蓝橙 / 正式版深色），`natural` 或 `perry` 是用户手动选的。
+     *
+     * 存 id 字符串而不是枚举下标：以后加主题、改顺序都不会把老文件读歪。
+     * 认不出来的一律当 auto（[io.github.huang404yan.platypus.core.theme.launcherThemeOf]）。
+     */
+    val theme: String = "auto",
     /** 最近一次写盘时间（毫秒）；0 表示还没写过。 */
     val updatedAt: Long = 0L,
 ) {
@@ -54,6 +61,7 @@ data class LauncherSettings(
             defaultMemoryMb = Instance.clampMemoryMb(raw.defaultMemoryMb),
             activeAccountUuid = raw.activeAccountUuid.trim(),
             microsoftClientId = raw.microsoftClientId.trim().trim('"').trim(),
+            theme = raw.theme.trim().lowercase(),
         )
     }
 }

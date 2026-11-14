@@ -8,6 +8,7 @@ androidx-core = "1.19.1"
 androidx-activity = "1.13.0"
 androidx-compose-bom = "2026.09.00"
 xz = "1.10"
+jna = "5.14.0"
 
 [libraries]
 kotlinx-coroutines-core = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-core", version.ref = "coroutines" }
@@ -15,6 +16,7 @@ kotlinx-coroutines-swing = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-
 kotlinx-coroutines-android = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-android", version.ref = "coroutines" }
 kotlinx-serialization-json = { module = "org.jetbrains.kotlinx:kotlinx-serialization-json", version.ref = "serialization" }
 tukaani-xz = { module = "org.tukaani:xz", version.ref = "xz" }
+jna = { module = "net.java.dev.jna:jna", version.ref = "jna" }
 
 androidx-core-ktx = { module = "androidx.core:core-ktx", version.ref = "androidx-core" }
 androidx-activity-compose = { module = "androidx.activity:activity-compose", version.ref = "androidx-activity" }

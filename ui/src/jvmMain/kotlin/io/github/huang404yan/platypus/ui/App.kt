@@ -34,6 +34,8 @@ import io.github.huang404yan.platypus.core.Brand
 import io.github.huang404yan.platypus.core.instance.Instance
 import io.github.huang404yan.platypus.core.instance.instanceKey
 import io.github.huang404yan.platypus.core.packs.PackKind
+import io.github.huang404yan.platypus.core.theme.LauncherTheme
+import io.github.huang404yan.platypus.core.theme.launcherThemeOf
 import java.io.File
 
 /**
@@ -61,8 +63,27 @@ fun defaultGameRoot(): String {
 }
 
 @Composable
-fun App(initialGameRoot: String? = null, backend: LauncherBackend? = null) {
-    MaterialTheme {
+fun App(
+    initialGameRoot: String? = null,
+    backend: LauncherBackend? = null,
+    // 主题在 Run 时才定下来（要先读设置），而标题栏是宿主窗口画的、这里碰不到，
+    // 所以把「最终选了哪套」回调出去，由 app-desktop 去改标题栏。
+    onThemeChanged: (LauncherTheme) -> Unit = {},
+) {
+    // 配色提到 MaterialTheme 外面：整套 ColorScheme 由它决定，改它等于换一层皮，
+    // 页面代码一行都不用知道 —— 全仓库的颜色都走 MaterialTheme.colorScheme。
+    var theme by remember { mutableStateOf(LauncherTheme.AUTO) }
+
+    // 只在最外层读一次设置。放这里而不是每页各读一次：切页会重建页面，
+    // 每页各读会让主题在切换瞬间闪一下，而且同一份文件被反复解析。
+    LaunchedEffect(backend) {
+        val repository = backend?.settings ?: return@LaunchedEffect
+        theme = runCatching { launcherThemeOf(repository.load().theme) }.getOrDefault(LauncherTheme.AUTO)
+    }
+
+    LaunchedEffect(theme) { onThemeChanged(theme) }
+
+    PlatypusTheme(theme) {
         var page by remember { mutableStateOf(Page.INSTANCE) }
 
         // 实例页点「去启动」时带上这个实例：只交一个 key，不把整个对象塞给启动页当长期状态。
@@ -136,7 +157,13 @@ fun App(initialGameRoot: String? = null, backend: LauncherBackend? = null) {
                         page = Page.LAUNCH
                     }
                     // 设置页的「Java」二级项要刷新信号（重读官方清单），其它二级项不用
-                    Page.SETTINGS -> SettingsPage(backend, subTabOf(Page.SETTINGS), tick)
+                    Page.SETTINGS -> SettingsPage(
+                        backend = backend,
+                        subTab = subTabOf(Page.SETTINGS),
+                        refreshTick = tick,
+                        theme = theme,
+                        onThemeChange = { theme = it },
+                    )
                     Page.ABOUT -> AboutPage()
                 }
             }
