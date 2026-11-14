@@ -48,17 +48,18 @@ object MicrosoftEndpoints {
     const val SCOPE = "XboxLive.signin offline_access"
 
     /**
-     * 内置的 Client ID。
+     * 内置的 Client ID —— **开源 / 测试版里是空串**。
      *
-     * 设备码流程必须先有一个在 Azure 上注册过的公共客户端，而申请第三方 MSA 应用
-     * 需要自己注册，没有官方发的通用 ID。这个 ID 是公开文档里长期被各类命令行工具
-     * 引用的公共客户端，能通全链路，但它不归本项目所有，微软随时可能收紧。
+     * 设备码流程必须先有一个在 Azure 上注册过的公共客户端，而任何随安装包发出去的 ID
+     * 都等于让所有使用者共用一份别人的应用注册：被限流、被微软收紧、被认定滥用，
+     * 都不是拿到安装包的人能处理的；仓库公开之后谁都能把那个 ID 抄走用。
      *
-     * 没有做「让用户填自己的 Client ID」—— 那需要把 clientId 一路传到刷新会话那一步，
-     * 而刷新与登录必须用同一个 ID，多出来的状态比收益大。真到了不能用那天，
-     * 改这一行常量、发一个新版本即可（docs/40 写了这一段）。
+     * 所以从 0.8.0-preview.10 起，ID 一律由用户自己注册一个，填进「设置 → 账号」，
+     * 只存在本地的 settings.json 里，不进仓库、不进安装包。申请步骤见 docs/41。
+     *
+     * 空串时登录在发请求之前就会报「还没有填 Client ID」，不会拿空值去撞微软。
      */
-    const val DEFAULT_CLIENT_ID = "04b07795-8ddb-461a-bbee-02f9e1bf7b46"
+    const val DEFAULT_CLIENT_ID = ""
 
     /** 微软让你「去这个网页输入短码」时给的地址，拿不到响应里的值时当兜底。 */
     const val DEFAULT_VERIFICATION_URI = "https://www.microsoft.com/link"
@@ -100,6 +101,49 @@ class MicrosoftAuthException(message: String, cause: Throwable? = null) : Runtim
 object MicrosoftAuth {
 
     private val json = Json { ignoreUnknownKeys = true; isLenient = true }
+
+    /**
+     * 把用户填进来的 Client ID 归一化：去首尾空白，顺手抹掉从网页复制时常带的引号。
+     *
+     * 用户是在 Azure 门户里抄一段 ID 再粘过来的，多一个空格或一对引号很常见，
+     * 直接拿去发请求会得到 AADSTS700016（找不到这个应用），排查起来极费劲。
+     */
+    fun normalizeClientId(raw: String): String = raw.trim().trim('"').trim()
+
+    /**
+     * 校验用户填的 Client ID，合法返回 null，不合法返回中文原因。
+     *
+     * 只做形状检查（GUID：36 位、四个横线、其余是十六进制），**不联网验证** ——
+     * 真假要等登录时由微软回话，这里能挡住的是「漏填」和「粘错了一段」。
+     */
+    fun clientIdProblem(raw: String): String? {
+        val id = normalizeClientId(raw)
+        if (id.isEmpty()) {
+            return "还没有填 Client ID，正版登录用不了。申请办法见「设置 → 账号」页里的说明。"
+        }
+        val badShape = id.length != 36 || id.count { it == '-' } != 4 ||
+            id.any { it != '-' && !it.isHexDigit() }
+        if (badShape) {
+            return "这不像一个应用 ID。Azure 给的是 36 位、带四个横线的形式，" +
+                "例如 00000000-0000-0000-0000-000000000000。"
+        }
+        return null
+    }
+
+    /**
+     * 发请求前的最后一道检查：不合法就抛，别让微软回一个看不懂的状态码。
+     *
+     * 返回归一化之后的 ID，调用方拿它去拼请求。
+     */
+    fun requireClientId(raw: String): String {
+        val id = normalizeClientId(raw)
+        val problem = clientIdProblem(id)
+        if (problem != null) throw MicrosoftAuthException(problem)
+        return id
+    }
+
+    private fun Char.isHexDigit(): Boolean =
+        (this in '0'..'9') || (this in 'a'..'f') || (this in 'A'..'F')
 
     // ---- 请求体 ----
 
@@ -240,7 +284,8 @@ object MicrosoftAuth {
         "invalid_grant" ->
             "登录凭据已经被微软作废了（改过密码，或者在这个账号上点了退出登录），需要重新登录。"
         "unauthorized_client", "invalid_client" ->
-            "这个 Client ID 不被微软接受。去设置页「账号」里换成你自己注册的 Azure 应用 ID。"
+            "这个 Client ID 不被微软接受。它要么填错了，要么没在 Azure 里开「允许公共客户端流」——" +
+                "去「设置 → 账号」重新检查一遍，那页第一步写着申请步骤。"
         "slow_down" -> "请求太频繁了，微软要求放慢轮询。"
         else -> if (description.isNotBlank()) description else "微软返回了没见过的错误：$code"
     }

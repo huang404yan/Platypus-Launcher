@@ -71,7 +71,7 @@ const val SETTINGS_TAB_OTHER = "other"
 @Composable
 fun SettingsPage(
     backend: LauncherBackend?,
-    /** [SETTINGS_TAB_LAUNCH] / [SETTINGS_TAB_ACCOUNT] / [SETTINGS_TAB_JAVA] / [SETTINGS_TAB_UI] / [SETTINGS_TAB_OTHER]。 */
+    /** 五个二级项之一：见 [SETTINGS_TAB_LAUNCH] 与它下面那四个常量。 */
     subTab: String = SETTINGS_TAB_LAUNCH,
     /**
      * 侧边栏那个「↻」的计数，只有「Java」页用得上（重读一次官方运行时清单）。
@@ -116,13 +116,17 @@ fun SettingsPage(
     var noticeIsError by remember { mutableStateOf(false) }
     var savedAt by remember { mutableStateOf(0L) }
     var activeAccountUuid by remember { mutableStateOf("") }
+    var microsoftClientId by remember { mutableStateOf("") }
 
     LaunchedEffect(Unit) {
-        val settings = withContext(Dispatchers.IO) { runCatching { repository.load() }.getOrDefault(LauncherSettings()) }
+        val settings = withContext(Dispatchers.IO) {
+            runCatching { repository.load() }.getOrDefault(LauncherSettings())
+        }
         username = settings.offlineUsername
         gameRoot = settings.defaultGameRoot
         memoryText = settings.defaultMemoryMb.toString()
         activeAccountUuid = settings.activeAccountUuid
+        microsoftClientId = settings.microsoftClientId
         loaded = true
         loadedFrom = (repository as? JsonSettingsRepository)?.path.orEmpty()
     }
@@ -144,6 +148,7 @@ fun SettingsPage(
                         defaultGameRoot = gameRoot.trim(),
                         defaultMemoryMb = clamped,
                         activeAccountUuid = activeAccountUuid,
+                        microsoftClientId = microsoftClientId,
                     ),
                 )
             }
@@ -191,6 +196,7 @@ fun SettingsPage(
                         defaultGameRoot = gameRoot.trim(),
                         defaultMemoryMb = Instance.clampMemoryMb(parsedMemory),
                         activeAccountUuid = uuid,
+                        microsoftClientId = microsoftClientId,
                     ),
                 )
             }
@@ -209,11 +215,48 @@ fun SettingsPage(
         }
     }
 
+    /**
+     * 立刻把 Client ID 写进设置。
+     *
+     * 和「用哪个账号」一样不跟底部「保存」按钮走：用户在账号页填完 ID 就会顺手点登录，
+     * 如果那时还没落盘，登录读到的还是空串，会报「还没有填 Client ID」——
+     * 一个刚刚明明填过的东西说他没填，比报错更让人火大。
+     */
+    fun saveClientId(raw: String) {
+        val cleaned = raw.trim().trim('"').trim()
+        microsoftClientId = cleaned
+        val parsedMemory = memoryText.trim().toIntOrNull() ?: Instance.DEFAULT_MEMORY_MB
+        scope.launch {
+            val result = runCatching {
+                repository.save(
+                    LauncherSettings(
+                        offlineUsername = normalizeOfflineUsername(username),
+                        defaultGameRoot = gameRoot.trim(),
+                        defaultMemoryMb = Instance.clampMemoryMb(parsedMemory),
+                        activeAccountUuid = activeAccountUuid,
+                        microsoftClientId = cleaned,
+                    ),
+                )
+            }
+            result.onSuccess { stored ->
+                microsoftClientId = stored.microsoftClientId
+                savedAt = stored.updatedAt
+                // 成功不在这里说话：账号页点完「保存 ID」自己会提示，两处都说会重复。
+            }.onFailure {
+                noticeIsError = true
+                notice = "Client ID 没能存下来：" + (it.message ?: it.javaClass.simpleName)
+            }
+        }
+    }
+
     fun resetDefaults() {
         username = LauncherSettings.DEFAULT_OFFLINE_USERNAME
         gameRoot = ""
         memoryText = Instance.DEFAULT_MEMORY_MB.toString()
         activeAccountUuid = ""
+        // Client ID 刻意不跟着填回默认值：默认值是空串，而用户是从 Azure 门户抄来的，
+        // 手边没有备份就找不回来了（那个 ID 在门户里还能看到，但他得再走一遍）。
+        // 「填回默认值」的语义是「把可重建的设置恢复」，这一项不属于。
         noticeIsError = false
         notice = "已填回默认值，点「保存」才生效。"
     }
@@ -237,8 +280,10 @@ fun SettingsPage(
             SETTINGS_TAB_ACCOUNT -> AccountTab(
                 backend = backend,
                 activeUuid = activeAccountUuid,
+                clientId = microsoftClientId,
                 onUseAccount = { useAccount(it) },
                 onUseOffline = { useAccount("") },
+                onSaveClientId = { saveClientId(it) },
             )
             SETTINGS_TAB_JAVA -> JavaTab(backend, gameRoot, refreshTick)
             SETTINGS_TAB_UI -> InterfaceTab()

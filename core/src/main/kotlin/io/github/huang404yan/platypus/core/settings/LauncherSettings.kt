@@ -28,6 +28,14 @@ data class LauncherSettings(
      * 这样用户在设置页换游戏目录、或者把设置文件发给别人时，不会连账号一起带出去。
      */
     val activeAccountUuid: String = "",
+    /**
+     * 用户自己注册的微软应用（Client）ID；空串表示没填，正版登录用不了。
+     *
+     * 刻意不内置一个随包发出去的 ID：那等于让所有使用者共用一份别人的应用注册，
+     * 出了限流或被微软收紧，拿到安装包的人无从处理。填一次就行，存在本机这个
+     * settings.json 里，不进仓库也不进安装包。申请步骤见 docs/41。
+     */
+    val microsoftClientId: String = "",
     /** 最近一次写盘时间（毫秒）；0 表示还没写过。 */
     val updatedAt: Long = 0L,
 ) {
@@ -45,6 +53,7 @@ data class LauncherSettings(
             defaultGameRoot = raw.defaultGameRoot.trim().trim('"'),
             defaultMemoryMb = Instance.clampMemoryMb(raw.defaultMemoryMb),
             activeAccountUuid = raw.activeAccountUuid.trim(),
+            microsoftClientId = raw.microsoftClientId.trim().trim('"').trim(),
         )
     }
 }

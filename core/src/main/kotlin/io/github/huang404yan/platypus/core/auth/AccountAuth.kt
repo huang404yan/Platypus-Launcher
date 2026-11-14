@@ -28,6 +28,17 @@ class MicrosoftAccountAuth(
     private val client: MicrosoftAuthClient = MicrosoftAuthClient(),
     /** 允许为 null：没有仓库时照样能登录，只是下次得重来（假后端 / 单测用）。 */
     private val repository: AccountRepository? = null,
+    /**
+     * 去哪儿要用户填的 Client ID。
+     *
+     * 做成函数而不是构造参数，是因为它存在设置文件里、用户可以随时改：登录那一刻的
+     * 值才算数；缓存住会让「刚填完 ID 就点登录」用上旧值。挂了设置仓库的装配会
+     * 现读 settings.json，没挂的（假后端 / 单测）用 [MicrosoftEndpoints.DEFAULT_CLIENT_ID]。
+     *
+     * **登录与刷新必须用同一个 ID** —— 微软把 refresh_token 绑在应用上，换了 ID
+     * 刷新一律 invalid_grant，用户会看到「登录凭据已被作废」，其实只是 ID 变了。
+     */
+    private val clientIdProvider: suspend () -> String = { MicrosoftEndpoints.DEFAULT_CLIENT_ID },
 ) : AccountAuth {
 
     /**
@@ -37,13 +48,15 @@ class MicrosoftAccountAuth(
      * 之后每轮轮询都调 [onTick]，带剩余秒数，界面可用来显示「还剩 N 秒」。
      */
     suspend fun login(
-        clientId: String = MicrosoftEndpoints.DEFAULT_CLIENT_ID,
+        /** 留空表示用 [clientIdProvider] 现读的那个。 */
+        clientId: String? = null,
         onCode: (DeviceCodeGrant) -> Unit,
         onTick: (remainingSeconds: Int) -> Unit = {},
     ): StoredAccount {
-        val grant = client.requestDeviceCode(clientId)
+        val resolved = clientId ?: clientIdProvider()
+        val grant = client.requestDeviceCode(resolved)
         onCode(grant)
-        val tokens = client.awaitTokens(grant, clientId, onTick)
+        val tokens = client.awaitTokens(grant, resolved, onTick)
         val login = client.authenticate(tokens.accessToken, tokens.refreshToken)
         val stored = StoredAccount(
             uuid = login.profile.id,
@@ -56,7 +69,7 @@ class MicrosoftAccountAuth(
 
     override suspend fun sessionFor(account: StoredAccount): Session {
         val tokens = try {
-            client.refresh(account.refreshToken)
+            client.refresh(account.refreshToken, clientIdProvider())
         } catch (e: CancellationException) {
             throw e
         } catch (e: MicrosoftAuthException) {
