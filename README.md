@@ -99,7 +99,8 @@ Windows 下也可以用 `gradlew.bat`。首次构建会下载约 300 MB 依赖�
 - `docs/32-daoru-hedui.md`：**导入后核对磁盘**（为什么要「再看一眼」而不是信下载器、先比大小必要时才算 sha1、失败不抛而是收集成清单、取消要显示 `Canceled` 而不是停在 `Running`）
 - `docs/35-jiemian-ke-yongxing.md`：**界面可用性**（窗口默认尺寸与最小尺寸、实例页为什么整页滚动而不是「固定头 + 权重列表」、用 Swing `JFileChooser` 而不是 AWT `FileDialog`、下载页状态条、中文搜索与不引外部词库的理由）
 - `docs/36-xinxi-jiagou-yu-zhixie.md`：**信息架构重排与开源致谢**（左栏收成六项、下载下五个二级项、刷新按钮挂导航项、整合包独立成页、致谢四分类与「使用了代码」为空的意义）
-- `docs/37-zuolan-shujubao-geli-yu-duanxucan.md`：**启动页左栏化、数据包与服务端、版本隔离开关、安装器中断续跑**（54 高大按钮与目录为什么留右栏、`loaders=["datapack"]` 的实测理由、插件为什么不做、`isolated` 推翻 `docs/22` 的来龙去脉、`InstallerProcess` 的杀进程时机与两个易错点）
+- `docs/37-zuolan-shujubao-geli-yu-duanxucan.md`：**启动页左栏化、数据包与服务端、版本隔离开关、安装器中断续跑**（54 高大按钮与目录为什么留右栏、`loaders=["datapack"]` 的实测理由、插件为什么不做、`isolated` 推翻 `docs/22` 的来龙去脉、`InstallerProcess` 的杀进程时机与两个易错点）。**其中「服务端只做原版」「启动浮层没做」两条已被 `docs/38` 推翻**
+- `docs/38-qidong-fuceng-yu-fuwuduan.md`：**启动浮层、服务端加载器与服务端登记**（进度只准前进的理由、取消为什么不砍协程、Paper 老 API 410 与只给 sha256、Fabric 的 server jar 必须带 installer 版本、Forge 的 Java 为什么让用户挑、服务端为什么单开一套登记、为什么没有「启动服务端」按钮）
 
 ## 下载
 
@@ -136,7 +137,7 @@ M0（骨架）+ M1（实例扫描）+ M2（下载器）+ M3（**Windows 一键�
 
 **下载断点续传**：先写 `<文件>.part`，校验通过才转正；`.part` 有内容就发 `Range` 接着下，断网不清半成品，下次自动接上。进度条会额外显示「其中 N 个接着上次下（省了 M MB）」（`docs/14`）。
 
-单测 **512 例全过**（45 个测试类，`./gradlew :core:test`）。另有十二个无头冒烟任务（`e2eInstall` / `settingsSmoke` / `instanceFlowSmoke` / `resumeSmoke` / `deleteSmoke` / `fabricE2e` / `modpackE2e` / `forgeE2e` / `neoForgeE2e` / `modsE2e` / `modUpdateE2e` / `isolationSmoke`），走的是界面按钮同一批函数；`resumeSmoke` / `fabricE2e` / `modpackE2e` / `forgeE2e` / `neoForgeE2e` / `modsE2e` 需要联网，分别在空目录真装 Fabric、真跑 Forge 与 NeoForge 官方安装器、真从 Modrinth 下模组、真把一个 `.mrpack` 从解析装到进主菜单；`deleteSmoke` 在 `dist/_delete-smoke` 里全程造假数据，不碰真实 `.minecraft`。
+单测 **551 例全过**（49 个测试类，`./gradlew :core:test :ui:jvmTest`；`ui` 从这一版起有 `jvmTest` 源集，格式化函数与导航常量也进单测了）。另有十二个无头冒烟任务（`e2eInstall` / `settingsSmoke` / `instanceFlowSmoke` / `resumeSmoke` / `deleteSmoke` / `fabricE2e` / `modpackE2e` / `forgeE2e` / `neoForgeE2e` / `modsE2e` / `modUpdateE2e` / `isolationSmoke`），走的是界面按钮同一批函数；`resumeSmoke` / `fabricE2e` / `modpackE2e` / `forgeE2e` / `neoForgeE2e` / `modsE2e` 需要联网，分别在空目录真装 Fabric、真跑 Forge 与 NeoForge 官方安装器、真从 Modrinth 下模组、真把一个 `.mrpack` 从解析装到进主菜单；`deleteSmoke` 在 `dist/_delete-smoke` 里全程造假数据，不碰真实 `.minecraft`。
 
 **能装 Fabric 了**：下载页勾「顺带装 Fabric」→ 拉 meta.fabricmc.net 的 loader 列表（默认落在最新 stable）→ 装 profile json（只改 `id`，保留 `inheritsFrom`）→ 按 maven 坐标补全 8 个库的地址并下载 → 登记成 `1.20.1-fabric-0.20.1` 这样的实例。实测空目录全流程 4 分 29 秒进主菜单，日志首行 `Loading Minecraft 1.20.1 with Fabric Loader 0.20.1`（`docs/15`）。
 
@@ -186,7 +187,9 @@ M0（骨架）+ M1（实例扫描）+ M2（下载器）+ M3（**Windows 一键�
 
 **中文搜索**：Modrinth 只认英文名与 slug，直接搜「钠」什么也搜不到。PCL 能做到是因为它内置了一份 3 万余行的中文名数据库（`PCLCS/Resource/WikiEntries.txt`），而 `pcl-src` 没有 LICENSE 文件、许可状态不明，不能直接拷进本项目。这里改成手写 140 余条常用中英对照（`core/search/SearchKeywords.kt`，每条 slug 都用 Modrinth 的 `/search` 实测过「搜出来非空」）：输入中文时界面直接说明「搜不到是因为 Modrinth 不认中文」，并给一组可点的英文候选 chip，点一下替换关键词；输入框为空时给这一类热门词（`docs/35`）。
 
-**整合包之外还能装数据包与服务端了**：下载栏按 PCL 的分法补了两项。数据包和资源包共用同一套扫描/安装代码（`datapacks/` + `loaders=["datapack"]`），中文词典跟着加了 11 条。服务端下的是 Mojang 原版 `server.jar`，顺手写好 `eula.txt` 与双击就能开的 `start.bat`（Windows，CRLF + `chcp 65001` + `pause`）/ `start.sh`（LF），目录里已有能用的 jar 时不重复下载并明说「没重复下载」。**只有原版**，Forge / NeoForge / Fabric / Paper 的服务端不做，页面上写明了原因（`docs/37`）。
+**整合包之外还能装数据包与服务端了**：下载栏按 PCL 的分法补了两项。数据包和资源包共用同一套扫描/安装代码（`datapacks/` + `loaders=["datapack"]`），中文词典跟着加了 11 条。
+
+**服务端五种加载器都支持了**：原版走 Mojang 的 `server.jar`、Paper 走 `fill.papermc.io/v3` 的构建列表（老 `api.papermc.io/v2` 已经 410 Gone）、Fabric 用 `meta.fabricmc.net` 现成的 server jar（地址必须带 installer 版本，不带直接 404）、Forge 与 NeoForge 跑各自的官方 installer。装完顺手写好 `eula.txt` 与双击就能开的 `start.bat`（Windows，CRLF + `chcp 65001` + `pause`）/ `start.sh`（LF）；Forge / NeoForge 的 `run.bat` 是安装器自己生成的，**绝不覆盖**，所以卡片上写的是「改内存改 `user_jvm_args.txt`」。Paper 只给 sha256 而下载器只认 sha1，所以下完自己算一遍再比对，对不上删掉重下并说明原因。Forge 安装器用的 Java 让用户自己挑：拿新版 java 去跑老版安装器会 `UnsupportedClassVersionError`，而那个报错埋在 installer 日志里，界面上只看得到「失败」（`docs/38`）。
 
 **插件这一项不做，理由是实测的**：Modrinth 的 `project_type:plugin` facet 会把全站模组都搜出来（返回项的 `project_type` 全是 `mod`），插件实际靠 `loaders=["bukkit","paper","spigot"]` 这类值区分；而且插件要落进服务端的 `plugins/`，这一版还没有「服务端实例」这个概念，硬塞入口只会让人装进客户端 `mods/`。
 
@@ -196,4 +199,4 @@ M0（骨架）+ M1（实例扫描）+ M2（下载器）+ M3（**Windows 一键�
 
 **取消安装不再留一个后台 java**：Forge / NeoForge 的官方安装器以前是「起进程 + 循环读日志」，点「取消」只是取消协程，那个 java 还在往 `libraries/` 里写；超时检查也因为装在读循环里而对不出声的进程永不生效。现在抽成 `core/install/InstallerProcess.kt`：协程一结束就 `destroyForcibly`（连派生的子进程一起杀）、日志由独立协程读而主循环用 `waitFor(100ms)` 盯超时与取消、取消以 `CancellationException` 的形式冒出去而不是被包成「安装失败」。下次再点安装，installer 自己会跳过 `libraries/` 里已经存在的库（`docs/37`）。
 
-尚未实现：正版/微软登录（`core/auth` 只有接口）、服务端只有原版（Forge / NeoForge / Fabric / Paper 的服务端没做）、Modrinth 上的插件（`project_type:plugin` facet 实测不可用，见上）、NAT 穿透与公网中转（「直接进」+ 本机地址枚举已能把局域网与公网 IPv6 的场景走通）、中文搜索的完整词库（只有常用对照表，冷门模组仍需用户给英文名）。模组依赖的 `required` / `optional` / `incompatible` 三类声明都已解析：`required` 自动装齐，`optional` 在依赖树卡片里单独列出「作者建议一起装」但**不替你装**，`incompatible` 由模组页的「查冲突」提示。
+尚未实现：正版/微软登录（`core/auth` 只有接口）、服务端不能从界面启动也看不到控制台输出（只能打开目录、自己双击脚本）、Modrinth 上的插件（`project_type:plugin` facet 实测不可用，见上）、NAT 穿透与公网中转（「直接进」+ 本机地址枚举已能把局域网与公网 IPv6 的场景走通）、中文搜索的完整词库（只有常用对照表，冷门模组仍需用户给英文名）。模组依赖的 `required` / `optional` / `incompatible` 三类声明都已解析：`required` 自动装齐，`optional` 在依赖树卡片里单独列出「作者建议一起装」但**不替你装**，`incompatible` 由模组页的「查冲突」提示。

@@ -1,5 +1,6 @@
 package io.github.huang404yan.platypus.ui
 
+import io.github.huang404yan.platypus.core.install.ServerRepository
 import io.github.huang404yan.platypus.core.instance.InstanceRepository
 import io.github.huang404yan.platypus.core.launch.GameRuntime
 import io.github.huang404yan.platypus.core.runtime.JavaRuntimeService
@@ -25,4 +26,11 @@ interface LauncherBackend {
      * 生产装配（DesktopServices）一定会提供，界面在 null 时退回内置默认值。
      */
     val settings: SettingsRepository? get() = null
+
+    /**
+     * 服务端登记（「下载 / 服务端」页装过的那些）。
+     *
+     * 同样给默认 null：服务端不进实例列表，不给它也不影响其它页面。
+     */
+    val servers: ServerRepository? get() = null
 }
