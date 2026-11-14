@@ -37,7 +37,47 @@ interface JavaRuntimeService {
         component: String?,
         onProgress: (Float) -> Unit = {},
     ): JavaRuntime = ensure(major, onProgress)
+
+    /**
+     * 官方清单里这台机器能装的托管运行时，给「下载 Java」那张表用。
+     *
+     * 与 [ensure] 的区别是「不一定有现成的」：这里列的是「能下什么」，
+     * 每一项自带已装标记，界面照着画一张表即可。不支持的后端（安卓端暂时）返回空表。
+     */
+    suspend fun catalog(): List<JavaRuntimeOffer> = emptyList()
+
+    /**
+     * 强制下载一份托管运行时，**不先看本机有没有**。
+     *
+     * [ensure] 的语义是「能用就行」：本机已经有 Java 21 就直接返回那个，一个字节都不下。
+     * 但用户点「下载 Java 21」时想要的是一份启动器自己管的、删得掉的运行时，
+     * 所以这里绕开探测，直接走下载。默认实现退回 [ensureRuntime] 方便测试替身。
+     */
+    suspend fun download(
+        major: Int,
+        component: String?,
+        onProgress: (Float) -> Unit = {},
+    ): JavaRuntime = ensureRuntime(major, component, onProgress)
 }
+
+/**
+ * 官方清单里的一个可下载运行时。
+ *
+ * @param component Mojang 的组件 id（java-runtime-gamma 之类），下载时原样传回去
+ * @param majorVersion 主版本号，界面显示「Java 21」用它
+ * @param versionName 官方版本名（21.0.7 / 8u51-cacert462b08），比主版本号更细
+ * @param manifestSize 该组件清单文件的大小（不是下下来的体积），只用来排序与判断有没有数据
+ * @param installed 这个组件在本地是否已经有一份能用的 java 可执行文件
+ * @param installedPath 已装时 java 的绝对路径
+ */
+data class JavaRuntimeOffer(
+    val component: String,
+    val majorVersion: Int,
+    val versionName: String,
+    val manifestSize: Long = -1L,
+    val installed: Boolean = false,
+    val installedPath: String? = null,
+)
 
 /**
  * 从一组已探测到的运行时里挑主版本正好是 [major] 的那个。

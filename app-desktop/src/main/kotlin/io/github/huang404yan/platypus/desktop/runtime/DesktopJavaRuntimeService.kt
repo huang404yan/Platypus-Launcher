@@ -3,7 +3,11 @@ package io.github.huang404yan.platypus.desktop.runtime
 import io.github.huang404yan.platypus.core.runtime.JavaCandidatePaths
 import io.github.huang404yan.platypus.core.runtime.JavaProbeParser
 import io.github.huang404yan.platypus.core.runtime.JavaRuntime
+import io.github.huang404yan.platypus.core.runtime.JavaRuntimeOffer
 import io.github.huang404yan.platypus.core.runtime.JavaRuntimeService
+import io.github.huang404yan.platypus.core.runtime.buildRuntimeOffers
+import io.github.huang404yan.platypus.core.runtime.javaExecutableInRuntime
+import io.github.huang404yan.platypus.core.runtime.runtimePlatform
 import io.github.huang404yan.platypus.core.runtime.JavaRuntimeUnavailableException
 import io.github.huang404yan.platypus.core.runtime.JavaSearchEnv
 import io.github.huang404yan.platypus.core.runtime.findExactMajor
@@ -47,6 +51,9 @@ class DesktopJavaRuntimeService(
 ) : JavaRuntimeService {
 
     private val windows: Boolean = System.getProperty("os.name").orEmpty().lowercase().contains("win")
+
+    /** Mojang 运行时清单里的平台键（windows-x64 之类），[catalog] 与下载共用。 */
+    private val platform: String = runtimePlatform()
 
     override suspend fun detect(): List<JavaRuntime> = withContext(Dispatchers.IO) {
         val candidates = JavaCandidatePaths.candidates(
@@ -132,6 +139,80 @@ class DesktopJavaRuntimeService(
             managed = true,
         )
     }
+
+    /**
+     * 官方清单里这台机器能装的运行时，带「已装」标记。
+     *
+     * 「已装」先看托管目录（<gameRoot>/runtime/<component>/bin/java.exe），再看本机探测到的
+     * 同主版本 Java —— 用户机器上已经有一份能用的 Java 17 时，列表里那一行就该显示「已装」，
+     * 而不是让他再下一份 150 MB 的。两者都没有才显示「下载」。
+     *
+     * 拿不到清单（断网、镜像挂了、没配游戏目录都算）时返回空表并把原因放进 [lastCatalogError]，
+     * 由界面决定显示「列表拉不到」还是「这台机器一个都装不了」。
+     */
+    override suspend fun catalog(): List<JavaRuntimeOffer> {
+        lastCatalogError = null
+        val root = gameRoot
+        if (root == null) {
+            lastCatalogError = "没有配置游戏目录，不知道把 Java 下到哪儿。先去设置页填一个。"
+            return emptyList()
+        }
+        val index = try {
+            MojangJavaRuntimeInstaller(root).loadIndex()
+        } catch (e: JavaRuntimeInstallException) {
+            lastCatalogError = e.message
+            return emptyList()
+        }
+        val detected = detect()
+        val offers = buildRuntimeOffers(index, platform) { component ->
+            val managed = javaExecutableInRuntime(File(File(root, "runtime"), component), platform)
+            when {
+                managed.isFile -> managed.path
+                else -> null
+            }
+        }
+        // 本机别处已装同主版本时补上「已装」，但路径显示托管那份的优先。
+        return offers.map { offer ->
+            if (offer.installed) return@map offer
+            val local = detected.findExactMajor(offer.majorVersion) ?: return@map offer
+            offer.copy(installed = true, installedPath = local.path)
+        }
+    }
+
+    /**
+     * 强制下载一份托管运行时。
+     *
+     * 与 [ensureRuntime] 的唯一差别是**不先探测本机**：用户明确点了「下载 Java 21」，
+     * 就该得到一份启动器自己管的、能在列表里看见、删得掉的运行时，
+     * 而不是悄悄用回他系统里那个（那个可能明天就被卸载了）。
+     */
+    override suspend fun download(
+        major: Int,
+        component: String?,
+        onProgress: (Float) -> Unit,
+    ): JavaRuntime {
+        val root = gameRoot ?: throw JavaRuntimeUnavailableException(
+            "没有配置游戏目录，无法下载托管运行时；请去设置页填一个游戏目录。",
+        )
+        val installer = MojangJavaRuntimeInstaller(root)
+        val java = try {
+            installer.ensure(major, component, onProgress)
+        } catch (e: JavaRuntimeInstallException) {
+            throw JavaRuntimeUnavailableException("下载 Java " + major + " 失败：" + e.message)
+        }
+        val probed = probe(java.path)?.runtime
+        return probed?.copy(managed = true) ?: JavaRuntime(
+            path = java.path,
+            majorVersion = major,
+            vendor = "Mojang",
+            managed = true,
+        )
+    }
+
+    /** 上次 [catalog] 失败的原因，成功时为 null。 */
+    @Volatile
+    var lastCatalogError: String? = null
+        private set
 
     /** 读环境变量、注册表、PATH、启动器目录，拼出候选枚举需要的输入。 */
     private fun buildSearchEnv(): JavaSearchEnv {

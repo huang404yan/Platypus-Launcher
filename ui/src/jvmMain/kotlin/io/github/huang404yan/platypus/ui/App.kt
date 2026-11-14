@@ -108,7 +108,9 @@ fun App(initialGameRoot: String? = null, backend: LauncherBackend? = null) {
             ) {
                 val sub = subTabOf(page)
                 // tick 只在「下载」页有意义；别的页面忽略它，免得切页时误触发。
-                val tick = if (page == Page.DOWNLOAD) refreshTick else 0
+                // tick 只在「下载」页与「设置 → Java」有意义（两处都有需要重读的清单）；
+                // 别的页面忽略它，免得切页时误触发。
+                val tick = if (page == Page.DOWNLOAD || page == Page.SETTINGS) refreshTick else 0
                 when (page) {
                     Page.LAUNCH -> LaunchPage(backend, initialGameRoot, focusKey, quickPlay)
                     Page.INSTANCE -> InstancePage(backend, initialGameRoot) { instance: Instance ->
@@ -133,7 +135,8 @@ fun App(initialGameRoot: String? = null, backend: LauncherBackend? = null) {
                         quickPlay = address
                         page = Page.LAUNCH
                     }
-                    Page.SETTINGS -> SettingsPage(backend, subTabOf(Page.SETTINGS))
+                    // 设置页的「Java」二级项要刷新信号（重读官方清单），其它二级项不用
+                    Page.SETTINGS -> SettingsPage(backend, subTabOf(Page.SETTINGS), tick)
                     Page.ABOUT -> AboutPage()
                 }
             }

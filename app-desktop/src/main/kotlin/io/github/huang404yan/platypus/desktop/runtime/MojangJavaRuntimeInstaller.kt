@@ -6,6 +6,7 @@ import io.github.huang404yan.platypus.core.download.HttpDownloader
 import io.github.huang404yan.platypus.core.runtime.JavaRuntimeComponents
 import io.github.huang404yan.platypus.core.runtime.MOJANG_RUNTIME_INDEX_URL
 import io.github.huang404yan.platypus.core.runtime.JavaRuntimeEntry
+import io.github.huang404yan.platypus.core.runtime.JavaRuntimeIndex
 import io.github.huang404yan.platypus.core.runtime.JavaRuntimePlan
 import io.github.huang404yan.platypus.core.runtime.javaExecutableInRuntime
 import io.github.huang404yan.platypus.core.runtime.parseRuntimeIndex
@@ -104,6 +105,22 @@ class MojangJavaRuntimeInstaller(
         }
         onProgress(1f)
         java
+    }
+
+    /**
+     * 拉整份运行时索引原文并解析，给「下载 Java」那张表用。
+     *
+     * 与 [ensure] 分开是因为列表页要一眼看到「这台机器能装哪几个」，
+     * 而 [ensure] 是「装一个确定的」，两者的失败处理与进度语义都不一样。
+     * 失败时记 [lastFailure] 并抛 [JavaRuntimeInstallException]，界面照常显示错误文案。
+     */
+    suspend fun loadIndex(): JavaRuntimeIndex = withContext(Dispatchers.IO) {
+        lastFailure = null
+        runCatching { parseRuntimeIndex(fetchText(indexUrl)) }
+            .getOrElse {
+                lastFailure = "拉取运行时索引失败：" + (it.message ?: it.javaClass.simpleName)
+                throw JavaRuntimeInstallException(lastFailure!!, it)
+            }
     }
 
     /** 组件 id：优先用版本 json 里的，其次按主版本兜底。 */

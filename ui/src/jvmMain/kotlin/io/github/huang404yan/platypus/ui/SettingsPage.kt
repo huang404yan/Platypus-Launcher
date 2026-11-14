@@ -41,6 +41,9 @@ const val SETTINGS_TAB_LAUNCH = "launch"
 /** 「界面」二级项的 id。 */
 const val SETTINGS_TAB_UI = "ui"
 
+/** 「Java」二级项的 id。 */
+const val SETTINGS_TAB_JAVA = "java"
+
 /** 「其他」二级项的 id。 */
 const val SETTINGS_TAB_OTHER = "other"
 
@@ -65,8 +68,14 @@ const val SETTINGS_TAB_OTHER = "other"
 @Composable
 fun SettingsPage(
     backend: LauncherBackend?,
-    /** [SETTINGS_TAB_LAUNCH] / [SETTINGS_TAB_UI] / [SETTINGS_TAB_OTHER]；由 App.kt 从侧边栏传进来。 */
+    /** [SETTINGS_TAB_LAUNCH] / [SETTINGS_TAB_JAVA] / [SETTINGS_TAB_UI] / [SETTINGS_TAB_OTHER]。 */
     subTab: String = SETTINGS_TAB_LAUNCH,
+    /**
+     * 侧边栏那个「↻」的计数，只有「Java」页用得上（重读一次官方运行时清单）。
+     *
+     * 别的二级项没有可重读的远端清单，传了也不理 —— 与下载页那几项同一个约定。
+     */
+    refreshTick: Int = 0,
 ) {
     if (backend == null) {
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -181,6 +190,8 @@ fun SettingsPage(
         )
 
         when (subTab) {
+            // Java 页不读写设置文件，所以下面那排「保存 / 填回默认值」对它不显示。
+            SETTINGS_TAB_JAVA -> JavaTab(backend, gameRoot, refreshTick)
             SETTINGS_TAB_UI -> InterfaceTab()
             SETTINGS_TAB_OTHER -> OtherTab(
                 loadedFrom = loadedFrom,
@@ -200,9 +211,11 @@ fun SettingsPage(
             )
         }
 
-        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            Button(onClick = { save() }, enabled = loaded) { Text("保存") }
-            OutlinedButton(onClick = { resetDefaults() }, enabled = loaded) { Text("填回默认值") }
+        if (subTab != SETTINGS_TAB_JAVA) {
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Button(onClick = { save() }, enabled = loaded) { Text("保存") }
+                OutlinedButton(onClick = { resetDefaults() }, enabled = loaded) { Text("填回默认值") }
+            }
         }
 
         if (notice.isNotBlank()) {
@@ -377,8 +390,9 @@ private fun InfoLine(label: String, value: String) {
     }
 }
 
+/** 设置页各二级项共用的一张卡片；「Java」页在别的文件里也要用，所以是 internal。 */
 @Composable
-private fun SettingCard(title: String, hint: String, content: @Composable () -> Unit) {
+internal fun SettingCard(title: String, hint: String, content: @Composable () -> Unit) {
     Card(
         Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
