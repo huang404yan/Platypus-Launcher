@@ -209,7 +209,23 @@ RESULT menuReached=true launchMs=13552
 
 补下来的 `JarJarFileSystems-0.4.0.jar` = 31 835 B、sha1 `ef7e5716525bbe50c784a362f9393457a33e6daf`，与 installer 的 `version.json` 里声明的 sha1/size **完全一致**——说明 CreeperHost 给的是原版文件，不是被替换过的。游戏日志里 `NeoForge mod loading, version 20.4.253, for MC 1.20.4 with MCP 20240627.114801` 出现即证明加载器真的起来了。
 
-**这两条线同时说明**：1.20.4 与 1.21.1 生成的 instance json 形状一致（都是 `mainClass = cpw.mods.bootstraplauncher.BootstrapLauncher`、四个 `--fml.*` 参数：`neoForgeVersion` / `fmlVersion` / `mcVersion` / `neoFormVersion`），所以安装器代码一条路走两个大版本，不需要按版本分支。真正的差异只在库清单内容上——20.4.253 的 188 条 profile 库 / 83 个去重 path 比 21.1.266 更大一些。
+### 6.3 幂等复跑：同一个目录再跑一次（2026-11-14 12:51）
+
+```
+gradle :app-desktop:neoForgeE2e -PnfDir=dist/_neoforge-e2e -PskipWix    ← 不传 -PneoforgeVersion，走默认
+```
+
+| 阶段 | 数字 | 说明 |
+| --- | --- | --- |
+| 原版 1.21.1 | `downloaded=3962 failures=0` | 文件都在，全部被 sha1 跳过 |
+| installer | `exit=0 ms=581`、`bytes=0` | 581 ms 是因为 `Install` 发现目标已装好直接返回；`bytes=0` 表示没重新下 installer jar |
+| 整段 | `INSTALL OK in 6268 ms; javaInstalled=false` | 无 Java 下载（已就位） |
+| 进主菜单 | `launchMs = 12930`、`menuReached = true`、`exitCode = 1` | 正常进菜单后自己退出（1.21.1 的既定行为） |
+| 总耗时 | `TOTAL ms = 24523` | 对比 6.1 的 636 469 ms |
+
+这条不是新功能，是验「重跑不会把已装环境搞坏」：第二次跑完全不碰网络下载，581 ms 走完 installer，游戏仍能进主菜单。**注意 `-PnfDir` 是必填**，漏了会报 `缺少 -PnfDir=<游戏目录>（建议 dist/_neoforge-e2e）` 且 BUILD FAILED——第一次跑就踩了这个。
+
+**6.1 与 6.2 两条线同时说明**：1.20.4 与 1.21.1 生成的 instance json 形状一致（都是 `mainClass = cpw.mods.bootstraplauncher.BootstrapLauncher`、四个 `--fml.*` 参数：`neoForgeVersion` / `fmlVersion` / `mcVersion` / `neoFormVersion`），所以安装器代码一条路走两个大版本，不需要按版本分支。真正的差异只在库清单内容上——20.4.253 的 188 条 profile 库 / 83 个去重 path 比 21.1.266 更大一些。
 
 ## 七、界面
 
