@@ -29,6 +29,8 @@ import androidx.compose.ui.unit.dp
 import io.github.huang404yan.platypus.core.lan.LanDiscovery
 import io.github.huang404yan.platypus.core.lan.LanScanResult
 import io.github.huang404yan.platypus.core.lan.LanWorld
+import io.github.huang404yan.platypus.core.lan.LocalAddresses
+import io.github.huang404yan.platypus.core.lan.LocalBinding
 import kotlinx.coroutines.launch
 
 /**
@@ -54,6 +56,11 @@ internal fun LinkPage() {
     var result by remember { mutableStateOf<LanScanResult?>(null) }
     var manual by remember { mutableStateOf("") }
     var notice by remember { mutableStateOf("") }
+
+    // 本机地址：点「重新读取」换 key 触发重算，平时不反复扫网卡。
+    var addressNonce by remember { mutableStateOf(0) }
+    val addresses = remember(addressNonce) { LocalAddresses.list() }
+    var portText by remember { mutableStateOf("25565") }
 
     fun scan() {
         if (scanning) return
@@ -173,6 +180,68 @@ internal fun LinkPage() {
         }
 
         item {
+            Text("让朋友连到你", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+            Text(
+                "你在游戏里对局域网开放后，聊天栏会给一个端口。把这里的地址配上那个端口发给朋友，" +
+                    "他粘到游戏「多人游戏 → 直接连接」就能进。",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+
+        item {
+            Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
+                Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedTextField(
+                            value = portText,
+                            onValueChange = { input -> portText = input.filter { it.isDigit() }.take(5) },
+                            modifier = Modifier.weight(1f),
+                            label = { Text("端口（对局域网开放时聊天栏给的数字）") },
+                            singleLine = true,
+                        )
+                        OutlinedButton(onClick = { addressNonce++ }) { Text("重新读取") }
+                    }
+                    val port = portText.toIntOrNull()?.takeIf { it in 1..65535 }
+                    if (port == null) {
+                        Text(
+                            "端口要填 1–65535 的数字。",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.error,
+                        )
+                    } else if (addresses.isEmpty()) {
+                        Text(
+                            "没读到可用的网卡地址。可能只有回环地址（没联网），或者被系统限制读网卡信息。",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    } else {
+                        for (binding in addresses) {
+                            val text = binding.withPort(port)
+                            Row(
+                                Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            ) {
+                                Column(Modifier.weight(1f)) {
+                                    Text(text, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
+                                    Text(
+                                        kindLabelOf(binding.kind),
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
+                                OutlinedButton(onClick = { notice = copyToClipboard(context, text) }) {
+                                    Text("复制地址")
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        item {
             Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
                 Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     Text("为什么不在这里「点一下就进」", fontWeight = FontWeight.SemiBold)
@@ -183,7 +252,9 @@ internal fun LinkPage() {
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                     Text(
-                        "跨网络的联机（不在同一个 Wi-Fi）需要 NAT 穿透或中转服务器，这一版没做。",
+                        "跨网络（不在同一 Wi-Fi）：要么双方都有公网 IPv6（上面 [ ] 开头那种地址，通常直接能连），" +
+                            "要么在路由器上把端口转发到房主的机器。UDP 打洞和公网中转服务器这一版没做——" +
+                            "那需要一台常驻服务器，跟「填对地址就能连」是两件事。",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -191,6 +262,17 @@ internal fun LinkPage() {
             }
         }
     }
+}
+
+/**
+ * 地址种类的白话说明。
+ *
+ * 分类只按地址段判断，不代表真的能连通 —— 文案说的是「能用在哪」，不是「一定能连」。
+ */
+private fun kindLabelOf(kind: LocalBinding.Kind): String = when (kind) {
+    LocalBinding.Kind.LAN -> "同一 Wi-Fi/局域网，朋友直接用这个"
+    LocalBinding.Kind.IPV6 -> "公网 IPv6，对方也有 IPv6 时能跨网络连"
+    LocalBinding.Kind.OTHER -> "其它地址，多半要配合端口转发才能连"
 }
 
 private fun scanningText(result: LanScanResult?, scanning: Boolean): String {
