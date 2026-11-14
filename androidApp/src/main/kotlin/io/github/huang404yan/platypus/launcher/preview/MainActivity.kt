@@ -29,11 +29,15 @@ import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
@@ -53,6 +57,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import io.github.huang404yan.platypus.core.Brand
+import io.github.huang404yan.platypus.core.Credit
+import io.github.huang404yan.platypus.core.CreditKind
+import io.github.huang404yan.platypus.core.Credits
 import io.github.huang404yan.platypus.core.instance.Instance
 import io.github.huang404yan.platypus.core.instance.InstanceScanner
 import io.github.huang404yan.platypus.core.instance.JsonInstanceRepository
@@ -85,14 +92,18 @@ class MainActivity : ComponentActivity() {
  * 「诊断」是安卓独有的（桌面没有 EGL、也没有「所有文件访问权限」这类要查的东西）；
  * 「更多」这个名字原来挂着一个永远「还没做」的占位，现在被模组、联机、设置三个真页面取代。
  *
- * 「光影资源包」在桌面上是侧边栏的一个页面、里面再分光影 / 资源包两个二级项；
- * 手机侧边栏放不下二级，所以这里只留一个 Tab，光影 / 资源包由页面顶部的两个按钮切换。
+ * 「光影资源包」在桌面上是侧边栏的一个页面、里面再分光影 / 资源包 / 数据包三个二级项；
+ * 手机侧边栏放不下二级，所以这里只留一个 Tab，三种包由页面顶部的按钮切换。
+ *
+ * 「服务端」也是一个 Tab。手机上只能装原版 / Paper / Fabric 三种（Forge 与 NeoForge
+ * 要起 java 子进程跑安装器，这一版不做），装完没有应用内开服，只留目录和脚本。
  */
 private enum class Tab(val label: String) {
     INSTANCE("实例"),
     DOWNLOAD("下载"),
     MODS("模组"),
     PACKS("光影资源包"),
+    SERVER("服务端"),
     LINK("联机"),
     LAUNCH("启动"),
     SETTINGS("设置"),
@@ -120,6 +131,7 @@ private fun AppRoot() {
                 Tab.DOWNLOAD -> DownloadPage()
                 Tab.MODS -> ModsPage()
                 Tab.PACKS -> PacksPage()
+                Tab.SERVER -> ServerPage()
                 Tab.LINK -> LinkPage()
                 Tab.SETTINGS -> SettingsPage()
                 Tab.DIAGNOSTIC -> DiagnosticPage()
@@ -375,8 +387,11 @@ private fun LoaderBadge(loader: LoaderKind) {
 
 @Composable
 private fun AboutPage() {
+    // 加了致谢段之后这一页比一屏长，必须能滚 —— 桌面端也一样（那是 ScrollView）。
     Column(
-        Modifier.fillMaxSize(),
+        Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState()),
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         Text("关于", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
@@ -405,6 +420,12 @@ private fun AboutPage() {
             }
         }
 
+        HorizontalDivider()
+
+        CreditsSection()
+
+        HorizontalDivider()
+
         Text("免责声明", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
         Text(
             Brand.DISCLAIMER_ZH,
@@ -417,6 +438,77 @@ private fun AboutPage() {
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
     }
+}
+
+/**
+ * 开源致谢。跟桌面端 `ui/About.kt` 的 `CreditsSection` 同一套数据结构（core 的 `Credits`），
+ * 只是排得紧一点 —— 手机屏幕窄，授权协议名放第二行而不是挤在标题右侧。
+ */
+@Composable
+private fun CreditsSection() {
+    Text("开源致谢", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+    Text(
+        Credits.INTRO_ZH,
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+    SelectionContainer {
+        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            for (kind in CreditKind.entries) {
+                val group = Credits.of(kind)
+                if (group.isEmpty()) continue
+                Text(
+                    kind.label + " · " + group.size,
+                    style = MaterialTheme.typography.labelLarge,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.padding(top = 4.dp),
+                )
+                Text(
+                    creditKindExplanation(kind),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                for (item in group) {
+                    CreditCard(item)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun CreditCard(item: Credit) {
+    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
+        Column(
+            Modifier.fillMaxWidth().padding(10.dp),
+            verticalArrangement = Arrangement.spacedBy(2.dp),
+        ) {
+            Text(item.name, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
+            Text(
+                item.license,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            if (item.note.isNotBlank()) {
+                Text(
+                    item.note,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            if (item.url.isNotBlank()) {
+                Text(item.url, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
+            }
+        }
+    }
+}
+
+/** 每一类致谢到底意味着什么 —— 尤其要让用户分清「GPL 代码没进这个项目」。 */
+private fun creditKindExplanation(kind: CreditKind): String = when (kind) {
+    CreditKind.CODE -> "这些项目的实现被用进了本项目，版权归原作者，按各自的许可使用。"
+    CreditKind.REFERENCE -> "只看过它们的文档、issue 与源码来理解问题怎么解，代码是自己重写的。"
+    CreditKind.SPEC -> "用的是公开的接口、数据格式或社区约定，没有链接也没有修改对方的代码。"
+    CreditKind.LIBRARY -> "编译进安装包的第三方库，各自保留原版权与许可。"
 }
 
 @Composable
@@ -449,7 +541,7 @@ private fun LaunchPlaceholder() {
         )
         Text(
             "这一版能做的：把游戏文件下全（下载页）、认出已有的实例（实例页）、装模组（模组页）、" +
-                "找局域网世界（联机页）。",
+                "装光影 / 资源包 / 数据包（那一页）、下一个能开的服务端（服务端页）、找局域网世界（联机页）。",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )

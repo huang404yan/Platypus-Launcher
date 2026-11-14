@@ -1,5 +1,8 @@
 package io.github.huang404yan.platypus.launcher.preview
 
+import io.github.huang404yan.platypus.core.install.ServerInstallProgress
+import io.github.huang404yan.platypus.core.install.ServerInstaller
+import io.github.huang404yan.platypus.core.install.ServerLoader
 import io.github.huang404yan.platypus.core.instance.LoaderKind
 import io.github.huang404yan.platypus.core.mods.ModInstallProgress
 import io.github.huang404yan.platypus.core.mods.ModInstaller
@@ -193,6 +196,104 @@ internal object PackInstallRunner {
                         busySlug = "",
                         progress = null,
                         message = "装 " + title + " 失败：" + (e.message ?: e.toString()),
+                        failed = true,
+                        doneAt = System.currentTimeMillis(),
+                    )
+                }
+            }
+        }
+    }
+
+    fun cancel() {
+        if (!_state.value.busy) return
+        job?.cancel()
+        job = null
+    }
+
+    fun hint(text: String) {
+        if (_state.value.busy) return
+        _state.value = _state.value.copy(message = text, failed = true)
+    }
+}
+
+/** 服务端下载与安装的进度状态，字段含义同 [ModInstallState]。 */
+internal data class ServerInstallState(
+    val busy: Boolean = false,
+    val progress: ServerInstallProgress? = null,
+    val message: String = "",
+    val failed: Boolean = false,
+    val doneAt: Long = 0L,
+    /** 这一次装完的结果；页面拿它去登记，也拿目录去重。 */
+    val result: ServerInstaller.ServerInstallResult? = null,
+) {
+    /** 装好的那个服务端目录（绝对路径）；没装成为空串。 */
+    val doneDir: String get() = result?.dir?.absolutePath.orEmpty()
+}
+
+/**
+ * 进程级的服务端下载任务，理由同 [ModInstallRunner]。
+ *
+ * 安卓上只走原版 / Paper / Fabric 三条路：Forge 与 NeoForge 要起一个 java 子进程跑安装器，
+ * 手机上既没有现成的 java 也没有起子进程的余地，那两种加载器在安卓界面上不出现。
+ */
+internal object ServerInstallRunner {
+
+    private val _state = MutableStateFlow(ServerInstallState())
+    val state: StateFlow<ServerInstallState> = _state.asStateFlow()
+
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    private var job: Job? = null
+
+    fun start(
+        targetDir: File,
+        versionId: String,
+        loader: ServerLoader,
+        memoryMb: Int,
+    ) {
+        if (_state.value.busy) return
+        _state.value = ServerInstallState(
+            busy = true,
+            message = "正在准备 " + loader.kind.label + " 服务端（" + versionId + "）…",
+        )
+        job = scope.launch {
+            try {
+                val result = withContext(Dispatchers.IO) {
+                    ServerInstaller.install(
+                        targetDir = targetDir,
+                        versionId = versionId,
+                        loader = loader,
+                        memoryMb = memoryMb,
+                    ) { p: ServerInstallProgress ->
+                        _state.update { it.copy(progress = p, message = p.detail.ifBlank { it.message }) }
+                    }
+                }
+                _state.update {
+                    it.copy(
+                        busy = false,
+                        progress = null,
+                        message = result.summary,
+                        failed = false,
+                        doneAt = System.currentTimeMillis(),
+                        result = result,
+                    )
+                }
+            } catch (e: CancellationException) {
+                _state.update {
+                    it.copy(
+                        busy = false,
+                        progress = null,
+                        message = "已取消。下了一半的文件留在盘上，再点一次会接着下。",
+                        failed = false,
+                        doneAt = System.currentTimeMillis(),
+                    )
+                }
+                throw e
+            } catch (e: Exception) {
+                _state.update {
+                    it.copy(
+                        busy = false,
+                        progress = null,
+                        message = "装服务端失败：" + (e.message ?: e.toString()),
                         failed = true,
                         doneAt = System.currentTimeMillis(),
                     )

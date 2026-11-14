@@ -56,14 +56,14 @@ import kotlinx.coroutines.withContext
 import java.io.File
 
 /**
- * 光影 / 资源包页（手机）。
+ * 光影 / 资源包 / 数据包页（手机）。
  *
  * 和桌面端 PacksPage 是同一套逻辑（PackScanner / PackFileOps / PackInstaller 三个 core 类
  * 一行没重写），只是手机上放不下桌面的左右双栏，改成一条竖着滚的流：
- * 选实例 → 选光影还是资源包 → 搜索装机 → 下面是已装清单。
+ * 选实例 → 选是哪一类包 → 搜索装机 → 下面是已装清单。
  *
- * 桌面上「光影」和「资源包」是侧边栏的两个二级项，手机上侧边栏放不下二级，
- * 所以改成页面顶部两个按钮切换；切过去要重扫一次，否则会挂着另一种包扫出来的清单
+ * 桌面上「光影」「资源包」「数据包」是侧边栏的三个二级项，手机上侧边栏放不下二级，
+ * 所以改成页面顶部三个按钮切换；切过去要重扫一次，否则会挂着另一种包扫出来的清单
  * （桌面端踩过：切到资源包页后，列表里躺着三个光影包）。
  *
  * 光影要先用 Iris 或 OptiFine 才能加载 —— 手机端目前还没有应用内启动游戏的能力
@@ -81,7 +81,7 @@ internal fun PacksPage() {
     var selectedKey by remember { mutableStateOf("") }
     var gameVersion by remember { mutableStateOf("") }
 
-    /** 当前看的是光影还是资源包。手机上由顶部两个按钮改这个值。 */
+    /** 当前看的是哪一类包。手机上由顶部三个按钮改这个值。 */
     var kind by remember { mutableStateOf(PackKind.SHADER) }
 
     var snapshot by remember { mutableStateOf<PackScanResult?>(null) }
@@ -248,7 +248,7 @@ internal fun PacksPage() {
         )
     }
 
-    /** 首屏扫完了没有。用来区分「首屏」和「切光影 / 资源包」两种重扫。 */
+    /** 首屏扫完了没有。用来区分「首屏」和「切包的类别」两种重扫。 */
     var booted by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
@@ -263,7 +263,7 @@ internal fun PacksPage() {
     }
 
     /*
-     * 切「光影 / 资源包」必须重扫一次，并清掉上一种包的搜索结果。
+     * 切包的类别必须重扫一次，并清掉上一种包的搜索结果。
      *
      * 只靠上面那个 LaunchedEffect(Unit) 不够：它的 key 是 Unit，切按钮只会重组、不会重启它，
      * 于是资源包页会一直挂着光影扫出来的清单（桌面端就是这里踩的坑）。
@@ -287,13 +287,12 @@ internal fun PacksPage() {
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 // 别拼 kind.label + "包"：「资源包」+「包」会变成「资源包包」（桌面端实测出来的）
                 Text(
-                    if (kind == PackKind.RESOURCE_PACK) "资源包" else "光影包",
+                    packPageTitle(kind),
                     style = MaterialTheme.typography.headlineSmall,
                     fontWeight = FontWeight.SemiBold,
                 )
                 Text(
-                    "每个实例有自己的 " + kind.dirName + "/。装进实例目录，互不影响。" +
-                        if (kind == PackKind.SHADER) "光影要先用 Iris 或 OptiFine 才能加载。" else "",
+                    packPageIntro(kind),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -310,7 +309,7 @@ internal fun PacksPage() {
                         contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
                     ) {
                         Text(
-                            if (option == PackKind.RESOURCE_PACK) "资源包" else "光影包",
+                            packPageTitle(option),
                             style = MaterialTheme.typography.labelLarge,
                             fontWeight = if (active) FontWeight.SemiBold else FontWeight.Normal,
                             color = if (active) {
@@ -577,11 +576,36 @@ internal fun PacksPage() {
     }
 }
 
-private fun packLabelOf(kind: PackKind): String = if (kind == PackKind.RESOURCE_PACK) "资源包" else "光影"
+private fun packLabelOf(kind: PackKind): String = when (kind) {
+    PackKind.SHADER -> "光影"
+    PackKind.RESOURCE_PACK -> "资源包"
+    PackKind.DATAPACK -> "数据包"
+}
 
-/** 搜索框里的示例关键词：光影和资源包的热门包完全不同。 */
-private fun packExampleOf(kind: PackKind): String =
-    if (kind == PackKind.RESOURCE_PACK) "fresh、faithful、xali" else "complementary、bsl、photon"
+/** 搜索框里的示例关键词：三类包的热门包完全不同。 */
+private fun packExampleOf(kind: PackKind): String = when (kind) {
+    PackKind.SHADER -> "complementary、bsl、photon"
+    PackKind.RESOURCE_PACK -> "fresh、faithful、xali"
+    PackKind.DATAPACK -> "terralith、veinminer、tectonic"
+}
+
+/** 页面标题。数据包不是「XX包」的形状（「数据包包」读起来是错的），单独写。 */
+private fun packPageTitle(kind: PackKind): String = when (kind) {
+    PackKind.SHADER -> "光影包"
+    PackKind.RESOURCE_PACK -> "资源包"
+    PackKind.DATAPACK -> "数据包"
+}
+
+/** 页面说明：三类包的落盘目录与生效条件都不一样，别让用户猜。 */
+private fun packPageIntro(kind: PackKind): String = when (kind) {
+    PackKind.SHADER ->
+        "每个实例有自己的 shaderpacks/。装进实例目录，互不影响。光影要先用 Iris 或 OptiFine 才能加载。"
+    PackKind.RESOURCE_PACK ->
+        "每个实例有自己的 resourcepacks/。装进实例目录，互不影响。"
+    // 数据包还有一个坑：已经建好的世界要重新进一次才读取它
+    PackKind.DATAPACK ->
+        "每个实例有自己的 datapacks/，对这一版的所有存档生效。已经建好的世界要重新进一次才读取它。"
+}
 
 /** 实例标签上的加载器名。模组页那个是 private，这里留一份。 */
 private fun packLoaderLabel(kind: LoaderKind): String = when (kind) {
