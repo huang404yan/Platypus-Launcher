@@ -1,8 +1,10 @@
 package io.github.huang404yan.platypus.desktop
 
 import io.github.huang404yan.platypus.core.instance.LoaderKind
+import io.github.huang404yan.platypus.core.mods.ModDependencyResolver
 import io.github.huang404yan.platypus.core.mods.ModEntry
 import io.github.huang404yan.platypus.core.mods.ModScanner
+import io.github.huang404yan.platypus.core.mods.ModrinthDependencySource
 import io.github.huang404yan.platypus.core.mods.ModrinthMeta
 import io.github.huang404yan.platypus.core.mods.ModInstallProgress
 import io.github.huang404yan.platypus.core.mods.ModInstaller
@@ -94,6 +96,30 @@ fun main(args: Array<String>): Unit = runBlocking {
             " version=" + result.version + " sha1Checked=" + (result.entry.problem == null))
         if (result.requiredDependencies.isNotEmpty()) {
             say("  required dependencies not installed: " + result.requiredDependencies.joinToString(", "))
+        }
+        // 可选依赖：只提示、不排进安装计划。这里顺手把求解层也跑一遍，
+        // 用真实 Modrinth 数据证明「作者标了 optional 的 project_id」能被翻成标题+版本。
+        if (result.optionalDependencies.isNotEmpty()) {
+            say("  optional dependencies not installed: " + result.optionalDependencies.joinToString(", "))
+            val source = ModrinthDependencySource(gameVersion, loader)
+            val modsDir = ModScanner.modsDir(gameDir)
+            val installed = ModDependencyResolver.installedProjectIds(modsDir)
+            val suggested = withTimeoutOrNull(timeoutMs) {
+                ModDependencyResolver.suggestOptional(
+                    rootTitle = result.entry.title,
+                    projectIds = result.optionalDependencies,
+                    source = source,
+                    installedProjectIds = installed,
+                ) { step -> say("  " + step) }
+            }
+            if (suggested == null) {
+                say("  OPTIONAL timeout")
+            } else {
+                say("  OPTIONAL resolved=" + suggested.size)
+                suggested.forEach { dep ->
+                    say("    · " + dep.title + " " + dep.file.versionNumber + " —— " + dep.suggestedBy + " 建议一起装")
+                }
+            }
         }
 
         val scan = ModScanner.scan(gameDir)

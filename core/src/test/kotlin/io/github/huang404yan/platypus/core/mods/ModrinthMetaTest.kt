@@ -130,6 +130,70 @@ class ModrinthMetaTest {
     }
 
     @Test
+    fun `版本里的 optional 依赖单独收，不混进 required`() {
+        val versions = assertNotNull(ModrinthMeta.parseVersions(versionsResponse, "sodium").getOrNull())
+        assertEquals(emptyList(), versions[0].optionalDependencies, "无依赖")
+        // 第 2 个版本的 sample 里同时有 required P7dR8mSH 与 optional Ha28R6CL
+        assertEquals(listOf("Ha28R6CL"), versions[1].optionalDependencies)
+        assertEquals(listOf("P7dR8mSH"), versions[1].requiredDependencies, "两个列表不能互相污染")
+    }
+
+    @Test
+    fun `optional 与 incompatible 各进各的列表`() {
+        val sample = """
+            [
+              {
+                "id": "V1",
+                "version_number": "0.3.31+mc1.20.1",
+                "version_type": "release",
+                "dependencies": [
+                  {"project_id": "4ZqxOvjD", "dependency_type": "incompatible"},
+                  {"project_id": "9s6osm5g", "dependency_type": "required"},
+                  {"project_id": "Ha28R6CL", "dependency_type": "optional"},
+                  {"project_id": "Ha28R6CL", "dependency_type": "optional"}
+                ],
+                "files": [
+                  {
+                    "hashes": {"sha1": "2222222222222222222222222222222222222222"},
+                    "url": "https://cdn.modrinth.com/embeddium.jar",
+                    "filename": "embeddium-0.3.31+mc1.20.1.jar",
+                    "primary": true,
+                    "size": 1000
+                  }
+                ]
+              }
+            ]
+        """.trimIndent()
+        val file = assertNotNull(ModrinthMeta.parseVersions(sample, "embeddium").getOrNull()).single()
+        assertEquals(listOf("9s6osm5g"), file.requiredDependencies)
+        assertEquals(listOf("4ZqxOvjD"), file.incompatibleDependencies)
+        assertEquals(listOf("Ha28R6CL"), file.optionalDependencies, "重复的 optional 要去重")
+    }
+
+    @Test
+    fun `反查结果的 optional 依赖也解析出来`() {
+        val sample = """
+            {
+              "aaa111": {
+                "id": "V1",
+                "project_id": "sk9rgfiA",
+                "version_number": "0.3.31+mc1.20.1",
+                "dependencies": [
+                  {"project_id": "Ha28R6CL", "dependency_type": "optional"},
+                  {"project_id": "Ha28R6CL", "dependency_type": "optional"}
+                ],
+                "files": [
+                  {"hashes": {"sha1": "aaa111"}, "url": "https://cdn/x.jar", "filename": "x.jar", "primary": true, "size": 10}
+                ]
+              }
+            }
+        """.trimIndent()
+        val lookup = assertNotNull(assertNotNull(ModrinthMeta.parseVersionFiles(sample).getOrNull())["aaa111"])
+        assertEquals(listOf("Ha28R6CL"), lookup.optionalDependencies)
+        assertEquals(emptyList(), lookup.requiredDependencies)
+    }
+
+    @Test
     fun `版本里的 incompatible 依赖单独收，不和 required 混`() {
         // 2026-11-14 实测：Embeddium 的 mc1.20.1 版本就是这么写的
         val sample = """

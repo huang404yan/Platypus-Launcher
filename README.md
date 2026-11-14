@@ -131,7 +131,7 @@ M0（骨架）+ M1（实例扫描）+ M2（下载器）+ M3（**Windows 一键�
 
 **下载断点续传**：先写 `<文件>.part`，校验通过才转正；`.part` 有内容就发 `Range` 接着下，断网不清半成品，下次自动接上。进度条会额外显示「其中 N 个接着上次下（省了 M MB）」（`docs/14`）。
 
-单测 **448 例全过**（40 个测试类，`./gradlew :core:test`）。另有十二个无头冒烟任务（`e2eInstall` / `settingsSmoke` / `instanceFlowSmoke` / `resumeSmoke` / `deleteSmoke` / `fabricE2e` / `modpackE2e` / `forgeE2e` / `neoForgeE2e` / `modsE2e` / `modUpdateE2e` / `isolationSmoke`），走的是界面按钮同一批函数；`resumeSmoke` / `fabricE2e` / `modpackE2e` / `forgeE2e` / `neoForgeE2e` / `modsE2e` 需要联网，分别在空目录真装 Fabric、真跑 Forge 与 NeoForge 官方安装器、真从 Modrinth 下模组、真把一个 `.mrpack` 从解析装到进主菜单；`deleteSmoke` 在 `dist/_delete-smoke` 里全程造假数据，不碰真实 `.minecraft`。
+单测 **459 例全过**（40 个测试类，`./gradlew :core:test`）。另有十二个无头冒烟任务（`e2eInstall` / `settingsSmoke` / `instanceFlowSmoke` / `resumeSmoke` / `deleteSmoke` / `fabricE2e` / `modpackE2e` / `forgeE2e` / `neoForgeE2e` / `modsE2e` / `modUpdateE2e` / `isolationSmoke`），走的是界面按钮同一批函数；`resumeSmoke` / `fabricE2e` / `modpackE2e` / `forgeE2e` / `neoForgeE2e` / `modsE2e` 需要联网，分别在空目录真装 Fabric、真跑 Forge 与 NeoForge 官方安装器、真从 Modrinth 下模组、真把一个 `.mrpack` 从解析装到进主菜单；`deleteSmoke` 在 `dist/_delete-smoke` 里全程造假数据，不碰真实 `.minecraft`。
 
 **能装 Fabric 了**：下载页勾「顺带装 Fabric」→ 拉 meta.fabricmc.net 的 loader 列表（默认落在最新 stable）→ 装 profile json（只改 `id`，保留 `inheritsFrom`）→ 按 maven 坐标补全 8 个库的地址并下载 → 登记成 `1.20.1-fabric-0.20.1` 这样的实例。实测空目录全流程 4 分 29 秒进主菜单，日志首行 `Loading Minecraft 1.20.1 with Fabric Loader 0.20.1`（`docs/15`）。
 
@@ -141,7 +141,7 @@ M0（骨架）+ M1（实例扫描）+ M2（下载器）+ M3（**Windows 一键�
 
 **有模组页了**：左侧列出 `mods/` 里已装的（读 `fabric.mod.json` / `mods.toml` / `neoforge.mods.toml` 拿 id、名字、版本、加载器，坏 jar 标出来但不崩），右侧从 Modrinth 搜、选一个装进去，下载沿用 `.part` 续传 + sha1 强校验。实测装 Sodium 971 552 字节、33 秒（`docs/18`）。
 
-**模组前置会自动装齐**：Modrinth 的依赖表只给 `project_id`，装完一个模组后启动器再查两次（id → slug、slug → 版本），把前置一层层展开成依赖树，界面按层缩进列出、点一次「一次装齐」全下完。同一个库被多个模组依赖只排一次，`mods/` 里已装的先用 sha1 反查跳过，查不到/没适配/已装过的逐条说清原因。实测装 Iris 1.7.6 时自动列出 `Sodium 0.5.13` 并一并装进（2 726 899 B + 971 552 B）。深度 8 层、单次 64 个封顶，成环会停下（`docs/28`）。
+**模组前置会自动装齐**：Modrinth 的依赖表只给 `project_id`，装完一个模组后启动器再查两次（id → slug、slug → 版本），把前置一层层展开成依赖树，界面按层缩进列出、点一次「一次装齐」全下完。同一个库被多个模组依赖只排一次，`mods/` 里已装的先用 sha1 反查跳过，查不到/没适配/已装过的逐条说清原因。实测装 Iris 1.7.6 时自动列出 `Sodium 0.5.13` 并一并装进（2 726 899 B + 971 552 B）。深度 8 层、单次 64 个封顶，成环会停下。作者标了 `optional` 的依赖不进安装计划，只在同一张卡片里单独列一行「建议一起装」并写明是谁提的——不装照样能启动（`docs/28`）。
 
 **作者声明的不兼容会提前提示**：模组页的「查冲突」把 `mods/` 里每个 jar 的 sha1 拿去 Modrinth 反查，读出作者在版本里写的 `dependency_type = "incompatible"`，把「两个都装着」和「只被点名、没装」分成两段列出来。本机一个真实 Forge 实例的 34 个 jar 里查出 3 条声明（Embeddium 对 Rubidium 与 TexTrue's Embeddium Options、Superb Warfare 对 Iris/Oculus & GeckoLib Compat），三条都是「作者提到但没装」；另造一对互斥的测试实例验了 `present` 分支真的会标成「都装在这个实例里」。措辞统一按「作者声明」写，卡片里明说「不一定崩」（`docs/30`）。
 
@@ -163,4 +163,4 @@ M0（骨架）+ M1（实例扫描）+ M2（下载器）+ M3（**Windows 一键�
 
 **联机页**：扫描局域网广播（`224.0.2.60:4445`，读 `[MOTD]`/`[AD]`）列出同网段的世界，也能手动解析 `host:port` 并复制地址。**不在启动器里「点一下就进」**——绕过游戏会丢皮肤与会话，界面里写清了原因。
 
-尚未实现：正版/微软登录（`core/auth` 只有接口）、跨网络联机（NAT 穿透/中转，本版没做）、`optional` 依赖不自动装（只装 `required`；`incompatible` 已能反查并提示）。
+尚未实现：正版/微软登录（`core/auth` 只有接口）、跨网络联机（NAT 穿透/中转，本版没做）。模组依赖的 `required` / `optional` / `incompatible` 三类声明都已解析：`required` 自动装齐，`optional` 在依赖树卡片里单独列出「作者建议一起装」但**不替你装**，`incompatible` 由模组页的「查冲突」提示。

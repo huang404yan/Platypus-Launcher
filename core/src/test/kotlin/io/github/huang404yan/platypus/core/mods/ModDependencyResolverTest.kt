@@ -17,7 +17,12 @@ class ModDependencyResolverTest {
     private fun project(id: String, slug: String, title: String = slug) =
         ModProject(slug = slug, title = title, description = "", author = null, downloads = 0L, projectId = id)
 
-    private fun file(slug: String, version: String = "1.0", deps: List<String> = emptyList()) =
+    private fun file(
+        slug: String,
+        version: String = "1.0",
+        deps: List<String> = emptyList(),
+        optional: List<String> = emptyList(),
+    ) =
         ModVersionFile(
             projectSlug = slug,
             versionNumber = version,
@@ -27,6 +32,7 @@ class ModDependencyResolverTest {
             size = 10L,
             releaseType = "release",
             requiredDependencies = deps,
+            optionalDependencies = optional,
         )
 
     /**
@@ -468,5 +474,153 @@ class ModDependencyResolverTest {
         assertEquals(listOf("sodium", "fabric-api"), plan.mods.map { it.slug })
         assertEquals(listOf(0, 1), plan.mods.map { it.depth })
         assertEquals(1, plan.dependencyCount)
+    }
+
+    @Test
+    fun `可选依赖只列出来，不排进安装计划`() {
+        val source = FakeSource(
+            projects = mapOf(
+                "P1" to project("P1", "iris", "Iris Shaders"),
+                "P2" to project("P2", "sodium", "Sodium"),
+            ),
+            versions = mapOf(
+                "iris" to listOf(file("iris", optional = listOf("P2"))),
+                "sodium" to listOf(file("sodium")),
+            ),
+        )
+        val plan = kotlinx.coroutines.runBlocking {
+            val (roots, _) = ModDependencyResolver.rootsOf(listOf("P1"), source)
+            ModDependencyResolver.solve(roots, source = source)
+        }
+        // mods 里只有根 —— 可选依赖一旦混进来，「一次装齐」会把它一起下掉
+        assertEquals(listOf("iris"), plan.mods.map { it.slug })
+        assertEquals(listOf("sodium"), plan.optional.map { it.slug })
+        assertEquals("Iris Shaders", plan.optional.single().suggestedBy)
+        assertEquals("1.0", plan.optional.single().file.versionNumber)
+    }
+
+    @Test
+    fun `可选依赖不再往下展开`() {
+        val source = FakeSource(
+            projects = mapOf(
+                "P1" to project("P1", "iris", "Iris Shaders"),
+                "P2" to project("P2", "sodium", "Sodium"),
+                "P3" to project("P3", "fabric-api", "Fabric API"),
+            ),
+            versions = mapOf(
+                "iris" to listOf(file("iris", optional = listOf("P2"))),
+                "sodium" to listOf(file("sodium", deps = listOf("P3"))),
+                "fabric-api" to listOf(file("fabric-api")),
+            ),
+        )
+        val plan = kotlinx.coroutines.runBlocking {
+            val (roots, _) = ModDependencyResolver.rootsOf(listOf("P1"), source)
+            ModDependencyResolver.solve(roots, source = source)
+        }
+        // 可选依赖自己的前置不跟进来：那等于把「可选」当「必需」用
+        assertEquals(listOf("iris"), plan.mods.map { it.slug })
+        assertEquals(listOf("sodium"), plan.optional.map { it.slug })
+    }
+
+    @Test
+    fun `已经在必需树里的可选依赖不再重复列`() {
+        val source = FakeSource(
+            projects = mapOf(
+                "P1" to project("P1", "iris", "Iris Shaders"),
+                "P2" to project("P2", "sodium", "Sodium"),
+            ),
+            versions = mapOf(
+                "iris" to listOf(file("iris", deps = listOf("P2"), optional = listOf("P2"))),
+                "sodium" to listOf(file("sodium")),
+            ),
+        )
+        val plan = kotlinx.coroutines.runBlocking {
+            val (roots, _) = ModDependencyResolver.rootsOf(listOf("P1"), source)
+            ModDependencyResolver.solve(roots, source = source)
+        }
+        assertEquals(listOf("iris", "sodium"), plan.mods.map { it.slug })
+        assertTrue(plan.optional.isEmpty(), "必需树里已经排了，不该再列一遍")
+    }
+
+    @Test
+    fun `可选依赖查不到版本时静默略过不占跳过区`() {
+        val source = FakeSource(
+            projects = mapOf("P1" to project("P1", "iris", "Iris Shaders")),
+            versions = mapOf("iris" to listOf(file("iris", optional = listOf("P9")))),
+        )
+        val plan = kotlinx.coroutines.runBlocking {
+            val (roots, _) = ModDependencyResolver.rootsOf(listOf("P1"), source)
+            ModDependencyResolver.solve(roots, source = source)
+        }
+        assertEquals(listOf("iris"), plan.mods.map { it.slug })
+        assertTrue(plan.optional.isEmpty())
+        // 可选依赖本来就能不装，不该占「跳过」的位置让人以为装错了
+        assertTrue(plan.skipped.isEmpty())
+    }
+
+    @Test
+    fun `已经装过的可选依赖不再提示`() {
+        val source = FakeSource(
+            projects = mapOf(
+                "P1" to project("P1", "iris", "Iris Shaders"),
+                "P2" to project("P2", "sodium", "Sodium"),
+            ),
+            versions = mapOf(
+                "iris" to listOf(file("iris", optional = listOf("P2"))),
+                "sodium" to listOf(file("sodium")),
+            ),
+        )
+        val plan = kotlinx.coroutines.runBlocking {
+            val (roots, _) = ModDependencyResolver.rootsOf(listOf("P1"), source)
+            ModDependencyResolver.solve(roots, installedProjectIds = setOf("P2"), source = source)
+        }
+        assertEquals(listOf("iris"), plan.mods.map { it.slug })
+        assertTrue(plan.optional.isEmpty(), "已经装了的不该再劝一次")
+    }
+
+    @Test
+    fun `没有必需前置时也能单独提示可选依赖`() {
+        // 「装完一个只标了 optional 的模组」那条路：没有根可展开，但提示不能丢
+        val source = FakeSource(
+            projects = mapOf("P2" to project("P2", "sodium", "Sodium")),
+            versions = mapOf("sodium" to listOf(file("sodium"))),
+        )
+        val optional = kotlinx.coroutines.runBlocking {
+            ModDependencyResolver.suggestOptional("Iris Shaders", listOf("P2"), source)
+        }
+        assertEquals(listOf("sodium"), optional.map { it.slug })
+        assertEquals("Sodium", optional.single().title)
+        assertEquals("Iris Shaders", optional.single().suggestedBy)
+    }
+
+    @Test
+    fun `单独提示可选依赖时也会跳过已经装过的`() {
+        val source = FakeSource(
+            projects = mapOf("P2" to project("P2", "sodium", "Sodium")),
+            versions = mapOf("sodium" to listOf(file("sodium"))),
+        )
+        val optional = kotlinx.coroutines.runBlocking {
+            ModDependencyResolver.suggestOptional(
+                rootTitle = "Iris Shaders",
+                projectIds = listOf("P2"),
+                source = source,
+                installedProjectIds = setOf("P2"),
+            )
+        }
+        assertTrue(optional.isEmpty())
+    }
+
+    @Test
+    fun `单独提示可选依赖时能限个数`() {
+        // 一个模组挂四十个可选依赖时，卡片不能撑成一屏
+        val ids = (1..40).map { "P" + it }
+        val source = FakeSource(
+            projects = ids.associateWith { project(it, "mod" + it, "Mod " + it) },
+            versions = ids.associate { "mod" + it to listOf(file("mod" + it)) },
+        )
+        val optional = kotlinx.coroutines.runBlocking {
+            ModDependencyResolver.suggestOptional("Root", ids, source)
+        }
+        assertEquals(ModDependencyResolver.MAX_OPTIONAL, optional.size)
     }
 }

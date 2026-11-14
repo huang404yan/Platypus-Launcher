@@ -40,6 +40,14 @@ data class ModVersionFile(
      * 冲突只能靠用户进游戏撞。现在留一份，装之前与装之后都能拿来对。
      */
     val incompatibleDependencies: List<String> = emptyList(),
+    /**
+     * 作者标成「可选」的 project_id。
+     *
+     * 和 [requiredDependencies] 分开放，不合并：可选依赖不装也能启动，所以既不自动装，
+     * 也不该混进「前置都装齐了」的判断里 —— 混进去会让一次装齐多下一堆用不到的库。
+     * 它只用于在依赖树卡片里单独写一句「作者建议一起装 X」。
+     */
+    val optionalDependencies: List<String> = emptyList(),
 )
 
 sealed interface ModrinthParse<out T> {
@@ -207,6 +215,11 @@ object ModrinthMeta {
                 .filter { stringOf(it, "dependency_type") == "incompatible" }
                 .mapNotNull { stringOf(it, "project_id") }
                 .distinct()
+            // optional 不自动装，但得单独留一份：依赖树卡片要如实告诉用户「作者建议一起装」
+            val optional = depObjects
+                .filter { stringOf(it, "dependency_type") == "optional" }
+                .mapNotNull { stringOf(it, "project_id") }
+                .distinct()
             ModVersionFile(
                 projectSlug = projectSlug,
                 versionNumber = stringOf(obj, "version_number") ?: fileName,
@@ -217,6 +230,7 @@ object ModrinthMeta {
                 releaseType = stringOf(obj, "version_type") ?: "release",
                 requiredDependencies = deps,
                 incompatibleDependencies = conflicts,
+                optionalDependencies = optional,
             )
         }
         return ModrinthParse.Ok(versions)
@@ -256,6 +270,10 @@ object ModrinthMeta {
                 requiredDependencies = depObjects
                     .filter { stringOf(it, "dependency_type") == "required" }
                     .mapNotNull { stringOf(it, "project_id") },
+                optionalDependencies = depObjects
+                    .filter { stringOf(it, "dependency_type") == "optional" }
+                    .mapNotNull { stringOf(it, "project_id") }
+                    .distinct(),
             )
         }
         return ModrinthParse.Ok(result)
@@ -355,5 +373,7 @@ data class ModVersionLookup(
     val incompatibleDependencies: List<String> = emptyList(),
     /** 这个版本要的前置 project_id（同样只认 required）。 */
     val requiredDependencies: List<String> = emptyList(),
+    /** 作者标成「可选」的 project_id。不参与自动安装，只用于提示。 */
+    val optionalDependencies: List<String> = emptyList(),
 )
 

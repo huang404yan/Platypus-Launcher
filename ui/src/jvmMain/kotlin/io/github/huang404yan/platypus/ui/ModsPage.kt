@@ -497,30 +497,49 @@ fun ModsPage(
         missing: List<String>,
         instanceDir: File,
         kind: LoaderKind,
+        suggestedOptional: List<String> = emptyList(),
     ) {
-        if (missing.isEmpty()) return
+        if (missing.isEmpty() && suggestedOptional.isEmpty()) return
         depStep = "查前置…"
         try {
             val plan = withContext(Dispatchers.IO) {
                 val source = ModrinthDependencySource(gameVersion.trim().ifBlank { null }, kind)
-                val (roots, skippedRoots) = ModDependencyResolver.rootsOf(missing, source) { depStep = it }
-                // 已经装过的（含刚装进去的那个根）不再下一遍：mods/ 里躺两份同名库，Forge 会直接起不来
-                val installedIds = ModDependencyResolver.installedProjectIds(ModScanner.modsDir(instanceDir))
-                val solved = ModDependencyResolver.solve(roots, installedIds, source) { depStep = it }
-                // 根这一层自己带着「谁缺它」的信息：rootsOf 只拿得到一串 project_id，
-                // 不知道是哪个模组报出来的，这里补上，卡片上才不会只显示一串包名。
-                solved.copy(
-                    mods = solved.mods.map { mod ->
-                        if (mod.depth == 0) mod.copy(requiredBy = listOf(rootTitle)) else mod
-                    },
-                    skipped = skippedRoots.map { if (it.requiredBy.isBlank()) it.copy(requiredBy = rootTitle) else it } +
-                        solved.skipped,
-                )
+                val modsDir = ModScanner.modsDir(instanceDir)
+                if (missing.isEmpty()) {
+                    // 没有必需前置，只有作者标的可选依赖：以前这里直接 return，
+                    // 结果是「装完 Sodium 这种没前置的模组，可选提示全丢了」。
+                    // 可选依赖不进安装计划，所以这张卡只有「先不管」是可点的。
+                    DependencyPlan(
+                        mods = emptyList(),
+                        optional = ModDependencyResolver.suggestOptional(
+                            rootTitle = rootTitle,
+                            projectIds = suggestedOptional,
+                            source = source,
+                            installedProjectIds = ModDependencyResolver.installedProjectIds(modsDir),
+                        ) { depStep = it },
+                    )
+                } else {
+                    val (roots, skippedRoots) = ModDependencyResolver.rootsOf(missing, source) { depStep = it }
+                    // 已经装过的（含刚装进去的那个根）不再下一遍：mods/ 里躺两份同名库，Forge 会直接起不来
+                    val installedIds = ModDependencyResolver.installedProjectIds(modsDir)
+                    val solved = ModDependencyResolver.solve(roots, installedIds, source) { depStep = it }
+                    // 根这一层自己带着「谁缺它」的信息：rootsOf 只拿得到一串 project_id，
+                    // 不知道是哪个模组报出来的，这里补上，卡片上才不会只显示一串包名。
+                    solved.copy(
+                        mods = solved.mods.map { mod ->
+                            if (mod.depth == 0) mod.copy(requiredBy = listOf(rootTitle)) else mod
+                        },
+                        skipped = skippedRoots.map { if (it.requiredBy.isBlank()) it.copy(requiredBy = rootTitle) else it } +
+                            solved.skipped,
+                        // 可选依赖同理：根自己声明的可选依赖，rootsOf 这一层还不知道是谁提的
+                        optional = solved.optional.map {
+                            if (it.suggestedBy.isBlank()) it.copy(suggestedBy = rootTitle) else it
+                        },
+                    )
+                }
             }
-            depPlan = plan
-            if (plan.mods.isEmpty() && plan.skipped.isEmpty()) {
-                depStep = ""
-            }
+            // 一样都没查出来（既没有要装的前置，也没有可选的）就别弹一张空卡片占位置
+            depPlan = plan.takeIf { it.mods.isNotEmpty() || it.skipped.isNotEmpty() || it.optional.isNotEmpty() }
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
@@ -591,15 +610,23 @@ fun ModsPage(
             }
             notice = "已装进 " + target.name + "：" + result.entry.title + " " + result.version +
                 "（" + formatBytesShort(result.downloadedBytes) + "）" +
-                if (result.requiredDependencies.isEmpty()) {
-                    "。"
-                } else {
-                    "。它还要 " + result.requiredDependencies.size + " 个前置，正在展开整棵依赖树，展开后去「已装」页一次装齐。"
+                when {
+                    result.requiredDependencies.isNotEmpty() ->
+                        "。它还要 " + result.requiredDependencies.size + " 个前置，正在展开整棵依赖树，展开后去「已装」页一次装齐。"
+                    result.optionalDependencies.isNotEmpty() ->
+                        "。它自己就能跑，作者另外标了 " + result.optionalDependencies.size + " 个建议一起装的，已列在下面的卡片里。"
+                    else -> "。"
                 }
             // 把整棵前置依赖树展开，「已装」页会摆出来让人一次性装齐。
             // 只展开直接前置是不够的：前置自己还可能有前置，漏一层进游戏照样崩。
             rescanMods()
-            solveDependencies(result.entry.title, result.requiredDependencies, instanceDir, kind)
+            solveDependencies(
+                rootTitle = result.entry.title,
+                missing = result.requiredDependencies,
+                instanceDir = instanceDir,
+                kind = kind,
+                suggestedOptional = result.optionalDependencies,
+            )
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
@@ -1173,11 +1200,14 @@ private fun DependencyPlanCard(
 ) {
     Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
         Column(Modifier.fillMaxWidth().padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Text(
-                "前置依赖 · " + plan.mods.size + " 个要保持顺序安装",
-                style = MaterialTheme.typography.bodySmall,
-                fontWeight = FontWeight.SemiBold,
-            )
+            // 只有可选依赖时不存在「保持顺序」，标题得换，否则会写成「前置依赖 · 0 个」
+            if (plan.mods.isNotEmpty()) {
+                Text(
+                    "前置依赖 · " + plan.mods.size + " 个要保持顺序安装",
+                    style = MaterialTheme.typography.bodySmall,
+                    fontWeight = FontWeight.SemiBold,
+                )
+            }
             plan.mods.forEach { mod ->
                 Text(
                     // 每层缩进两个全角空格，depth 0 就是用户自己点的那个
@@ -1189,6 +1219,21 @@ private fun DependencyPlanCard(
                 if (mod.requiredBy.isNotEmpty()) {
                     Text(
                         "　".repeat(mod.depth + 1) + "被 " + mod.requiredBy.joinToString("、") + " 需要",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+            if (plan.optional.isNotEmpty()) {
+                Text(
+                    "可选依赖 · " + plan.optional.size + " 个（不装也能启动）：",
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                plan.optional.forEach { dep ->
+                    Text(
+                        "· " + dep.title + " " + dep.file.versionNumber +
+                            if (dep.suggestedBy.isNotBlank()) " —— " + dep.suggestedBy + " 建议一起装" else "",
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -1213,7 +1258,7 @@ private fun DependencyPlanCard(
                 Text("· " + warning, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error)
             }
             Text(
-                "不带前置启动会崩，或者进游戏后功能是空的。",
+                "不带前置启动会崩，或者进游戏后功能是空的；标了可选的不装不影响启动。",
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -1223,8 +1268,11 @@ private fun DependencyPlanCard(
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("", modifier = Modifier.weight(1f))
                 TextButton(onClick = onDismiss, enabled = !busy) { Text("先不管") }
-                OutlinedButton(onClick = onInstall, enabled = !busy && plan.mods.isNotEmpty()) {
-                    Text(if (busy) "安装中…" else "一次装齐")
+                // 只有可选依赖时没有「装齐」这回事：留一个灰着的按钮比不留更让人疑惑
+                if (plan.mods.isNotEmpty()) {
+                    OutlinedButton(onClick = onInstall, enabled = !busy) {
+                        Text(if (busy) "安装中…" else "一次装齐")
+                    }
                 }
             }
         }
