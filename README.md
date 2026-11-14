@@ -119,15 +119,15 @@ releases/preview/{android,windows,linux}/   Platypus Preview 孵化版
 
 ## 状态
 
-M0（骨架）+ M1（实例扫描）+ M2（下载器）+ M3（**Windows 一键装闭环**）+ M4（**整合包导入**）已完成，当前版本 **0.8.0-preview.7**（孵化线）。
+M0（骨架）+ M1（实例扫描）+ M2（下载器）+ M3（**Windows 一键装闭环**）+ M4（**整合包导入**）已完成，当前版本 **0.8.0-preview.8**（孵化线）。
 
 **Windows 端已经能双击玩起来**：选版本 → 下载（客户端 jar / libraries / assets）→ 缺 Java 自动从 Mojang 官方运行时清单补 → 登记成实例 → 启动进主菜单，全程不需要人替启动器干活。实例内存可在启动页改（512–32768 MB）。
 
 **Android 端补齐了三个页面**：侧边栏从「四个真页面 + 两个哑占位」变成「七个真页面 + 启动占位」。新增模组页（本地 `mods/` 列表 + Modrinth 搜索安装）、联机页（组播扫描 + 手动解析地址，多拿一个 `MulticastLock` 才收得到包）、设置页（与桌面读写同一个 `platypus/settings.json`）。为此把 `ModInstaller` 从 `ui` 的 jvmMain 下沉到 `core`，桌面与安卓共用同一份逻辑。启动页仍不存在——「应用内起 JVM + 图形转译」是独立的 `runtime-android` 模块（`docs/09`），占位页现在写清缺什么而不是一句「还没做」（`docs/20`）。
 
-**Android 端也能管光影和资源包了**：侧边栏在「模组」与「联机」之间多一项「光影资源包」，页内顶部两个按钮切光影 / 资源包（手机侧边栏放不下二级）。逻辑与桌面端共用 core 的 `PackScanner` / `PackFileOps` / `PackInstaller`，一行没重写：从实例的 `shaderpacks/` 或 `resourcepacks/` 扫出已装的、勾选框启停、删除二次确认、从 Modrinth 搜了直接装。手机端目前还没有应用内启动游戏的能力（`runtime-android` 未开始），所以这一页的用处是「在手机上把包装好」（`docs/29`）。
+**Android 端也能管光影、资源包和数据包了**：侧边栏在「模组」与「联机」之间多一项「光影资源包」，页内顶部三个按钮切光影 / 资源包 / 数据包（手机侧边栏放不下二级）。逻辑与桌面端共用 core 的 `PackScanner` / `PackFileOps` / `PackInstaller`，一行没重写：从实例的 `shaderpacks/` 或 `resourcepacks/` 扫出已装的、勾选框启停、删除二次确认、从 Modrinth 搜了直接装。手机端目前还没有应用内启动游戏的能力（`runtime-android` 未开始），所以这一页的用处是「在手机上把包装好」（`docs/29`）。
 
-**Android 端仍未在真机跑过**：四个新页面和原有的下载页、诊断页一样，验证止于「编译通过 + APK 的 dex 里有这些类」，没有一份真机截图或日志。
+**Android 端仍未在真机跑过**：这一批新页面（模组、光影资源包、服务端、关于页致谢）和原有的下载页、诊断页一样，验证止于「编译通过 + APK 的 dex 里有这些类」，没有一份真机截图或日志。
 
 设置已经能存住：离线用户名、默认游戏目录、新实例默认内存，落在 `<游戏目录>/platypus/settings.json`，关掉再打开还在（`docs/13`）。
 
@@ -193,10 +193,16 @@ M0（骨架）+ M1（实例扫描）+ M2（下载器）+ M3（**Windows 一键�
 
 **插件这一项不做，理由是实测的**：Modrinth 的 `project_type:plugin` facet 会把全站模组都搜出来（返回项的 `project_type` 全是 `mod`），插件实际靠 `loaders=["bukkit","paper","spigot"]` 这类值区分；而且插件要落进服务端的 `plugins/`，这一版还没有「服务端实例」这个概念，硬塞入口只会让人装进客户端 `mods/`。
 
+**启动时有一层浮层了**：点「启动」之后整页盖一层半透明遮罩，中间一张卡写「正在启动游戏」、实例名、一根进度条、当前步骤与百分比，底部「取消启动」。照 PCL 的 `PanLaunching`（`PageLaunchLeft.xaml:76-158`）做的，但只取它四行信息里的两行（PCL 还有「登录方式」与「下载速度」，这一版不下载任何东西、也不登录）。进度**只准前进不准后退**：解压原生库那一步会让 `Stage` 回退一次，跟着跳条子会来回抖。取消**不砍协程** —— `DesktopGameRuntime.launch` 在 `withContext` 里同步起进程，中途取消会让 `withContext` 抛异常、已经起来的 java 进程再也拿不到句柄，所以改成「先记下意愿，等 `launch` 返回句柄时立刻 `stop()`」（`docs/38`）。
+
+**装过的服务端会被记住**：原来服务端页装完只剩一张「已就绪」卡片，切页回来就没了。现在装完自动写进 `<游戏目录>/platypus/servers.json`（`core/install/ServerRepository.kt`），页面底部列出「装过的服务端（N）」，每条能「打开目录」与「从列表里去掉」。**没有复用 `Instance`**：服务端没有 `versions/` 布局、不该出现在启动页、也不需要 Java 探测那一套，硬塞进去会让实例列表混进一堆点「启动」会报错的东西。同一个目录再存一次不会长出第二条（重装不该变成两行）。刻意**没有「启动服务端」按钮**：开服是长驻进程，用户要往控制台敲 `stop`、`op`、`whitelist`，没有控制台就只能强杀，比不起进程更糟（`docs/38`）。
+
+**安卓端跟上了这一轮**：桌面这边补的「数据包 / 服务端 / 关于页开源致谢」，安卓也补了。侧边栏在「光影资源包」与「联机」之间多一项「服务端」，页内同样能选原版 / Paper / Fabric 三种加载器（Forge 与 NeoForge 要起 java 子进程跑官方 installer，安卓上没有这条路，所以不列）。关于页跟桌面一样有「开源致谢」四组，且从 `core/Credits.kt` 读同一份数据。**启动页浮层与左栏没有搬**：安卓还没有应用内启动游戏的能力（`runtime-android` 未开始），没有启动流程就无从谈启动浮层。
+
 **启动页也变成左栏了**：照 PCL 的 `PageLaunchLeft.xaml`，左栏放实例列表（吃掉剩余高度、自己滚）+ 离线用户名 + 内存 + **54 高的大号启动按钮**，右栏放游戏目录、Java、直连、崩溃报告与日志。目录行留在右栏是因为「一处目录决定左栏能选到哪些实例」，它属于范围而不是动作（`docs/37`）。
 
 **版本隔离能关了**：`Instance` 新增 `isolated: Boolean = true`（默认值就是旧行为，旧 `instances.json` 不用迁移），实例详情页多一张「版本隔离」卡。关掉之后 `--gameDir` 指回游戏根目录，所有版本共用一份 `mods/`、`saves/`、`options.txt` —— 整合包把模组平铺在根目录时才有得选。不是 `versions/<id>` 形状的目录不给这个开关（关不关都落在同一处），详情页会直说。界面层的游戏目录推导同时统一走 `InstanceLayouts.of(...).gameDir`，模组页、光影页、详情统计跟着一起变（`docs/37`）。
 
 **取消安装不再留一个后台 java**：Forge / NeoForge 的官方安装器以前是「起进程 + 循环读日志」，点「取消」只是取消协程，那个 java 还在往 `libraries/` 里写；超时检查也因为装在读循环里而对不出声的进程永不生效。现在抽成 `core/install/InstallerProcess.kt`：协程一结束就 `destroyForcibly`（连派生的子进程一起杀）、日志由独立协程读而主循环用 `waitFor(100ms)` 盯超时与取消、取消以 `CancellationException` 的形式冒出去而不是被包成「安装失败」。下次再点安装，installer 自己会跳过 `libraries/` 里已经存在的库（`docs/37`）。
 
-尚未实现：正版/微软登录（`core/auth` 只有接口）、服务端不能从界面启动也看不到控制台输出（只能打开目录、自己双击脚本）、Modrinth 上的插件（`project_type:plugin` facet 实测不可用，见上）、NAT 穿透与公网中转（「直接进」+ 本机地址枚举已能把局域网与公网 IPv6 的场景走通）、中文搜索的完整词库（只有常用对照表，冷门模组仍需用户给英文名）。模组依赖的 `required` / `optional` / `incompatible` 三类声明都已解析：`required` 自动装齐，`optional` 在依赖树卡片里单独列出「作者建议一起装」但**不替你装**，`incompatible` 由模组页的「查冲突」提示。
+尚未实现：正版/微软登录（`core/auth` 只有接口）、服务端不能从界面启动也看不到控制台输出（只能打开目录、自己双击脚本，见上）、Modrinth 上的插件（`project_type:plugin` facet 实测不可用，见上）、NAT 穿透与公网中转（「直接进」+ 本机地址枚举已能把局域网与公网 IPv6 的场景走通）、中文搜索的完整词库（只有常用对照表，冷门模组仍需用户给英文名）。模组依赖的 `required` / `optional` / `incompatible` 三类声明都已解析：`required` 自动装齐，`optional` 在依赖树卡片里单独列出「作者建议一起装」但**不替你装**，`incompatible` 由模组页的「查冲突」提示。
