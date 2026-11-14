@@ -1,6 +1,10 @@
 package io.github.huang404yan.platypus.desktop
 
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.graphics.painter.BitmapPainter
 import androidx.compose.ui.graphics.toComposeImageBitmap
 import androidx.compose.ui.unit.dp
@@ -9,6 +13,7 @@ import androidx.compose.ui.window.application
 import androidx.compose.ui.window.rememberWindowState
 import io.github.huang404yan.platypus.core.Brand
 import io.github.huang404yan.platypus.core.instance.InstanceScanner
+import io.github.huang404yan.platypus.core.theme.LauncherTheme
 import io.github.huang404yan.platypus.ui.App
 import io.github.huang404yan.platypus.ui.defaultGameRoot
 import org.jetbrains.skia.Image
@@ -51,7 +56,28 @@ fun main(args: Array<String>) {
                 // 拖到比这还小，侧栏与表单会互相挤，不如直接卡住下限。
                 window.minimumSize = Dimension(1024, 640)
             }
-            App(initialGameRoot = root.ifBlank { null }, backend = services)
+            // 标题栏由系统画，深色主题下那条浅灰白接缝很扎眼，所以这里跟着配色改。
+            // 存成一个状态而不是直接在回调里调：窗口刚组合时 peer 可能还没建好，
+            // LaunchedEffect 会等一帧再重试一次（见下面那段 delay）。
+            var wantDarkTitleBar by remember { mutableStateOf<Boolean?>(null) }
+            LaunchedEffect(wantDarkTitleBar) {
+                val dark = wantDarkTitleBar ?: return@LaunchedEffect
+                // 窗口刚组合时 peer 未必已经建好，失败就隔一帧再试一次；
+                // 两次都不行说明这台机器上没有 DWM（或不是 Windows），安静放弃。
+                var applied = WindowTheme.applyDarkTitleBar(window, dark)
+                if (!applied) {
+                    kotlinx.coroutines.delay(250)
+                    applied = WindowTheme.applyDarkTitleBar(window, dark)
+                }
+                println("[ui] dark title bar=$applied")
+            }
+            App(
+                initialGameRoot = root.ifBlank { null },
+                backend = services,
+                onThemeChanged = { picked ->
+                    wantDarkTitleBar = picked.resolve(Brand.isPreview).isDark
+                },
+            )
         }
     }
 }

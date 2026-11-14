@@ -109,6 +109,7 @@ Windows 下也可以用 `gradlew.bat`。首次构建会下载约 300 MB 依赖�
 - `docs/39-java-xiazai.md`：**两端下载 Java**（为什么要 `ensure` 与 `download` 两套语义、`minecraft-java-exe` 与 gamma-snapshot 为什么要丢、安卓 JRE 的 universal + bin 两包结构、gh-proxy 的实测速率、tar 自己解析时的路径穿越与可执行位、为什么安卓只能下不能启动）
 - `docs/40-zhengban-denglu.md`：**微软正版登录**（为什么用设备码而不是本地回调端口、七步链路与 v1/v2 不能混用、RpsTicket 的 `d=` 规则、`entitlements/mcstore` 为什么必须查、四个服务各说各话的报错怎么翻、只存 refresh_token 与它的轮换、换不到会话时为什么停下来报错、**preview.10 起内置 Client ID 已改成空串**）
 - `docs/41-zishen-client-id.md`：**自己申请一个 Azure 应用 ID**（为什么不再内置：配额共享、随时被收紧、仓库公开就能被抄走；门户四步与每步为什么；`XboxLive.signin offline_access` 之外什么都不要；四条报错对照；这个 ID 不是密钥；测试版的发布约定）
+- `docs/42-liangtao-peise.md`：**两套配色**（为什么是两套而不是调色盘、60/30/10 的四色对照、正文为什么不用纯白与强调色上的字为什么用深色、默认值按版本给且选过就记住、色值为什么打包成 `Long` 放进 core、换主题只要换一个 `ColorScheme`、对比度是怎么算出来的）
 
 ## 下载
 
@@ -127,7 +128,7 @@ releases/preview/{android,windows,linux}/   Platypus Preview 孵化版
 
 ## 状态
 
-M0（骨架）+ M1（实例扫描）+ M2（下载器）+ M3（**Windows 一键装闭环**）+ M4（**整合包导入**）已完成，当前版本 **0.8.0-preview.10**（孵化线）。
+M0（骨架）+ M1（实例扫描）+ M2（下载器）+ M3（**Windows 一键装闭环**）+ M4（**整合包导入**）已完成，当前版本 **0.8.0-preview.11**（孵化线）。
 
 **Windows 端已经能双击玩起来**：选版本 → 下载（客户端 jar / libraries / assets）→ 缺 Java 自动从 Mojang 官方运行时清单补 → 登记成实例 → 启动进主菜单，全程不需要人替启动器干活。实例内存可在启动页改（512–32768 MB）。
 
@@ -141,7 +142,9 @@ M0（骨架）+ M1（实例扫描）+ M2（下载器）+ M3（**Windows 一键�
 
 **安装包里不内置 Client ID**：微软不发放通用客户端 ID，任何随包发出的 ID 都等于让所有下载者共用一份别人名下的应用注册（配额共享、随时可能被关闭、仓库公开后谁都能抄走）。所以登录流程的第一步是「填一个自己的应用 ID」——「设置 → 账号」第一张卡里有申请步骤，「打开 Azure 门户」按钮直接跳到对应的门户页面，填完点「保存 ID」立刻生效（Client ID 是每次登录与刷新时现读设置的，不用重启）。三分钟一次，之后一直用。详见 `docs/41-zishen-client-id.md`。
 
-设置已经能存住：离线用户名、默认游戏目录、新实例默认内存、当前用哪个账号，落在 `<游戏目录>/platypus/settings.json`，关掉再打开还在（`docs/13`）。
+**有两套配色了**：原来一直是 Material 3 默认的紫调浅色——那是「没设计过」的样子。现在按「60% 背景 + 30% 模块 + 10% 强调」定了两套：「自然原色」是深潭青底、泥土棕卡片、鸭嘴橙强调，正式版默认；「特工蓝橙」是灰白底、泰瑞蓝绿模块、亮橙强调，孵化版默认。前者的正文用奶油白而不是纯白（纯白在深色底上盯久了刺眼）、强调色上的字用深棕而不是白（白字压 `#FF8C00` 只有 2.2:1，深棕有 8:1）；后者侧栏与卡片用兑淡的蓝绿而不是饱和的 `#00A896`（整条侧栏刷饱和色会盖过橙色，10% 的强调就不成立了）。色值全在 core 的 `LauncherTheme.kt` 里以 ARGB 长整型存着，桌面与安卓各留一份「转 ColorScheme」的映射；界面里 250 多处颜色本来就全走 `MaterialTheme.colorScheme`，所以换主题没有一行页面代码需要改。「设置 → 界面」三行选项，点一下立刻换皮并落盘（不跟底部「保存」走）；没选过时按版本号自动挑，选过就记住，在孵化版里选了深色也不会因为版本号是 preview 又被掰回去。单测里四条在**算对比度**（正文 ≥ 4.5:1、强调色上的字 ≥ 4.5:1、卡片与底色的层次在 1.05–3 之间、所有色值都不透明），因为「按钮上的字看不清」这种问题只有数字能提前拦住。第一版有个真故障：页面根容器没铺底色，深色主题下没被卡片盖住的空白全是 Swing 窗口的白，压在上面的奶油白文字对比度掉到 1.0:1 —— 所以 `PlatypusTheme` 现在自己在最外层铺一层 `background`；窗口标题栏也跟着配色走（Windows 上用 `DwmSetWindowAttribute`，见 `app-desktop/.../WindowTheme.kt`）。细节都在 `docs/42`。
+
+设置已经能存住：离线用户名、默认游戏目录、新实例默认内存、当前用哪个账号、配色，落在 `<游戏目录>/platypus/settings.json`，关掉再打开还在（`docs/13`）。
 
 **实例页能自己建实例了**：填版本号 + 实例名 + 内存，本地已有那份游戏就直接认养（不联网），没有才走一键装；已登记的实例能改内存、能移除登记（只去掉登记，版本文件不动）。从实例页点「去启动」会跳到启动页并自动选中它（`docs/14`）。
 
@@ -149,7 +152,7 @@ M0（骨架）+ M1（实例扫描）+ M2（下载器）+ M3（**Windows 一键�
 
 **下载断点续传**：先写 `<文件>.part`，校验通过才转正；`.part` 有内容就发 `Range` 接着下，断网不清半成品，下次自动接上。进度条会额外显示「其中 N 个接着上次下（省了 M MB）」（`docs/14`）。
 
-单测 **623 例全过**（53 个测试类，`./gradlew :core:test :ui:jvmTest`；`ui` 从这一版起有 `jvmTest` 源集，格式化函数与导航常量也进单测了）。另有十二个无头冒烟任务（`e2eInstall` / `settingsSmoke` / `instanceFlowSmoke` / `resumeSmoke` / `deleteSmoke` / `fabricE2e` / `modpackE2e` / `forgeE2e` / `neoForgeE2e` / `modsE2e` / `modUpdateE2e` / `isolationSmoke`），走的是界面按钮同一批函数；`resumeSmoke` / `fabricE2e` / `modpackE2e` / `forgeE2e` / `neoForgeE2e` / `modsE2e` 需要联网，分别在空目录真装 Fabric、真跑 Forge 与 NeoForge 官方安装器、真从 Modrinth 下模组、真把一个 `.mrpack` 从解析装到进主菜单；`deleteSmoke` 在 `dist/_delete-smoke` 里全程造假数据，不碰真实 `.minecraft`。
+单测 **635 例全过**（54 个测试类，`./gradlew :core:test :ui:jvmTest`；`ui` 从这一版起有 `jvmTest` 源集，格式化函数与导航常量也进单测了）。另有十二个无头冒烟任务（`e2eInstall` / `settingsSmoke` / `instanceFlowSmoke` / `resumeSmoke` / `deleteSmoke` / `fabricE2e` / `modpackE2e` / `forgeE2e` / `neoForgeE2e` / `modsE2e` / `modUpdateE2e` / `isolationSmoke`），走的是界面按钮同一批函数；`resumeSmoke` / `fabricE2e` / `modpackE2e` / `forgeE2e` / `neoForgeE2e` / `modsE2e` 需要联网，分别在空目录真装 Fabric、真跑 Forge 与 NeoForge 官方安装器、真从 Modrinth 下模组、真把一个 `.mrpack` 从解析装到进主菜单；`deleteSmoke` 在 `dist/_delete-smoke` 里全程造假数据，不碰真实 `.minecraft`。
 
 **能装 Fabric 了**：下载页勾「顺带装 Fabric」→ 拉 meta.fabricmc.net 的 loader 列表（默认落在最新 stable）→ 装 profile json（只改 `id`，保留 `inheritsFrom`）→ 按 maven 坐标补全 8 个库的地址并下载 → 登记成 `1.20.1-fabric-0.20.1` 这样的实例。实测空目录全流程 4 分 29 秒进主菜单，日志首行 `Loading Minecraft 1.20.1 with Fabric Loader 0.20.1`（`docs/15`）。
 

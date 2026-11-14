@@ -1,11 +1,17 @@
 package io.github.huang404yan.platypus.ui
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
@@ -24,10 +30,14 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import io.github.huang404yan.platypus.core.Brand
 import io.github.huang404yan.platypus.core.instance.Instance
 import io.github.huang404yan.platypus.core.settings.LauncherSettings
+import io.github.huang404yan.platypus.core.theme.LauncherTheme
+import io.github.huang404yan.platypus.core.theme.paletteOf
 import io.github.huang404yan.platypus.core.settings.JsonSettingsRepository
 import io.github.huang404yan.platypus.core.settings.normalizeOfflineUsername
 import io.github.huang404yan.platypus.core.settings.usernameProblem
@@ -79,6 +89,15 @@ fun SettingsPage(
      * 别的二级项没有可重读的远端清单，传了也不理 —— 与下载页那几项同一个约定。
      */
     refreshTick: Int = 0,
+    /**
+     * 当前生效的配色。
+     *
+     * 由 [App] 持有而不是这一页：主题挂在最外层，改它等于换一层皮。这一页只负责
+     * 「把用户选的存下来」和「告诉上层立刻换」。
+     */
+    theme: LauncherTheme = LauncherTheme.AUTO,
+    /** 用户点了另一套配色：上层立刻换，同时这一页把它写进设置。 */
+    onThemeChange: (LauncherTheme) -> Unit = {},
 ) {
     if (backend == null) {
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -149,6 +168,7 @@ fun SettingsPage(
                         defaultMemoryMb = clamped,
                         activeAccountUuid = activeAccountUuid,
                         microsoftClientId = microsoftClientId,
+                        theme = theme.id,
                     ),
                 )
             }
@@ -197,6 +217,7 @@ fun SettingsPage(
                         defaultMemoryMb = Instance.clampMemoryMb(parsedMemory),
                         activeAccountUuid = uuid,
                         microsoftClientId = microsoftClientId,
+                        theme = theme.id,
                     ),
                 )
             }
@@ -235,6 +256,7 @@ fun SettingsPage(
                         defaultMemoryMb = Instance.clampMemoryMb(parsedMemory),
                         activeAccountUuid = activeAccountUuid,
                         microsoftClientId = cleaned,
+                        theme = theme.id,
                     ),
                 )
             }
@@ -245,6 +267,37 @@ fun SettingsPage(
             }.onFailure {
                 noticeIsError = true
                 notice = "Client ID 没能存下来：" + (it.message ?: it.javaClass.simpleName)
+            }
+        }
+    }
+
+    /**
+     * 立刻把配色写进设置并让上层换皮。
+     *
+     * 与账号、Client ID 一样不跟底部「保存」按钮走：换配色是即时反馈的事。
+     * 其余字段从内存当前值带上 —— 用户可能改了目录还没保存，不能把它冲掉。
+     */
+    fun persistTheme(picked: LauncherTheme) {
+        val parsedMemory = memoryText.trim().toIntOrNull() ?: Instance.DEFAULT_MEMORY_MB
+        scope.launch {
+            runCatching {
+                repository.save(
+                    LauncherSettings(
+                        offlineUsername = normalizeOfflineUsername(username),
+                        defaultGameRoot = gameRoot.trim(),
+                        defaultMemoryMb = Instance.clampMemoryMb(parsedMemory),
+                        activeAccountUuid = activeAccountUuid,
+                        microsoftClientId = microsoftClientId,
+                        theme = picked.id,
+                    ),
+                )
+            }.onSuccess { stored ->
+                savedAt = stored.updatedAt
+                noticeIsError = false
+                // 成功不在这里说话：选中的那一行自己会打勾，界面也已经变过来了。
+            }.onFailure {
+                noticeIsError = true
+                notice = "配色没能存下来：" + (it.message ?: it.javaClass.simpleName)
             }
         }
     }
@@ -286,7 +339,13 @@ fun SettingsPage(
                 onSaveClientId = { saveClientId(it) },
             )
             SETTINGS_TAB_JAVA -> JavaTab(backend, gameRoot, refreshTick)
-            SETTINGS_TAB_UI -> InterfaceTab()
+            SETTINGS_TAB_UI -> InterfaceTab(
+                theme = theme,
+                onPick = { picked ->
+                    onThemeChange(picked)
+                    persistTheme(picked)
+                },
+            )
             SETTINGS_TAB_OTHER -> OtherTab(
                 loadedFrom = loadedFrom,
                 savedAt = savedAt,
@@ -408,31 +467,103 @@ private fun LaunchTab(
 }
 
 /**
- * 「界面」：现在全是只读信息。
+ * 「界面」：选配色。
  *
- * 没有真控件可放 —— 主题、字号、动画开关属于阶段三（美化 U1–U4），
- * 与其在这里摆一排点不动的开关，不如把「当前是什么样、去哪儿改」讲清楚。
+ * 只有两套可选，外加一个「跟随版本」。这不是设置项没做完 —— 配色多到能调的时候，
+ * 用户会先花十分钟纠结，然后所有页面的验收都要乘以主题数量。两套够用来区分
+ * 正式版与孵化版的气质，也够让晚上玩的人自己挑一个不刺眼的。
+ *
+ * 点一下立刻生效并落盘，不跟底部「保存」按钮走：换配色是即时反馈的事，
+ * 点完还要再点一次保存，中间那一眼看到的新颜色就像没生效。
  */
 @Composable
-private fun InterfaceTab() {
+private fun InterfaceTab(theme: LauncherTheme, onPick: (LauncherTheme) -> Unit) {
+    val effective = theme.resolve(Brand.isPreview)
     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        SettingCard("当前界面", "下面这些暂时不可调，阶段三会做成可选项。") {
-            Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                InfoLine("主题", "跟随界面的默认配色（紫调 Material 3），深浅色还没做")
-                InfoLine("字号", "Material 3 默认五档，未提供整体缩放")
-                InfoLine("导航", "左侧一级栏 + 选中项的二级项；二级项的选中状态随页面切换保留到本次运行结束")
-                InfoLine("窗口", "启动后可以随意拉伸；内容区按可用宽度自适应")
+        SettingCard(
+            "配色",
+            "两套。「跟随版本」会按你现在装的是正式版还是孵化版自动挑："
+                + "孵化版走亮一点的蓝橙，正式版走护眼的深色。手动选过就记住你的选择，不再看版本号。"
+                + "改完立刻生效，这一项不用点下面的「保存」。",
+        ) {
+            Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                LauncherTheme.entries.forEach { option ->
+                    ThemeRow(
+                        option = option,
+                        // 「跟随版本」要显示它现在实际落在哪一套，否则用户看不出自己看到的是哪个。
+                        effective = if (option == LauncherTheme.AUTO) effective else option.resolve(Brand.isPreview),
+                        selected = option == theme,
+                        onClick = { onPick(option) },
+                    )
+                }
             }
         }
-        SettingCard("为什么这里是空的", "没做的设置项不摆控件。") {
-            Text(
-                "往下要补的是：深浅色切换、整体字号、减少动画（无障碍）。" +
-                    "这些要么牵动整套配色，要么要逐个页面调，做在功能补齐之后才不会返工。",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+        SettingCard("还没做的", "没做的不摆控件。") {
+            Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                InfoLine("字号", "Material 3 默认五档，未提供整体缩放")
+                InfoLine("动画", "没做「减少动画」的无障碍开关")
+                InfoLine("导航", "左侧一级栏 + 选中项的二级项；二级项的选中状态随页面切换保留到本次运行结束")
+            }
         }
     }
+}
+
+/**
+ * 一行配色选项：左边一块双色小样，中间名字与说明，右边选中标记。
+ *
+ * 小样用两格而不是一整块色：用户要判断的是「底是深的还是浅的、强调色跳不跳」，
+ * 两个方块并排放比一整块纯色更有信息量。
+ */
+@Composable
+private fun ThemeRow(option: LauncherTheme, effective: LauncherTheme, selected: Boolean, onClick: () -> Unit) {
+    val palette = paletteOf(effective)
+    Card(
+        modifier = Modifier.fillMaxWidth().clickable { onClick() },
+        colors = CardDefaults.cardColors(
+            containerColor = if (selected) {
+                MaterialTheme.colorScheme.primaryContainer
+            } else {
+                MaterialTheme.colorScheme.surface
+            },
+        ),
+    ) {
+        Row(
+            Modifier.fillMaxWidth().padding(10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Row(Modifier.width(52.dp).height(30.dp)) {
+                Box(Modifier.weight(1f).fillMaxHeight().background(Color(palette.background)))
+                Box(Modifier.weight(1f).fillMaxHeight().background(Color(palette.primary)))
+            }
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(
+                    option.label,
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+                )
+                Text(
+                    themeNoteOf(option, effective),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            if (selected) {
+                Text(
+                    "✓",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+            }
+        }
+    }
+}
+
+/** 每个选项底下那行小字。 */
+private fun themeNoteOf(option: LauncherTheme, effective: LauncherTheme): String = when (option) {
+    LauncherTheme.AUTO -> "现在用的是「" + effective.label + "」"
+    LauncherTheme.NATURAL -> "深潭青底、泥土棕卡片、鸭嘴橙；夜里不刺眼"
+    LauncherTheme.PERRY -> "灰白底、泰瑞蓝绿模块、亮橙；清爽高对比"
 }
 
 /** 「其他」：文件在哪、上次什么时候存的、怎么恢复默认。 */

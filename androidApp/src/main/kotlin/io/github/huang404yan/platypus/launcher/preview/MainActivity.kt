@@ -67,6 +67,7 @@ import io.github.huang404yan.platypus.core.instance.LoaderKind
 import io.github.huang404yan.platypus.core.instance.ScanResult
 import io.github.huang404yan.platypus.core.instance.instanceKey
 import io.github.huang404yan.platypus.core.instance.mergeInstances
+import io.github.huang404yan.platypus.core.theme.LauncherTheme
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -77,10 +78,22 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         setContent {
-            MaterialTheme {
-                Surface(modifier = Modifier.fillMaxSize()) {
-                    AppRoot()
-                }
+            // 配色从设置里读一次就定了：整棵界面都走 MaterialTheme.colorScheme，
+            // 换主题只要换这一层，页面代码一行都不用知道主题存在。
+            var theme by remember { mutableStateOf(LauncherTheme.AUTO) }
+            LaunchedEffect(Unit) { theme = readThemePreference() }
+            // PlatypusTheme 自己已经铺了一层 background 色的 Surface：这里再包一层
+            // 默认取 surface 的 Surface 会把那层盖住（浅色那套 surface 是纯白，
+            // background 才是色卡里那个 #F4F7F6），底色就变成白的了。
+            PlatypusTheme(theme) {
+                AppRoot(
+                    theme = theme,
+                    onThemeChange = { picked ->
+                        theme = picked
+                        // 落盘跟着切页走不了：这里是 Activity 级，没有 settings 仓库可用，
+                        // 所以由设置页自己写文件，写完再回调上来换皮。
+                    },
+                )
             }
         }
     }
@@ -116,7 +129,7 @@ private enum class Tab(val label: String) {
 }
 
 @Composable
-private fun AppRoot() {
+private fun AppRoot(theme: LauncherTheme, onThemeChange: (LauncherTheme) -> Unit) {
     var tab by remember { mutableStateOf(Tab.INSTANCE) }
     Row(
         modifier = Modifier
@@ -137,7 +150,7 @@ private fun AppRoot() {
                 Tab.PACKS -> PacksPage()
                 Tab.SERVER -> ServerPage()
                 Tab.LINK -> LinkPage()
-                Tab.SETTINGS -> SettingsPage()
+                Tab.SETTINGS -> SettingsPage(theme = theme, onThemeChange = onThemeChange)
                 Tab.JAVA -> JavaPage()
                 Tab.DIAGNOSTIC -> DiagnosticPage()
                 Tab.ABOUT -> AboutPage()

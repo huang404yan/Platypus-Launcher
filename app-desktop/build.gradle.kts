@@ -18,6 +18,10 @@ dependencies {
     implementation(compose.desktop.currentOs)
     implementation(libs.kotlinx.coroutines.swing)
 
+    // 深色标题栏：Windows 只给了 DwmSetWindowAttribute 这个口子，JDK 没有对等 API。
+    // 只在 app-desktop 里用，不进 core / ui（那两块不该知道宿主是什么系统）。
+    implementation(libs.jna)
+
     // 只有开发期无头验收（src/test）用得到，不进发行包。
     testImplementation(project(":ui"))
     testImplementation(project(":core"))
