@@ -130,6 +130,66 @@ class ModrinthMetaTest {
     }
 
     @Test
+    fun `版本里的 incompatible 依赖单独收，不和 required 混`() {
+        // 2026-11-14 实测：Embeddium 的 mc1.20.1 版本就是这么写的
+        val sample = """
+            [
+              {
+                "id": "V1",
+                "version_number": "0.3.31+mc1.20.1",
+                "version_type": "release",
+                "game_versions": ["1.20.1"],
+                "loaders": ["forge"],
+                "dependencies": [
+                  {"project_id": "4ZqxOvjD", "dependency_type": "incompatible"},
+                  {"project_id": "S1tndFDa", "dependency_type": "incompatible"},
+                  {"project_id": "9s6osm5g", "dependency_type": "required"},
+                  {"project_id": "Ha28R6CL", "dependency_type": "optional"}
+                ],
+                "files": [
+                  {
+                    "hashes": {"sha1": "2222222222222222222222222222222222222222"},
+                    "url": "https://cdn.modrinth.com/embeddium.jar",
+                    "filename": "embeddium-0.3.31+mc1.20.1.jar",
+                    "primary": true,
+                    "size": 1000
+                  }
+                ]
+              }
+            ]
+        """.trimIndent()
+        val versions = assertNotNull(ModrinthMeta.parseVersions(sample, "embeddium").getOrNull())
+        val file = versions.single()
+        assertEquals(listOf("4ZqxOvjD", "S1tndFDa"), file.incompatibleDependencies)
+        assertEquals(listOf("9s6osm5g"), file.requiredDependencies, "incompatible 不能被当成前置")
+    }
+
+    @Test
+    fun `反查结果的依赖字段也解析出来`() {
+        // /version_files 的响应与 /project/{slug}/version 同形，带 dependencies
+        val sample = """
+            {
+              "aaa111": {
+                "id": "V1",
+                "project_id": "sk9rgfiA",
+                "version_number": "0.3.31+mc1.20.1",
+                "dependencies": [
+                  {"project_id": "4ZqxOvjD", "dependency_type": "incompatible"}
+                ],
+                "files": [
+                  {"hashes": {"sha1": "aaa111"}, "url": "https://cdn/x.jar", "filename": "x.jar", "primary": true, "size": 10}
+                ]
+              }
+            }
+        """.trimIndent()
+        val lookups = assertNotNull(ModrinthMeta.parseVersionFiles(sample).getOrNull())
+        val lookup = assertNotNull(lookups["aaa111"])
+        assertEquals("sk9rgfiA", lookup.projectId)
+        assertEquals(listOf("4ZqxOvjD"), lookup.incompatibleDependencies)
+        assertEquals(emptyList(), lookup.requiredDependencies)
+    }
+
+    @Test
     fun `挑版本优先正式版`() {
         val versions = assertNotNull(ModrinthMeta.parseVersions(versionsResponse, "sodium").getOrNull())
         assertEquals("mc1.20.1-0.5.13-fabric", ModrinthMeta.pickBest(versions)?.versionNumber)
