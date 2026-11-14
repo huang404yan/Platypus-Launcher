@@ -84,3 +84,27 @@ val progress = install.progress
 - **切页仍占带宽。** 这是保活的必然代价：用户去了实例页，下载还在跑。没有做「后台限速」。
 - **没有单测。** `ui` 是 KMP 且只有 `jvmMain`，没有测试源集；runner 的正确性目前靠编译 + 人工点击验证。
   要补得先给 `ui` 建 `jvmTest`，把 `OneClickInstaller` 换成假实现再断言状态流转。
+
+## 七、安卓端同一问题（2026-11-14 补）
+
+安卓的下载页早就是进程级的（`androidApp/.../DownloadPage.kt` 里的 `DownloadJobRunner`），
+但**模组页与光影/资源包页**的安装仍然跑在 `rememberCoroutineScope()` 里。
+`MainActivity.kt` 的 `when (tab)` 与桌面 `when (page)` 同构，切 tab 一样会砍掉协程。
+
+新建 `androidApp/src/main/kotlin/io/github/huang404yan/platypus/launcher/preview/InstallJobs.kt`，两个 runner：
+
+| runner | 管什么 | 状态 |
+| --- | --- | --- |
+| `ModInstallRunner` | 往实例 `mods/` 装一个 Modrinth 模组 | `ModInstallState(busySlug, title, progress, message, failed, doneAt)` |
+| `PackInstallRunner` | 往实例 `shaderpacks/` 或 `resourcepacks/` 装一个包 | `PackInstallState`（字段同构） |
+
+与桌面版的两处差别：
+
+1. **多了 `doneAt` 时间戳。** runner 不知道界面在不在，装完之后没法通知页面重扫。
+   页面用 `LaunchedEffect(installState.doneAt) { if (installState.doneAt > 0L) rescanMods() }` 接住——
+   时间戳变了就重扫，切页回来也能补上这次重扫。
+2. **没有「安装计划」概念。** 安卓这边不展开依赖树，所以成功文案里明写「还差 N 个前置模组，需要自己再装」，
+   不给「都装齐了」的错觉。
+
+`:androidApp:assembleDebug` 实测 `BUILD SUCCESSFUL`（exit 0，40 tasks）。
+
