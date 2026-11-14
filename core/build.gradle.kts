@@ -48,6 +48,9 @@ kotlin.sourceSets.named("main") {
 dependencies {
     api(libs.kotlinx.coroutines.core)
     api(libs.kotlinx.serialization.json)
+    // 安卓端的 Java 运行时是 tar.xz：xz 解压用这个纯 Java 实现，
+    // 自己写 LZMA2 解码不值得（几百行还得自己测）。tar 那层是自己解析的，见 TarXz。
+    api(libs.tukaani.xz)
     testImplementation(kotlin("test"))
     testImplementation(kotlin("test-junit"))
 }

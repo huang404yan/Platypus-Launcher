@@ -44,7 +44,7 @@
 core/            纯 Kotlin，无 UI 依赖
   instance/      实例模型（实例 = 自包含目录）
   download/      下载器接口（多源/测速/并发/续传/校验）
-  runtime/       Java 运行时探测与推荐
+  runtime/       Java 运行时探测、推荐与下载（桌面走 Mojang 清单，安卓走 FCL 的 jreAssets）
   auth/          离线 / 微软 / 外置登录
   launch/        启动请求、事件、GameRuntime 抽象
 ui/              Compose Multiplatform，Android 与桌面共享
@@ -101,6 +101,7 @@ Windows 下也可以用 `gradlew.bat`。首次构建会下载约 300 MB 依赖�
 - `docs/36-xinxi-jiagou-yu-zhixie.md`：**信息架构重排与开源致谢**（左栏收成六项、下载下五个二级项、刷新按钮挂导航项、整合包独立成页、致谢四分类与「使用了代码」为空的意义）
 - `docs/37-zuolan-shujubao-geli-yu-duanxucan.md`：**启动页左栏化、数据包与服务端、版本隔离开关、安装器中断续跑**（54 高大按钮与目录为什么留右栏、`loaders=["datapack"]` 的实测理由、插件为什么不做、`isolated` 推翻 `docs/22` 的来龙去脉、`InstallerProcess` 的杀进程时机与两个易错点）。**其中「服务端只做原版」「启动浮层没做」两条已被 `docs/38` 推翻**
 - `docs/38-qidong-fuceng-yu-fuwuduan.md`：**启动浮层、服务端加载器与服务端登记**（进度只准前进的理由、取消为什么不砍协程、Paper 老 API 410 与只给 sha256、Fabric 的 server jar 必须带 installer 版本、Forge 的 Java 为什么让用户挑、服务端为什么单开一套登记、为什么没有「启动服务端」按钮）
+- `docs/39-java-xiazai.md`：**两端下载 Java**（为什么要 `ensure` 与 `download` 两套语义、`minecraft-java-exe` 与 gamma-snapshot 为什么要丢、安卓 JRE 的 universal + bin 两包结构、gh-proxy 的实测速率、tar 自己解析时的路径穿越与可执行位、为什么安卓只能下不能启动）
 
 ## 下载
 
@@ -137,7 +138,7 @@ M0（骨架）+ M1（实例扫描）+ M2（下载器）+ M3（**Windows 一键�
 
 **下载断点续传**：先写 `<文件>.part`，校验通过才转正；`.part` 有内容就发 `Range` 接着下，断网不清半成品，下次自动接上。进度条会额外显示「其中 N 个接着上次下（省了 M MB）」（`docs/14`）。
 
-单测 **551 例全过**（49 个测试类，`./gradlew :core:test :ui:jvmTest`；`ui` 从这一版起有 `jvmTest` 源集，格式化函数与导航常量也进单测了）。另有十二个无头冒烟任务（`e2eInstall` / `settingsSmoke` / `instanceFlowSmoke` / `resumeSmoke` / `deleteSmoke` / `fabricE2e` / `modpackE2e` / `forgeE2e` / `neoForgeE2e` / `modsE2e` / `modUpdateE2e` / `isolationSmoke`），走的是界面按钮同一批函数；`resumeSmoke` / `fabricE2e` / `modpackE2e` / `forgeE2e` / `neoForgeE2e` / `modsE2e` 需要联网，分别在空目录真装 Fabric、真跑 Forge 与 NeoForge 官方安装器、真从 Modrinth 下模组、真把一个 `.mrpack` 从解析装到进主菜单；`deleteSmoke` 在 `dist/_delete-smoke` 里全程造假数据，不碰真实 `.minecraft`。
+单测 **579 例全过**（51 个测试类，`./gradlew :core:test :ui:jvmTest`；`ui` 从这一版起有 `jvmTest` 源集，格式化函数与导航常量也进单测了）。另有十二个无头冒烟任务（`e2eInstall` / `settingsSmoke` / `instanceFlowSmoke` / `resumeSmoke` / `deleteSmoke` / `fabricE2e` / `modpackE2e` / `forgeE2e` / `neoForgeE2e` / `modsE2e` / `modUpdateE2e` / `isolationSmoke`），走的是界面按钮同一批函数；`resumeSmoke` / `fabricE2e` / `modpackE2e` / `forgeE2e` / `neoForgeE2e` / `modsE2e` 需要联网，分别在空目录真装 Fabric、真跑 Forge 与 NeoForge 官方安装器、真从 Modrinth 下模组、真把一个 `.mrpack` 从解析装到进主菜单；`deleteSmoke` 在 `dist/_delete-smoke` 里全程造假数据，不碰真实 `.minecraft`。
 
 **能装 Fabric 了**：下载页勾「顺带装 Fabric」→ 拉 meta.fabricmc.net 的 loader 列表（默认落在最新 stable）→ 装 profile json（只改 `id`，保留 `inheritsFrom`）→ 按 maven 坐标补全 8 个库的地址并下载 → 登记成 `1.20.1-fabric-0.20.1` 这样的实例。实测空目录全流程 4 分 29 秒进主菜单，日志首行 `Loading Minecraft 1.20.1 with Fabric Loader 0.20.1`（`docs/15`）。
 
@@ -195,6 +196,8 @@ M0（骨架）+ M1（实例扫描）+ M2（下载器）+ M3（**Windows 一键�
 
 **启动时有一层浮层了**：点「启动」之后整页盖一层半透明遮罩，中间一张卡写「正在启动游戏」、实例名、一根进度条、当前步骤与百分比，底部「取消启动」。照 PCL 的 `PanLaunching`（`PageLaunchLeft.xaml:76-158`）做的，但只取它四行信息里的两行（PCL 还有「登录方式」与「下载速度」，这一版不下载任何东西、也不登录）。进度**只准前进不准后退**：解压原生库那一步会让 `Stage` 回退一次，跟着跳条子会来回抖。取消**不砍协程** —— `DesktopGameRuntime.launch` 在 `withContext` 里同步起进程，中途取消会让 `withContext` 抛异常、已经起来的 java 进程再也拿不到句柄，所以改成「先记下意愿，等 `launch` 返回句柄时立刻 `stop()`」（`docs/38`）。
 
+**两端都能下 Java 了**：桌面端在「设置 → Java」列出 Mojang 官方运行时清单里这个平台能下的每一档（Windows x64 是 8 / 16 / 17 / 21 / 25），已装的标路径、未装的点一下下到 `<游戏目录>/runtime/`；这里刻意**不探测本机**——点「下载」就是要一份自己的、删得掉的。清单会丢掉 `minecraft-java-exe`（它的 version.name 是 14，不是 Java 版本）与 `java-runtime-gamma-snapshot`（与 gamma 同为 17，列两行没意义）。安卓端则是另一套：手机上没有「已装的 JDK」可扫，Android 10 起共享存储也不许执行代码，所以由启动器自己下几份按 ABI 预编译好的 OpenJDK，解到应用私有目录。用 FCL 仓库里的 jreAssets，**是 universal + bin-<abi> 两个包叠着解** —— `bin/java` 与 `release` 都在 bin 包里，只解 universal 会得到一个起不来的 JRE。tar 那层自己解析（`core/runtime/AndroidJava.kt` 的 `TarXz`），xz 用 `org.tukaani:xz`；路径穿越一律抛错而不是静默跳过，可执行位按 tar 头补上。地址走 `gh-proxy.com` 前缀（裸 GitHub 实测 42 秒只收到 64 KB，gh-proxy 883 KB/s）。APK 里不含 JRE，点下载时才取，所以包体积没变（`docs/39`）。
+
 **装过的服务端会被记住**：原来服务端页装完只剩一张「已就绪」卡片，切页回来就没了。现在装完自动写进 `<游戏目录>/platypus/servers.json`（`core/install/ServerRepository.kt`），页面底部列出「装过的服务端（N）」，每条能「打开目录」与「从列表里去掉」。**没有复用 `Instance`**：服务端没有 `versions/` 布局、不该出现在启动页、也不需要 Java 探测那一套，硬塞进去会让实例列表混进一堆点「启动」会报错的东西。同一个目录再存一次不会长出第二条（重装不该变成两行）。刻意**没有「启动服务端」按钮**：开服是长驻进程，用户要往控制台敲 `stop`、`op`、`whitelist`，没有控制台就只能强杀，比不起进程更糟（`docs/38`）。
 
 **安卓端跟上了这一轮**：桌面这边补的「数据包 / 服务端 / 关于页开源致谢」，安卓也补了。侧边栏在「光影资源包」与「联机」之间多一项「服务端」，页内同样能选原版 / Paper / Fabric 三种加载器（Forge 与 NeoForge 要起 java 子进程跑官方 installer，安卓上没有这条路，所以不列）。关于页跟桌面一样有「开源致谢」四组，且从 `core/Credits.kt` 读同一份数据。**启动页浮层与左栏没有搬**：安卓还没有应用内启动游戏的能力（`runtime-android` 未开始），没有启动流程就无从谈启动浮层。
@@ -205,4 +208,4 @@ M0（骨架）+ M1（实例扫描）+ M2（下载器）+ M3（**Windows 一键�
 
 **取消安装不再留一个后台 java**：Forge / NeoForge 的官方安装器以前是「起进程 + 循环读日志」，点「取消」只是取消协程，那个 java 还在往 `libraries/` 里写；超时检查也因为装在读循环里而对不出声的进程永不生效。现在抽成 `core/install/InstallerProcess.kt`：协程一结束就 `destroyForcibly`（连派生的子进程一起杀）、日志由独立协程读而主循环用 `waitFor(100ms)` 盯超时与取消、取消以 `CancellationException` 的形式冒出去而不是被包成「安装失败」。下次再点安装，installer 自己会跳过 `libraries/` 里已经存在的库（`docs/37`）。
 
-尚未实现：正版/微软登录（`core/auth` 只有接口）、服务端不能从界面启动也看不到控制台输出（只能打开目录、自己双击脚本，见上）、Modrinth 上的插件（`project_type:plugin` facet 实测不可用，见上）、NAT 穿透与公网中转（「直接进」+ 本机地址枚举已能把局域网与公网 IPv6 的场景走通）、中文搜索的完整词库（只有常用对照表，冷门模组仍需用户给英文名）。模组依赖的 `required` / `optional` / `incompatible` 三类声明都已解析：`required` 自动装齐，`optional` 在依赖树卡片里单独列出「作者建议一起装」但**不替你装**，`incompatible` 由模组页的「查冲突」提示。
+尚未实现：正版/微软登录（`core/auth` 只有接口）、服务端不能从界面启动也看不到控制台输出（只能打开目录、自己双击脚本，见上）、安卓端下好的 Java 暂时没有消费方（`runtime-android` 还没开始，下完只能先存着）、Modrinth 上的插件（`project_type:plugin` facet 实测不可用，见上）、NAT 穿透与公网中转（「直接进」+ 本机地址枚举已能把局域网与公网 IPv6 的场景走通）、中文搜索的完整词库（只有常用对照表，冷门模组仍需用户给英文名）。模组依赖的 `required` / `optional` / `incompatible` 三类声明都已解析：`required` 自动装齐，`optional` 在依赖树卡片里单独列出「作者建议一起装」但**不替你装**，`incompatible` 由模组页的「查冲突」提示。
