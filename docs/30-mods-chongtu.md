@@ -157,6 +157,7 @@ val present: Boolean get() = otherFile != null
 | 真网（测试实例 2 个 jar，故意放一对互斥） | `scanned=2 recognized=2 conflicts=2 present=1 potential=1`，命中的是 `Embeddium -> Rubidium present=true` |
 | 界面（Forge 实例） | 点「查冲突」→ 卡片标题「模组冲突 · 0 条已经装着」，下面列三条 `potential` |
 | 界面（2 个 jar 的测试实例） | 卡片标题「模组冲突 · 1 条已经装着」，第一行 `Embeddium ↔ Rubidium` + 「都装在这个实例里：embeddium-0.3.31+mc1.20.1.jar 与 rubidium-mc1.20.1-0.7.1.jar」，下方 `potential` 段 1 条（TexTrue's Embeddium Options） |
+| 安卓 APK | `:androidApp:assembleDebug` EXIT=0，13,386,990 B / 142 entries；dex 里 `ModConflictChecker` 63 处、`ModConflictReport` 12、`ConflictCard` 13、`checkConflicts` 10（**未真机验证**） |
 
 界面两张截图都验过「展开 / 收起」与「知道了」（关掉卡片）。
 
@@ -168,5 +169,5 @@ val present: Boolean get() = otherFile != null
 - **没有版本区间判断**。库拿到的是「这个项目的某个版本声明不兼容那个项目」，不判断「本地那个版本是不是落在声明范围内」。作者常写「不兼容 0.5.x」，本地装 0.4 其实没事，现在照样报。
 - **不查崩溃日志里的 mixin 冲突**。`docs/26` 的崩溃归因是另一条线，两边结论没有互相关联（比如「这条崩溃报告里的 `Mixin apply failed` 对应冲突卡片第三条」）。
 - **不做一键处置**。卡片只提示，停用/删除仍要用户自己到列表里点。
-- **安卓端没有这个按钮**。core 是共用的，但安卓的模组页还没有接（与 `docs/29` 的光影资源包不同，那边两端都接了）。
+- **安卓端只编译过，没在真机跑过**。手机模组页接的是同一份 `ModConflictChecker`（按钮 `查冲突`、卡片 `ConflictCard` 不放「展开全部」而是全列），dex 里能扫到 `ModConflictChecker` / `ConflictCard` / `checkConflicts`，但没有一份真机截图。
 - **`recognized` 不到 100% 时如实报**。Forge 实例 34 个里 4 个 Modrinth 不认识（多是自编译或非 Modrinth 来源），卡片底部会写「N 个文件 Modrinth 不认识」—— 这些文件不参与冲突检查，卡片不给它们背书的结论。
