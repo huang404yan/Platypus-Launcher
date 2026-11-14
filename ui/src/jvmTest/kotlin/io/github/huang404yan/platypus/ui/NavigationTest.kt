@@ -52,8 +52,17 @@ class NavigationTest {
     @Test
     fun `设置里有一项 Java`() {
         val subs = PAGE_SUB_TABS.getValue(Page.SETTINGS)
-        assertEquals(SETTINGS_TAB_JAVA, subs[1].id, "Java 紧跟在「启动」后面：它决定「用什么跑」，不是「跑成什么样」")
-        assertEquals("Java", subs[1].label)
+        assertEquals(SETTINGS_TAB_JAVA, subs[2].id, "Java 紧跟「启动」与「账号」：它决定「用什么跑」，不是「跑成什么样」")
+        assertEquals("Java", subs[2].label)
+    }
+
+    @Test
+    fun `设置里有一项账号`() {
+        val subs = PAGE_SUB_TABS.getValue(Page.SETTINGS)
+        assertEquals(SETTINGS_TAB_ACCOUNT, subs[1].id, "账号紧跟「启动」：它决定「以谁的身份进游戏」")
+        assertEquals("账号", subs[1].label)
+        // 账号页没有远端清单可刷新，登录状态由页面自己重读
+        assertFalse(subs[1].refreshable)
     }
 
     @Test
@@ -66,7 +75,7 @@ class NavigationTest {
     @Test
     fun `界面和其他两页仍然不带刷新按钮`() {
         val settings = PAGE_SUB_TABS.getValue(Page.SETTINGS)
-        for (id in listOf(SETTINGS_TAB_LAUNCH, SETTINGS_TAB_UI, SETTINGS_TAB_OTHER)) {
+        for (id in listOf(SETTINGS_TAB_LAUNCH, SETTINGS_TAB_ACCOUNT, SETTINGS_TAB_UI, SETTINGS_TAB_OTHER)) {
             assertFalse(settings.first { it.id == id }.refreshable, id + " 没有远端清单可刷新")
         }
     }

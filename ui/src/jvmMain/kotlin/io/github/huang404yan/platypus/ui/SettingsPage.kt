@@ -41,6 +41,9 @@ const val SETTINGS_TAB_LAUNCH = "launch"
 /** 「界面」二级项的 id。 */
 const val SETTINGS_TAB_UI = "ui"
 
+/** 「账号」二级项的 id。 */
+const val SETTINGS_TAB_ACCOUNT = "account"
+
 /** 「Java」二级项的 id。 */
 const val SETTINGS_TAB_JAVA = "java"
 
@@ -68,7 +71,7 @@ const val SETTINGS_TAB_OTHER = "other"
 @Composable
 fun SettingsPage(
     backend: LauncherBackend?,
-    /** [SETTINGS_TAB_LAUNCH] / [SETTINGS_TAB_JAVA] / [SETTINGS_TAB_UI] / [SETTINGS_TAB_OTHER]。 */
+    /** [SETTINGS_TAB_LAUNCH] / [SETTINGS_TAB_ACCOUNT] / [SETTINGS_TAB_JAVA] / [SETTINGS_TAB_UI] / [SETTINGS_TAB_OTHER]。 */
     subTab: String = SETTINGS_TAB_LAUNCH,
     /**
      * 侧边栏那个「↻」的计数，只有「Java」页用得上（重读一次官方运行时清单）。
@@ -112,12 +115,14 @@ fun SettingsPage(
     var notice by remember { mutableStateOf("") }
     var noticeIsError by remember { mutableStateOf(false) }
     var savedAt by remember { mutableStateOf(0L) }
+    var activeAccountUuid by remember { mutableStateOf("") }
 
     LaunchedEffect(Unit) {
         val settings = withContext(Dispatchers.IO) { runCatching { repository.load() }.getOrDefault(LauncherSettings()) }
         username = settings.offlineUsername
         gameRoot = settings.defaultGameRoot
         memoryText = settings.defaultMemoryMb.toString()
+        activeAccountUuid = settings.activeAccountUuid
         loaded = true
         loadedFrom = (repository as? JsonSettingsRepository)?.path.orEmpty()
     }
@@ -138,6 +143,7 @@ fun SettingsPage(
                         offlineUsername = cleanedName,
                         defaultGameRoot = gameRoot.trim(),
                         defaultMemoryMb = clamped,
+                        activeAccountUuid = activeAccountUuid,
                     ),
                 )
             }
@@ -168,10 +174,46 @@ fun SettingsPage(
         }
     }
 
+    /**
+     * 立刻把「用哪个账号」写进设置。
+     *
+     * 不跟「保存」按钮走：账号页那两个按钮点下去就是要马上生效的，用户不会想到
+     * 还得再滚回去点一次保存。其余字段从内存里的当前值带上，避免把没保存的改动冲掉。
+     */
+    fun useAccount(uuid: String) {
+        activeAccountUuid = uuid
+        val parsedMemory = memoryText.trim().toIntOrNull() ?: Instance.DEFAULT_MEMORY_MB
+        scope.launch {
+            val result = runCatching {
+                repository.save(
+                    LauncherSettings(
+                        offlineUsername = normalizeOfflineUsername(username),
+                        defaultGameRoot = gameRoot.trim(),
+                        defaultMemoryMb = Instance.clampMemoryMb(parsedMemory),
+                        activeAccountUuid = uuid,
+                    ),
+                )
+            }
+            result.onSuccess { stored ->
+                savedAt = stored.updatedAt
+                noticeIsError = false
+                notice = if (stored.activeAccountUuid.isBlank()) {
+                    "已改用离线模式。"
+                } else {
+                    "启动游戏时会用这个正版账号。"
+                }
+            }.onFailure {
+                noticeIsError = true
+                notice = "账号选择没能存下来：" + (it.message ?: it.javaClass.simpleName)
+            }
+        }
+    }
+
     fun resetDefaults() {
         username = LauncherSettings.DEFAULT_OFFLINE_USERNAME
         gameRoot = ""
         memoryText = Instance.DEFAULT_MEMORY_MB.toString()
+        activeAccountUuid = ""
         noticeIsError = false
         notice = "已填回默认值，点「保存」才生效。"
     }
@@ -191,6 +233,13 @@ fun SettingsPage(
 
         when (subTab) {
             // Java 页不读写设置文件，所以下面那排「保存 / 填回默认值」对它不显示。
+            // 账号页自己落盘（点「用这个」立刻生效），不走下面那排保存。
+            SETTINGS_TAB_ACCOUNT -> AccountTab(
+                backend = backend,
+                activeUuid = activeAccountUuid,
+                onUseAccount = { useAccount(it) },
+                onUseOffline = { useAccount("") },
+            )
             SETTINGS_TAB_JAVA -> JavaTab(backend, gameRoot, refreshTick)
             SETTINGS_TAB_UI -> InterfaceTab()
             SETTINGS_TAB_OTHER -> OtherTab(
@@ -211,7 +260,7 @@ fun SettingsPage(
             )
         }
 
-        if (subTab != SETTINGS_TAB_JAVA) {
+        if (subTab != SETTINGS_TAB_JAVA && subTab != SETTINGS_TAB_ACCOUNT) {
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 Button(onClick = { save() }, enabled = loaded) { Text("保存") }
                 OutlinedButton(onClick = { resetDefaults() }, enabled = loaded) { Text("填回默认值") }

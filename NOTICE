@@ -26,6 +26,9 @@ Copyright 2026 Platypus contributors
   Forge / NeoForge       官方 installer 以子进程调用，不链接、不修改其代码
   MCBBS v2 整合包格式    社区约定（manifest.json + modpack.json + overrides）
   离线登录 UUID 规则     OfflinePlayer:<名字> 的 MD5 转 v3 UUID
+  Microsoft 账号登录      OAuth 2.0 设备码授权 + Xbox Live / XSTS / Minecraft Services 的公开
+                          REST 接口；内置的 Client ID 是公开文档里被各类命令行工具引用的
+                          公共客户端，不归本项目所有，也不代表微软对本项目的授权
 
 == 设计参考（未使用其代码） ==
 
@@ -35,6 +38,8 @@ Copyright 2026 Platypus contributors
                                   源码树未附带 LICENSE，许可状态不明。
   HMCL                             GPL-3.0。实例目录布局、离线命名、Java 挑选方式的公开文档。
   Prism Launcher                   GPL-3.0。实例隔离形态（每实例独立目录，共享 libraries/assets）。
+  PCL2 · 微软登录部分               专有许可。七步链路里 XSTS 错误码的对照表、
+                                  「先查持有记录再拿档案」的顺序参照了它，代码未取。
   FCL（FoldCraftLauncher）         GPL-3.0。安卓端 Java 页把「自己下几份常用运行时」作为主路径，
                                    而不是扫描本机；实现为 Java + XML，代码未取。
 

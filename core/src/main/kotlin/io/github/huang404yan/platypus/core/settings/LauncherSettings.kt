@@ -21,6 +21,13 @@ data class LauncherSettings(
     val offlineUsername: String = DEFAULT_OFFLINE_USERNAME,
     val defaultGameRoot: String = "",
     val defaultMemoryMb: Int = Instance.DEFAULT_MEMORY_MB,
+    /**
+     * 启动时用哪个正版账号的 UUID；空串表示走离线模式。
+     *
+     * 只记 UUID 不记令牌：令牌在 platypus/accounts.json 里，由账号仓库单独管。
+     * 这样用户在设置页换游戏目录、或者把设置文件发给别人时，不会连账号一起带出去。
+     */
+    val activeAccountUuid: String = "",
     /** 最近一次写盘时间（毫秒）；0 表示还没写过。 */
     val updatedAt: Long = 0L,
 ) {
@@ -37,6 +44,7 @@ data class LauncherSettings(
             offlineUsername = normalizeOfflineUsername(raw.offlineUsername),
             defaultGameRoot = raw.defaultGameRoot.trim().trim('"'),
             defaultMemoryMb = Instance.clampMemoryMb(raw.defaultMemoryMb),
+            activeAccountUuid = raw.activeAccountUuid.trim(),
         )
     }
 }
