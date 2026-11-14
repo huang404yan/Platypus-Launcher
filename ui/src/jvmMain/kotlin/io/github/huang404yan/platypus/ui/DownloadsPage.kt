@@ -278,6 +278,8 @@ private fun NeoForgeRow(
 fun DownloadsPage(
     initialGameRoot: String?,
     backend: LauncherBackend? = null,
+    /** 左栏「刷新」按钮的信号：每点一次加一，页面拿它当 LaunchedEffect 的 key。 */
+    refreshTick: Int = 0,
     onInstalled: (Instance) -> Unit = {},
 ) {
     var gameDirText by remember { mutableStateOf(initialGameRoot ?: defaultGameRoot()) }
@@ -322,10 +324,6 @@ fun DownloadsPage(
     val speedBytesPerSecond = install.speedBytesPerSecond
     val elapsedMs = install.elapsedMs
     val message = install.message
-
-    // 这个 scope 只跑「刷新版本列表」这类跟着页面走也无所谓的请求；
-    // 真正的一键装跑在 OneClickRunner 里，切页不会中断。
-    val scope = rememberCoroutineScope()
 
     suspend fun refreshManifest() {
         loadingManifest = true
@@ -504,6 +502,11 @@ fun DownloadsPage(
         if (manifest == null) refreshManifest()
     }
 
+    // 左栏那个「↻」：重拉版本清单。tick 为 0 是首次组合，交给上面那个 effect 拉就行。
+    LaunchedEffect(refreshTick) {
+        if (refreshTick > 0) refreshManifest()
+    }
+
     val busy = phase is InstallPhase.Running
     val releases = manifest?.releases().orEmpty()
     val visible = if (filterText.isBlank()) {
@@ -661,9 +664,6 @@ fun DownloadsPage(
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            OutlinedButton(onClick = { scope.launch { refreshManifest() } }, enabled = !loadingManifest) {
-                Text("刷新列表")
-            }
         }
 
         manifestError?.let { DownloadHint(it + "（不影响手填版本号：会走 BMCLAPI 的版本接口兜底）", error = true) }
@@ -713,18 +713,8 @@ fun DownloadsPage(
             }
         }
 
-        // 整合包导入与一键装共用上面的「目标目录 / 默认内存」，但进度与步骤各自独立：
-        // 导入包含「下载包内文件」「解 overrides」两段，混进一键装的步骤列表会多出永远不会亮的灯。
-        ModpackSection(
-            enabled = !busy,
-            gameDir = gameDirText,
-            defaultMemoryMb = defaultMemoryMb,
-            backend = backend,
-            onImported = onInstalled,
-            // 远程搜整合包时把上面填的版本号带过去当种子，省得用户再敲一遍
-            initialGameVersion = versionText,
-        )
-
+        // 整合包导入搬去左栏「下载 / 整合包」了：它和一键装原版是并列的两件事，
+        // 都塞在原版页底部时，用户要滚过版本列表和进度条才看得见 —— 那正是「藏得深」。
         if (message.isNotBlank()) {
             DownloadHint(message, error = phase is InstallPhase.Failed)
         }

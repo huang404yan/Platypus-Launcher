@@ -52,11 +52,8 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
 
-/** 「光影」二级项的 id，与 Navigation.kt 里 PAGE_SUB_TABS 的定义对应。 */
-const val PACKS_TAB_SHADERS = "shaders"
-
-/** 「资源包」二级项的 id。 */
-const val PACKS_TAB_RESOURCEPACKS = "resourcepacks"
+// 以前这里有 PACKS_TAB_SHADERS / PACKS_TAB_RESOURCEPACKS 两个二级项 id。
+// 现在光影与资源包是「下载」下面的两个平级项，页面直接收 PackKind，不再靠字符串猜。
 
 /**
  * 光影 / 资源包页。
@@ -74,11 +71,12 @@ const val PACKS_TAB_RESOURCEPACKS = "resourcepacks"
 fun PacksPage(
     initialGameRoot: String? = null,
     backend: LauncherBackend? = null,
-    /** [PACKS_TAB_SHADERS] 或 [PACKS_TAB_RESOURCEPACKS]；由 App.kt 从侧边栏的二级导航传进来。 */
-    subTab: String = PACKS_TAB_SHADERS,
+    /** 光影还是资源包。由 App.kt 按侧栏点的是哪一项决定。 */
+    kind: PackKind = PackKind.SHADER,
+    /** 左栏「刷新」按钮的信号：每点一次加一，页面拿它当 LaunchedEffect 的 key。 */
+    refreshTick: Int = 0,
 ) {
     val scope = rememberCoroutineScope()
-    val kind = if (subTab == PACKS_TAB_RESOURCEPACKS) PackKind.RESOURCE_PACK else PackKind.SHADER
 
     var rootText by remember { mutableStateOf(initialGameRoot ?: defaultGameRoot()) }
     var instances by remember { mutableStateOf<List<Instance>>(emptyList()) }
@@ -289,6 +287,14 @@ fun PacksPage(
         rescanPacks()
     }
 
+    // 左栏那个「↻」：把实例和已装清单都重扫一遍。tick 为 0 是首次组合，不重复扫。
+    LaunchedEffect(refreshTick) {
+        if (refreshTick > 0 && rootText.isNotBlank()) {
+            rescanInstances()
+            rescanPacks()
+        }
+    }
+
     val current = snapshot
 
     Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -299,7 +305,7 @@ fun PacksPage(
             fontWeight = FontWeight.SemiBold,
         )
         Text(
-            if (subTab == PACKS_TAB_RESOURCEPACKS) {
+            if (kind == PackKind.RESOURCE_PACK) {
                 "从 Modrinth 搜资源包，装进选中实例的 resourcepacks/。"
             } else {
                 "从 Modrinth 搜光影，装进选中实例的 shaderpacks/。要先用 Iris 或 OptiFine 才能加载。"
@@ -324,15 +330,14 @@ fun PacksPage(
                     }
                 },
             ) { Text("选择…") }
-            Button(
-                onClick = {
-                    scope.launch {
-                        rescanInstances()
-                        rescanPacks()
-                    }
-                },
-                enabled = !scanning && rootText.isNotBlank(),
-            ) { Text(if (scanning) "扫描中…" else "刷新") }
+            // 重扫按钮在左栏「下载 / 光影包」或「资源包」那一项上（↻）；这里不再放第二个入口。
+            if (scanning) {
+                Text(
+                    "扫描中…",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
         }
 
         PackInstancePicker(

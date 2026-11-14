@@ -4,6 +4,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
@@ -16,9 +17,11 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -44,13 +47,96 @@ import io.github.huang404yan.platypus.core.modpack.ModpackBrowser
 import io.github.huang404yan.platypus.core.modpack.ModpackDownloadProgress
 import io.github.huang404yan.platypus.core.search.SearchTerm
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.io.File
 import java.util.Locale
 
 /** 整合包从哪来：本地已有的压缩包，还是当场从 Modrinth 下一个。 */
 private enum class ModpackSource { LOCAL, REMOTE }
+
+/**
+ * 整合包页：一个 .mrpack / MCBBS v2 包，装成能启动的实例。
+ *
+ * 内容本体还是 [ModpackSection]（本地文件 / 从 Modrinth 搜两条入口共用一条导入流水线），
+ * 这里补上它从下载页独立出来之后必须自己有的东西：标题、目标目录（含「选择…」）、
+ * 设置里读出来的默认内存。
+ *
+ * 为什么从下载页拆出来：PCL 把「安装整合包」和「安装原版」并排放在下载页的左侧栏
+ * （`PageDownloadLeft.xaml` 的 ItemInstall / ItemPack）。挤在原版那一页底部时，
+ * 用户要先滚过版本列表和一键安装的进度条才看得见它 —— 这正是「藏得深」。
+ * 拆成平级项之后，左边一眼就是「我想装什么」。
+ */
+@Composable
+internal fun ModpackPage(
+    initialGameRoot: String? = null,
+    backend: LauncherBackend? = null,
+    onImported: (Instance) -> Unit = {},
+) {
+    var gameDirText by remember { mutableStateOf(initialGameRoot ?: defaultGameRoot()) }
+    // 与下载页同一个来源：设置里指定的默认内存，导入后登记实例时用
+    var defaultMemoryMb by remember { mutableStateOf(Instance.DEFAULT_MEMORY_MB) }
+    // 远程搜索的游戏版本种子留空：整合包页面前面不再有「版本号输入框」，
+    // 猜一个版本反而会把能搜到的包过滤掉。搜完发现不对，用户可以在搜索行里改。
+    val versionSeed = ""
+
+    LaunchedEffect(Unit) {
+        val repository = backend?.settings
+        if (repository != null) {
+            val stored = withContext(Dispatchers.IO) { runCatching { repository.load() }.getOrNull() }
+            if (stored != null) {
+                if (initialGameRoot.isNullOrBlank() && stored.defaultGameRoot.isNotBlank()) {
+                    gameDirText = stored.defaultGameRoot
+                }
+                defaultMemoryMb = stored.defaultMemoryMb
+            }
+        }
+    }
+
+    val running = ModpackRunner.state.collectAsState().value.phase is ImportPhase.Running
+
+    Column(
+        Modifier.fillMaxSize().verticalScroll(rememberScrollState()),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Text("整合包", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
+        Text(
+            "选一个 .mrpack 或 MCBBS v2 压缩包，直接装成能启动的实例：包里的模组、" +
+                "配置、光影都会解到实例目录里，缺的游戏文件与加载器会一起补。",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+
+        Row(
+            Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            OutlinedTextField(
+                value = gameDirText,
+                onValueChange = { gameDirText = it },
+                modifier = Modifier.weight(1f),
+                label = { Text("游戏目录（.minecraft）") },
+                singleLine = true,
+            )
+            OutlinedButton(
+                onClick = { pickDirectory(gameDirText)?.let { gameDirText = it.absolutePath } },
+                enabled = !running,
+            ) { Text("选择…") }
+        }
+
+        ModpackSection(
+            enabled = !running,
+            gameDir = gameDirText,
+            defaultMemoryMb = defaultMemoryMb,
+            backend = backend,
+            onImported = onImported,
+            initialGameVersion = versionSeed,
+        )
+    }
+}
 
 /**
  * 整合包导入区：选一个 .mrpack / MCBBS v2 包，一次装成能启动的实例。

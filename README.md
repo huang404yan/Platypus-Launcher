@@ -97,6 +97,8 @@ Windows 下也可以用 `gradlew.bat`。首次构建会下载约 300 MB 依赖�
 - `docs/34-jie-mian-baohuo.md`：**桌面端下载 / 导入跨页保活**（切页会销毁页面、`rememberCoroutineScope` 随之取消、进程级 runner 与 `StateFlow`、幂等与速度采样两个坑、取消的三档语义）
 - `docs/33-lianji-zhilian.md`：**联机页「直接进」**（用官方 `--quickPlayMultiplayer` 而不是自己实现协议栈、特性开关不打开参数根本不会出现、版本不支持时抛错而不是静默停主菜单、地址为什么存在 App 层）
 - `docs/32-daoru-hedui.md`：**导入后核对磁盘**（为什么要「再看一眼」而不是信下载器、先比大小必要时才算 sha1、失败不抛而是收集成清单、取消要显示 `Canceled` 而不是停在 `Running`）
+- `docs/35-jiemian-ke-yongxing.md`：**界面可用性**（窗口默认尺寸与最小尺寸、实例页为什么整页滚动而不是「固定头 + 权重列表」、用 Swing `JFileChooser` 而不是 AWT `FileDialog`、下载页状态条、中文搜索与不引外部词库的理由）
+- `docs/36-xinxi-jiagou-yu-zhixie.md`：**信息架构重排与开源致谢**（左栏收成六项、下载下五个二级项、刷新按钮挂导航项、整合包独立成页、致谢四分类与「使用了代码」为空的意义）
 
 ## 下载
 
@@ -133,7 +135,7 @@ M0（骨架）+ M1（实例扫描）+ M2（下载器）+ M3（**Windows 一键�
 
 **下载断点续传**：先写 `<文件>.part`，校验通过才转正；`.part` 有内容就发 `Range` 接着下，断网不清半成品，下次自动接上。进度条会额外显示「其中 N 个接着上次下（省了 M MB）」（`docs/14`）。
 
-单测 **484 例全过**（42 个测试类，`./gradlew :core:test`）。另有十二个无头冒烟任务（`e2eInstall` / `settingsSmoke` / `instanceFlowSmoke` / `resumeSmoke` / `deleteSmoke` / `fabricE2e` / `modpackE2e` / `forgeE2e` / `neoForgeE2e` / `modsE2e` / `modUpdateE2e` / `isolationSmoke`），走的是界面按钮同一批函数；`resumeSmoke` / `fabricE2e` / `modpackE2e` / `forgeE2e` / `neoForgeE2e` / `modsE2e` 需要联网，分别在空目录真装 Fabric、真跑 Forge 与 NeoForge 官方安装器、真从 Modrinth 下模组、真把一个 `.mrpack` 从解析装到进主菜单；`deleteSmoke` 在 `dist/_delete-smoke` 里全程造假数据，不碰真实 `.minecraft`。
+单测 **491 例全过**（43 个测试类，`./gradlew :core:test`）。另有十二个无头冒烟任务（`e2eInstall` / `settingsSmoke` / `instanceFlowSmoke` / `resumeSmoke` / `deleteSmoke` / `fabricE2e` / `modpackE2e` / `forgeE2e` / `neoForgeE2e` / `modsE2e` / `modUpdateE2e` / `isolationSmoke`），走的是界面按钮同一批函数；`resumeSmoke` / `fabricE2e` / `modpackE2e` / `forgeE2e` / `neoForgeE2e` / `modsE2e` 需要联网，分别在空目录真装 Fabric、真跑 Forge 与 NeoForge 官方安装器、真从 Modrinth 下模组、真把一个 `.mrpack` 从解析装到进主菜单；`deleteSmoke` 在 `dist/_delete-smoke` 里全程造假数据，不碰真实 `.minecraft`。
 
 **能装 Fabric 了**：下载页勾「顺带装 Fabric」→ 拉 meta.fabricmc.net 的 loader 列表（默认落在最新 stable）→ 装 profile json（只改 `id`，保留 `inheritsFrom`）→ 按 maven 坐标补全 8 个库的地址并下载 → 登记成 `1.20.1-fabric-0.20.1` 这样的实例。实测空目录全流程 4 分 29 秒进主菜单，日志首行 `Loading Minecraft 1.20.1 with Fabric Loader 0.20.1`（`docs/15`）。
 
@@ -175,6 +177,11 @@ M0（骨架）+ M1（实例扫描）+ M2（下载器）+ M3（**Windows 一键�
 
 **点「一键安装」当场有反应**：进度、速度、失败原因原来都在整页最下面，一滚就出屏，用户以为按钮没反应会再点几次。现在说明文字下面钉一条状态条：运行中是「正在<步骤> · <进度> · <速度>/s · 已用 <时长>」，失败是「卡在「<步骤>」：<原因>」用错误色，完成是「安装完成：<实例名> 已就绪」。详细的步骤列表与重试按钮照旧留在下方。版本过滤框打错也不再给一个空列表，而是明说「没有名字里带「xxx」的正式版，清空能看全部 N 个」。
 
-**中文搜索**：Modrinth 只认英文名与 slug，直接搜「钠」什么也搜不到。PCL 能做到是因为它内置了一份 3 万余行的中文名数据库（`PCLCS/Resource/WikiEntries.txt`），而 `pcl-src` 没有 LICENSE 文件、许可状态不明，不能直接拷进本项目。这里改成手写约 90 条常用中英对照（`core/search/SearchKeywords.kt`）：输入中文时界面直接说明「搜不到是因为 Modrinth 不认中文」，并给一组可点的英文候选 chip，点一下替换关键词；输入框为空时给这一类热门词（`docs/35`）。
+**左栏按 PCL 的分法重排了**：以前是「启动 / 实例 / 下载 / 模组 / 光影资源包 / 联机 / 设置 / 关于」八项平铺，模组与光影各占一个一级项、里面再套二级页。现在按 PCL 的做法（`PageDownloadLeft.xaml`）收成六项：模组、整合包、资源包、光影包都变成「下载」下的二级项，整合包也从下载页底部搬出来独立成页——它和一键装原版是并列的两件事，塞在原版页最底下时用户要滚过版本列表和进度条才看得见，那正是「藏得深」。
+
+**刷新按钮挂在菜单项上**：以前每个页面内容区各有一个「刷新」按钮，位置各不相同。现在跟 PCL 一样做成导航项的属性：鼠标碰到「下载」下的某一项，右侧出现一个小 ↻，点它重扫这一页的清单。内容区里不再放第二个入口——同一个动作两个按钮，用户永远在猜哪个才是对的。整合包页故意不挂：它没有可刷新的缓存清单，放一个点了没反应的按钮比不放更糟。
+
+**关于页有开源致谢了**：分四组写清「使用了代码 / 设计参考（未使用代码）/ 格式与协议 / 运行时依赖」。PCL2 是专有许可、HMCL 与 Prism 是 GPL-3.0，本项目一行没抄，所以「使用了代码」这一组是空的——空着是有意的，不是漏写，单测里就有一条断言盯着它：一旦有人真的搬了实现，这条会变红，提醒同时改仓库根 `NOTICE`。致谢数据在 `core/Credits.kt`，关于页与 `NOTICE` 同源，不会出现「界面说没抄、NOTICE 里写着抄了」。
+**中文搜索**：Modrinth 只认英文名与 slug，直接搜「钠」什么也搜不到。PCL 能做到是因为它内置了一份 3 万余行的中文名数据库（`PCLCS/Resource/WikiEntries.txt`），而 `pcl-src` 没有 LICENSE 文件、许可状态不明，不能直接拷进本项目。这里改成手写 140 余条常用中英对照（`core/search/SearchKeywords.kt`，每条 slug 都用 Modrinth 的 `/search` 实测过「搜出来非空」）：输入中文时界面直接说明「搜不到是因为 Modrinth 不认中文」，并给一组可点的英文候选 chip，点一下替换关键词；输入框为空时给这一类热门词（`docs/35`）。
 
 尚未实现：正版/微软登录（`core/auth` 只有接口）、NAT 穿透与公网中转（「直接进」+ 本机地址枚举已能把局域网与公网 IPv6 的场景走通）、中文搜索的完整词库（只有常用对照表，冷门模组仍需用户给英文名）。模组依赖的 `required` / `optional` / `incompatible` 三类声明都已解析：`required` 自动装齐，`optional` 在依赖树卡片里单独列出「作者建议一起装」但**不替你装**，`incompatible` 由模组页的「查冲突」提示。

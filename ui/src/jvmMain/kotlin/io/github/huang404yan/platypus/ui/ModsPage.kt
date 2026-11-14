@@ -1,5 +1,6 @@
 package io.github.huang404yan.platypus.ui
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -31,6 +32,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import io.github.huang404yan.platypus.core.instance.Instance
@@ -64,10 +66,14 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
 
-/** 「已装」二级项的 id，与 Navigation.kt 里 PAGE_SUB_TABS 的定义对应。 */
+/**
+ * 「已装」与「浏览」两个分栏的 id。
+ *
+ * 以前它们是左侧栏的二级项（由 App.kt 通过 subTab 形参传进来）。现在整页挂在
+ * 「下载 / Mod」下面，两个分栏改成页面内的按钮 —— 侧栏只留「我想装什么」这一层，
+ * 再往下套一层二级导航会让左栏长到放不下。
+ */
 const val MODS_TAB_INSTALLED = "installed"
-
-/** 「浏览」二级项的 id。 */
 const val MODS_TAB_BROWSE = "browse"
 
 /**
@@ -92,10 +98,11 @@ const val MODS_TAB_BROWSE = "browse"
 fun ModsPage(
     initialGameRoot: String? = null,
     backend: LauncherBackend? = null,
-    /** [MODS_TAB_INSTALLED] 或 [MODS_TAB_BROWSE]；由 App.kt 从侧边栏的二级导航传进来。 */
-    subTab: String = MODS_TAB_INSTALLED,
+    /** 左栏「刷新」按钮的信号：每点一次加一，页面拿它当 LaunchedEffect 的 key。 */
+    refreshTick: Int = 0,
 ) {
     val scope = rememberCoroutineScope()
+    var tab by remember { mutableStateOf(MODS_TAB_INSTALLED) }
 
     var rootText by remember { mutableStateOf(initialGameRoot ?: defaultGameRoot()) }
     var instances by remember { mutableStateOf<List<Instance>>(emptyList()) }
@@ -652,12 +659,20 @@ fun ModsPage(
         }
     }
 
+    // 左栏那个「↻」：重扫目录里的实例与 mods/。tick 为 0 是首次组合，不用重复扫。
+    LaunchedEffect(refreshTick) {
+        if (refreshTick > 0 && rootText.isNotBlank()) {
+            rescanInstances()
+            rescanMods()
+        }
+    }
+
     val current = snapshot
 
     Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text("模组", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
         Text(
-            if (subTab == MODS_TAB_BROWSE) {
+            if (tab == MODS_TAB_BROWSE) {
                 "从 Modrinth 搜一个模组，装进选中实例自己的 mods/。"
             } else {
                 "这个实例的 mods/ 里有什么。每个实例一份，互不影响。"
@@ -665,6 +680,27 @@ fun ModsPage(
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
+
+        // 两个分栏放在内容区顶部而不是侧栏：侧栏已经有一层「下载」下的五项，
+        // 再套一层会长到屏幕外。这里一行按钮，扫一眼就知道还有另一块。
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            listOf(MODS_TAB_INSTALLED to "已装", MODS_TAB_BROWSE to "浏览").forEach { (id, label) ->
+                val active = tab == id
+                TextButton(
+                    onClick = { tab = id },
+                    modifier = Modifier.background(
+                        if (active) MaterialTheme.colorScheme.primary.copy(alpha = 0.14f) else Color.Transparent,
+                        MaterialTheme.shapes.small,
+                    ),
+                ) {
+                    Text(
+                        label,
+                        fontWeight = if (active) FontWeight.SemiBold else FontWeight.Normal,
+                        color = if (active) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+        }
 
         Row(
             Modifier.fillMaxWidth(),
@@ -685,15 +721,14 @@ fun ModsPage(
                     }
                 },
             ) { Text("选择…") }
-            Button(
-                onClick = {
-                    scope.launch {
-                        rescanInstances()
-                        rescanMods()
-                    }
-                },
-                enabled = !scanning && rootText.isNotBlank(),
-            ) { Text(if (scanning) "扫描中…" else "刷新") }
+            // 重扫按钮在左栏「下载 / Mod」那一项上（↻）；这里不再放第二个入口。
+            if (scanning) {
+                Text(
+                    "扫描中…",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
         }
 
         InstancePicker(
@@ -716,7 +751,7 @@ fun ModsPage(
         )
         if (scanError.isNotBlank()) ModHint(scanError, error = true)
 
-        if (subTab == MODS_TAB_BROWSE) {
+        if (tab == MODS_TAB_BROWSE) {
             BrowseTab(
                 modifier = Modifier.fillMaxWidth().weight(1f),
                 query = query,
