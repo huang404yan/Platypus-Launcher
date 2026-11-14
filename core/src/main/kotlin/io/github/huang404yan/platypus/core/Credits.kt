@@ -89,6 +89,16 @@ object Credits {
                 "一行代码都搬不过来。",
         ),
 
+        Credit(
+            name = "FCL（FoldCraftLauncher）",
+            kind = CreditKind.REFERENCE,
+            license = "GPL-3.0",
+            url = "https://github.com/FCL-Team/FoldCraftLauncher",
+            note = "安卓端 Java 页的形态参考了它：不问「你本机装了哪些 Java」，而是由启动器自己下几份" +
+                "常用运行时让用户挑。它的实现是 Java + XML 布局，与本项目的 Compose 不是一回事，" +
+                "代码一行未取。",
+        ),
+
         // —— 格式与协议 ——
         Credit(
             name = "Modrinth API",
@@ -126,6 +136,16 @@ object Credits {
         ),
 
         // —— 运行时依赖 ——
+        Credit(
+            name = "安卓 JRE 资产（FCL 的 jreAssets）",
+            kind = CreditKind.LIBRARY,
+            license = "OpenJDK：GPL-2.0 with Classpath Exception",
+            url = "https://github.com/FCL-Team/FoldCraftLauncher",
+            note = "手机上要一份能在 bionic libc 上跑、按 ABI 预编译好的 OpenJDK，自己编不现实。" +
+                "运行时本体是 OpenJDK，不是 FCL 的代码；本项目不把它打进安装包，而是用户点「下载」时" +
+                "从 FCL 仓库的 jreAssets 目录取 tar.xz（universal + bin-<abi> 两包）解到应用私有目录。" +
+                "GPL-2.0+CE 允许随产品分发而不传染，但仍在此标注来源。",
+        ),
         Credit(
             name = "Kotlin / kotlinx-coroutines / kotlinx-serialization",
             kind = CreditKind.LIBRARY,

@@ -35,5 +35,14 @@ Copyright 2026 Platypus contributors
                                   源码树未附带 LICENSE，许可状态不明。
   HMCL                             GPL-3.0。实例目录布局、离线命名、Java 挑选方式的公开文档。
   Prism Launcher                   GPL-3.0。实例隔离形态（每实例独立目录，共享 libraries/assets）。
+  FCL（FoldCraftLauncher）         GPL-3.0。安卓端 Java 页把「自己下几份常用运行时」作为主路径，
+                                   而不是扫描本机；实现为 Java + XML，代码未取。
+
+== 运行时资产（不进安装包，运行时下载） ==
+
+  安卓 JRE（FCL jreAssets）        OpenJDK 本体，GPL-2.0 with Classpath Exception。
+                                   APK 里不含 JRE；用户点「下载」时才从 FCL 仓库取
+                                   universal.tar.xz + bin-<abi>.tar.xz 解包到应用私有目录。
+                                   这两份包由 FCL 打包分发，本产品只提供下载与解包。
 
 关于页「开源致谢」由 core/Credits.kt 驱动，内容与本节保持一致。

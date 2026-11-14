@@ -97,6 +97,9 @@ class MainActivity : ComponentActivity() {
  *
  * 「服务端」也是一个 Tab。手机上只能装原版 / Paper / Fabric 三种（Forge 与 NeoForge
  * 要起 java 子进程跑安装器，这一版不做），装完没有应用内开服，只留目录和脚本。
+ *
+ * 「Java」紧跟设置：它跟桌面一样是「往盘上装一份运行时」，不是改设置，但也不需要单独
+ * 占一个顶层位置放前面 —— 装一次就不常来了。
  */
 private enum class Tab(val label: String) {
     INSTANCE("实例"),
@@ -107,6 +110,7 @@ private enum class Tab(val label: String) {
     LINK("联机"),
     LAUNCH("启动"),
     SETTINGS("设置"),
+    JAVA("Java"),
     DIAGNOSTIC("诊断"),
     ABOUT("关于"),
 }
@@ -134,6 +138,7 @@ private fun AppRoot() {
                 Tab.SERVER -> ServerPage()
                 Tab.LINK -> LinkPage()
                 Tab.SETTINGS -> SettingsPage()
+                Tab.JAVA -> JavaPage()
                 Tab.DIAGNOSTIC -> DiagnosticPage()
                 Tab.ABOUT -> AboutPage()
                 // 启动是唯一还没做的：它要的应用内 JVM 与图形转译属于 runtime-android，
