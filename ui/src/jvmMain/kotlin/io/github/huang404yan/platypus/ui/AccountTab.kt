@@ -143,6 +143,55 @@ internal fun AccountTab(
         }
     }
 
+    /**
+     * 真正的登录流程。
+     *
+     * [relogin] 为真时跳过「ID 是否已保存」那两道前置检查：重新登录用的是设置里
+     * 已经存下来的 ID，输入框此刻写着什么与它无关。拿输入框去拦，用户会看到
+     * 「这个 ID 还没保存」—— 而他这次根本不需要填 ID。
+     */
+    fun runLogin(relogin: Boolean) {
+        if (auth == null) {
+            noticeIsError = true
+            notice = "当前后端没有提供登录实现，正版登录不可用。"
+            return
+        }
+        notice = ""
+        noticeIsError = false
+        grant = null
+        remaining = 0
+        loggingIn = true
+        loginJob = scope.launch {
+            try {
+                val stored = auth.login(
+                    onCode = { code -> grant = code },
+                    onTick = { seconds -> remaining = seconds },
+                )
+                accounts = withContext(Dispatchers.IO) {
+                    repository?.let { runCatching { it.list() }.getOrNull() }.orEmpty()
+                }
+                // 刚登录的账号默认就是接下来要用的那个 —— 用户点「登录」的意图就是这个。
+                onUseAccount(stored.uuid)
+                notice = (if (relogin) "已重新登录：" else "已登录：") + stored.name +
+                    "，接下来启动游戏就用这个账号。"
+                noticeIsError = false
+            } catch (e: CancellationException) {
+                notice = "已取消登录。"
+                noticeIsError = false
+                throw e
+            } catch (e: Exception) {
+                noticeIsError = true
+                notice = (if (relogin) "重新登录失败：" else "登录失败：") +
+                    (e.message ?: e.javaClass.simpleName)
+            } finally {
+                grant = null
+                remaining = 0
+                loggingIn = false
+                loginJob = null
+            }
+        }
+    }
+
     fun startLogin() {
         if (auth == null) {
             noticeIsError = true
@@ -163,38 +212,7 @@ internal fun AccountTab(
             notice = "这个 ID 还没保存。先点上面的「保存 ID」—— 登录与刷新用的都是保存下来的那个。"
             return
         }
-        notice = ""
-        noticeIsError = false
-        grant = null
-        remaining = 0
-        loggingIn = true
-        loginJob = scope.launch {
-            try {
-                val stored = auth.login(
-                    onCode = { code -> grant = code },
-                    onTick = { seconds -> remaining = seconds },
-                )
-                accounts = withContext(Dispatchers.IO) {
-                    repository?.let { runCatching { it.list() }.getOrNull() }.orEmpty()
-                }
-                // 刚登录的账号默认就是接下来要用的那个 —— 用户点「登录」的意图就是这个。
-                onUseAccount(stored.uuid)
-                notice = "已登录：" + stored.name + "，接下来启动游戏就用这个账号。"
-                noticeIsError = false
-            } catch (e: CancellationException) {
-                notice = "已取消登录。"
-                noticeIsError = false
-                throw e
-            } catch (e: Exception) {
-                noticeIsError = true
-                notice = "登录失败：" + (e.message ?: e.javaClass.simpleName)
-            } finally {
-                grant = null
-                remaining = 0
-                loggingIn = false
-                loginJob = null
-            }
-        }
+        runLogin(relogin = false)
     }
 
     fun forget(account: StoredAccount) {
@@ -409,6 +427,7 @@ internal fun AccountTab(
                         active = account.key == activeUuid.trim().lowercase(),
                         busy = loggingIn,
                         onUse = { onUseAccount(account.uuid) },
+                        onRelogin = { runLogin(relogin = true) },
                         onForget = { forget(account) },
                     )
                 }
@@ -448,6 +467,7 @@ private fun AccountRow(
     active: Boolean,
     busy: Boolean,
     onUse: () -> Unit,
+    onRelogin: () -> Unit,
     onForget: () -> Unit,
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
@@ -468,6 +488,10 @@ private fun AccountRow(
             if (!active) {
                 TextButton(onClick = onUse, enabled = !busy) { Text("用这个") }
             }
+            // 令牌失效（改过密码、微软风控要求重登）时原来只有「移除」一条路：
+            // 用户在启动页看到「正版账号验证失败」，却不知道该点哪个。重新登录走同一套
+            // 设备码流程，成功后按 uuid 覆盖同一行，不会多出一个重复账号。
+            TextButton(onClick = onRelogin, enabled = !busy) { Text("重新登录") }
             TextButton(onClick = onForget, enabled = !busy) { Text("移除") }
         }
         Text(
