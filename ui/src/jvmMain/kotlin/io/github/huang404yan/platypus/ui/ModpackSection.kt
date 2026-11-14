@@ -36,6 +36,7 @@ import io.github.huang404yan.platypus.core.install.ModpackImporter
 import io.github.huang404yan.platypus.core.install.ModpackPreview
 import io.github.huang404yan.platypus.core.install.ModpackProgress
 import io.github.huang404yan.platypus.core.install.ModpackStep
+import io.github.huang404yan.platypus.core.install.ModpackVerifier
 import io.github.huang404yan.platypus.core.mods.ModProject
 import io.github.huang404yan.platypus.core.mods.ModrinthMeta
 import io.github.huang404yan.platypus.core.modpack.ModpackBrowser
@@ -52,6 +53,15 @@ private sealed interface ImportPhase {
     data object Running : ImportPhase
     data class Finished(val outcome: ModpackImportOutcome) : ImportPhase
     data class Failed(val step: ModpackStep, val message: String) : ImportPhase
+
+    /**
+     * 用户点了「取消」，或者页面被关掉/切走导致协程被取消。
+     *
+     * 单独一态而不是悄悄留在 [Running]：之前取消后 phase 一直是 Running，
+     * 界面就永远停在半截进度上、旁边还挂着一个「取消」按钮，看起来像卡死；
+     * 更糟的是用户会以为「没报错 = 装好了」。取消必须说出来。
+     */
+    data class Canceled(val step: ModpackStep) : ImportPhase
 }
 
 /** 整合包从哪来：本地已有的压缩包，还是当场从 Modrinth 下一个。 */
@@ -163,6 +173,12 @@ internal fun ModpackSection(
                 phase = ImportPhase.Finished(outcome)
                 message = ""
             } catch (e: CancellationException) {
+                // 先记下来再原样抛：抛出是协程的规矩（吞掉会让外层以为跑完了），
+                // 但界面得知道「这次导入断了」——留在 Running 会一直转灰条。
+                val step = progress?.step ?: ModpackStep.PARSING
+                progress = null
+                phase = ImportPhase.Canceled(step)
+                message = ""
                 throw e
             } catch (e: Exception) {
                 progress = null
@@ -448,11 +464,21 @@ internal fun ModpackSection(
                 Text(
                     message,
                     style = MaterialTheme.typography.bodySmall,
-                    color = if (phase is ImportPhase.Failed) {
+                    color = if (phase is ImportPhase.Failed || phase is ImportPhase.Canceled) {
                         MaterialTheme.colorScheme.error
                     } else {
                         MaterialTheme.colorScheme.onSurfaceVariant
                     },
+                )
+            }
+
+            val canceled = phase as? ImportPhase.Canceled
+            if (canceled != null) {
+                Text(
+                    "导入已中断（停在「" + canceled.step.label + "」）。实例目录里已经下好的文件不会白费，" +
+                        "再点一次「开始导入」会自动续上没下完的那几个。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
                 )
             }
 
@@ -471,11 +497,15 @@ internal fun ModpackSection(
 
             val finished = phase as? ImportPhase.Finished
             if (finished != null) {
+                // 「导入完成」只在核对通过时才敢说。清单里有一个文件没落好，就说明这个实例
+                // 是半成品 —— 用户拿它进游戏会看到缺模组的报错，比在这里承认没装齐糟得多。
+                val incomplete = !finished.outcome.complete
                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Text(
-                        "导入完成：" + finished.outcome.instance.name,
+                        (if (incomplete) "导入没装齐：" else "导入完成：") + finished.outcome.instance.name,
                         style = MaterialTheme.typography.bodyMedium,
                         fontWeight = FontWeight.SemiBold,
+                        color = if (incomplete) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface,
                     )
                     Text(
                         "包内文件 " + finished.outcome.downloadedFiles + " 个（" +
@@ -484,6 +514,18 @@ internal fun ModpackSection(
                             formatDurationMs(finished.outcome.elapsedMs),
                         style = MaterialTheme.typography.bodySmall,
                     )
+                    if (incomplete) {
+                        Text(
+                            ModpackVerifier.summarize(finished.outcome.fileIssues),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.error,
+                        )
+                        Text(
+                            "再点一次「开始导入」会只补没下完的那些文件；已经下好的不会重下。",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
                     finished.outcome.warnings.forEach {
                         Text(
                             "· " + it,

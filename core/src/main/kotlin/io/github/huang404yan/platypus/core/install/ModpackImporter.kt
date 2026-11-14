@@ -6,6 +6,7 @@ import io.github.huang404yan.platypus.core.instance.Instance
 import io.github.huang404yan.platypus.core.instance.InstanceLayouts
 import io.github.huang404yan.platypus.core.instance.InstanceRepository
 import io.github.huang404yan.platypus.core.instance.LoaderKind
+import io.github.huang404yan.platypus.core.modpack.ModpackFile
 import io.github.huang404yan.platypus.core.modpack.ModpackKind
 import io.github.huang404yan.platypus.core.modpack.ModpackLayout
 import io.github.huang404yan.platypus.core.modpack.ModpackManifest
@@ -31,6 +32,7 @@ enum class ModpackStep(val label: String) {
     PARSING("解析整合包"),
     INSTALLING_GAME("安装游戏与加载器"),
     DOWNLOADING_FILES("下载整合包文件"),
+    VERIFYING("核对包内文件"),
     EXTRACTING("解压 overrides"),
     FINISHING("写入实例设置"),
     DONE("完成"),
@@ -89,7 +91,17 @@ data class ModpackImportOutcome(
     val elapsedMs: Long,
     /** 汇总后的提示（包自身的警告 + 导入过程中发现的问题）。 */
     val warnings: List<String>,
-)
+    /**
+     * 导入结束前按清单核对磁盘，发现没落好的文件。
+     *
+     * 非空就说明这个实例是「半成品」：界面必须说「没装齐」，不能报「导入完成」。
+     * 空列表才是真的装齐了。
+     */
+    val fileIssues: List<ModpackFileIssue> = emptyList(),
+) {
+    /** 包内文件是否真的全在磁盘上。 */
+    val complete: Boolean get() = fileIssues.isEmpty()
+}
 
 /**
  * 整合包导入：`.mrpack` / MCBBS v2 包 → 一个能启动的实例。
@@ -211,6 +223,8 @@ object ModpackImporter {
         // ③ 下包内文件（MCBBS 包没有这一段）
         var downloadedFiles = 0
         var downloadedBytes = 0L
+        // 核对结果要在 if 外面可见：MCBBS 包没有文件段，天然就是空（没有什么可核的）。
+        var fileIssues: List<ModpackFileIssue> = emptyList()
         if (manifest.files.isNotEmpty()) {
             val items = manifest.files.map { f ->
                 DownloadItem(
@@ -264,6 +278,13 @@ object ModpackImporter {
             }
             downloadedFiles = report.succeeded
             if (downloadedBytes <= 0L) downloadedBytes = knownTotal
+
+            // ③.5 落盘核对：下载器只保证「下完那一刻」是对的，而这一整段可能跨好几分钟、
+            // 上百个文件，中途被取消/被杀/被别的程序改动都会让磁盘和清单对不上。
+            // 不在这里核一遍，界面就只能凭「下载器没报错」宣布导入完成 —— 那正是
+            // 「77 个文件少 1 个还显示导入完成」的来源。核对结果不抛异常，带回给界面：
+            // 实例已经注册好了，抛异常会让用户看到一个「失败」的实例却不知道它少了什么。
+            fileIssues = verifyPackedFiles(instanceDir, manifest.files, onProgress)
         }
 
         // ④ 解 overrides：按层顺序覆盖，后面的盖前面的
@@ -303,7 +324,34 @@ object ModpackImporter {
             overrideFiles = overrideFiles,
             elapsedMs = System.currentTimeMillis() - startedAt,
             warnings = warnings.distinct(),
+            fileIssues = fileIssues,
         )
+    }
+
+    /**
+     * 按清单核对刚下完的文件，返回对不上的那些。
+     *
+     * 进度用「已核对 X / Y 个文件」上报：文件多的时候这一步本身也要几秒（大小未知的要算 sha1），
+     * 界面不能停在「下载 77 / 77」上不动 —— 那看起来像卡住了。
+     */
+    private suspend fun verifyPackedFiles(
+        instanceDir: File,
+        files: List<ModpackFile>,
+        onProgress: (ModpackProgress) -> Unit,
+    ): List<ModpackFileIssue> {
+        if (files.isEmpty()) return emptyList()
+        onProgress(ModpackProgress(ModpackStep.VERIFYING, "核对 " + files.size + " 个文件", done = 0L, total = files.size.toLong()))
+        val issues = ModpackVerifier.verify(instanceDir, files) { done, total ->
+            onProgress(
+                ModpackProgress(
+                    ModpackStep.VERIFYING,
+                    "已核对 " + done + " / " + total + " 个文件",
+                    done = done.toLong(),
+                    total = total.toLong(),
+                ),
+            )
+        }
+        return issues
     }
 
     /**
