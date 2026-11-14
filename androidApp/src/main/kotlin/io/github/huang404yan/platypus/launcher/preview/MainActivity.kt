@@ -80,15 +80,19 @@ class MainActivity : ComponentActivity() {
 }
 
 /**
- * 侧边栏的顺序与桌面端对齐：实例 / 下载 / 模组 / 联机 / 启动 / 设置 / 诊断 / 关于。
+ * 侧边栏的顺序与桌面端对齐：实例 / 下载 / 模组 / 光影资源包 / 联机 / 启动 / 设置 / 诊断 / 关于。
  *
  * 「诊断」是安卓独有的（桌面没有 EGL、也没有「所有文件访问权限」这类要查的东西）；
  * 「更多」这个名字原来挂着一个永远「还没做」的占位，现在被模组、联机、设置三个真页面取代。
+ *
+ * 「光影资源包」在桌面上是侧边栏的一个页面、里面再分光影 / 资源包两个二级项；
+ * 手机侧边栏放不下二级，所以这里只留一个 Tab，光影 / 资源包由页面顶部的两个按钮切换。
  */
 private enum class Tab(val label: String) {
     INSTANCE("实例"),
     DOWNLOAD("下载"),
     MODS("模组"),
+    PACKS("光影资源包"),
     LINK("联机"),
     LAUNCH("启动"),
     SETTINGS("设置"),
@@ -115,6 +119,7 @@ private fun AppRoot() {
                 Tab.INSTANCE -> InstancePage()
                 Tab.DOWNLOAD -> DownloadPage()
                 Tab.MODS -> ModsPage()
+                Tab.PACKS -> PacksPage()
                 Tab.LINK -> LinkPage()
                 Tab.SETTINGS -> SettingsPage()
                 Tab.DIAGNOSTIC -> DiagnosticPage()
