@@ -59,31 +59,102 @@ class JavaRuntimeUnavailableException(message: String) : RuntimeException(messag
  * - 1.17.x → Java 16
  * - 1.18 – 1.20.4 → Java 17
  * - 1.20.5+ 与 1.21+ → Java 21
+ * - 26.1 起的年份式版本号（26.1 / 26.3 / 26.4-snapshot-8）→ Java 25
  *
- * 认不出版本号时：快照（形如 26w01a）按最新要求 21；其它（a1.2.6、b1.7.3 之类远古 id）按 8。
+ * 年份式那一支是 2026-11-14 补的：Mojang 从 26.1 起把版本号从 "1.21.11" 改成 "26.1"，没有
+ * "1." 前缀，原来会落到 else → Java 8。实测三个版本 json 的 javaVersion 都是
+ * {component: java-runtime-epsilon, majorVersion: 25}：
+ * - 26.1  → https://piston-meta.mojang.com/v1/packages/389f92510868468e073b7a12f19e70a7bf8684cd/26.1.json
+ * - 26.3  → .../9f67e10ed013deeaad20ac3c800652765d493408/26.3.json
+ * - 26.4-snapshot-8 → .../46f6dc6a5cefe084af0ce2ecf7f433c1222d4dd1/26.4-snapshot-8.json
+ * 而 1.21.11 仍是 java-runtime-delta / 21，所以分界线正好在 26。
+ *
+ * 周号快照（13w16a、21w19a、24w14a、26w14a 这种）按年份分段，边界来自 2026-11-14 把
+ * version_manifest_v2 里 744 个快照的 javaVersion.majorVersion 全拉下来统计的跃迁点：
+ * - 13w16a – 21w18a → 8
+ * - 21w19a – 22w02a → 16
+ * - 22w03a – 24w13a → 17
+ * - 24w14a – 25w46a → 21
+ * - 26w14a 起 → 25
+ * 只有 24w14potato（愚人节快照，实际是 1.20.4 那一代）是例外，官方 json 写 17。
+ *
+ * 已知偏差一个：1.18-pre1 官方是 16（到 pre2 才抬 17），但 1.x 那一支只按小版本判，
+ * 会把整个 1.18 系列都算成 17。744 个快照逐个对照只有这 1 个对不上，且官方 json
+ * 都带 javaVersion 字段，正常不会落到这个兜底函数。
+ * 实在认不出（a1.2.6、b1.7.3、c0.30_01c 之类远古 id）按 8。
+ *
+ * 这个函数只是**兜底**：真正权威的是版本 json 里的 javaVersion.majorVersion，
+ * 一键装那条路（OneClickInstaller）优先用它，只有版本文档缺该字段时才会落到这里。
  */
 object GameJavaRules {
-    /** 快照按最新要求处理。 */
-    const val LATEST_REQUIRED_MAJOR = 21
+    /** 当前最新的 Java 要求（26.x 起的年份式版本）。 */
+    const val LATEST_REQUIRED_MAJOR = 25
+
+    /** 认不出版本号时最后的兜底：周号快照按 21（24w14a 那一段就是 21）。 */
+    private const val WEEK_SNAPSHOT_MAJOR = 21
+
+    /** 愚人节快照 24w14potato 的周号；它的 Java 要求与同周的 24w14a 不同。 */
+    private const val POTATO_WEEK = 2414
 
     fun requiredMajor(gameVersion: String): Int {
         val trimmed = gameVersion.trim()
+        // 26.1 / 26.3 / 26.4-snapshot-8 这类年份式 id：取前两位当年份
+        val year = yearOf(trimmed)
+        if (year != null && year >= 26) return LATEST_REQUIRED_MAJOR
+
         val match = GameVersionRegex.find(trimmed)
-            ?: return if (SnapshotRegex.matches(trimmed)) LATEST_REQUIRED_MAJOR else 8
-        val minor = match.groupValues[2].toIntOrNull() ?: return LATEST_REQUIRED_MAJOR
-        val patch = match.groupValues[3].toIntOrNull() ?: 0
+        if (match != null) {
+            val minor = match.groupValues[2].toIntOrNull() ?: return WEEK_SNAPSHOT_MAJOR
+            val patch = match.groupValues[3].toIntOrNull() ?: 0
+            return when {
+                minor > 20 -> 21
+                minor == 20 && patch >= 5 -> 21
+                minor >= 18 -> 17
+                minor == 17 -> 16
+                else -> 8
+            }
+        }
+
+        val week = weekOf(trimmed) ?: return 8
+        // 24w14potato 是愚人节快照，官方 json 的 javaVersion 是 17（1.20.4 那一代），
+        // 但它的周号与 24w14a（21）相同，不单独判就会错一档。
+        if (week == POTATO_WEEK && trimmed.lowercase().endsWith("potato")) return 17
         return when {
-            minor > 20 -> 21
-            minor == 20 && patch >= 5 -> 21
-            minor >= 18 -> 17
-            minor == 17 -> 16
-            else -> 8
+            week < 2119 -> 8
+            week < 2203 -> 16
+            week < 2414 -> 17
+            week < 2614 -> 21
+            else -> 25
         }
     }
 
     /** 1.20.1、1.21、1.16.5-pre1 这类带 1. 前缀的版本号。 */
     private val GameVersionRegex = Regex("""^(1)\.(\d+)(?:\.(\d+))?""")
 
-    /** 26w01a 这样的快照 id。 */
-    private val SnapshotRegex = Regex("""^\d{2}w\d{2}[a-z]$""", RegexOption.IGNORE_CASE)
+    /**
+     * 周号快照开头的「年份 + 周」：13w16a → 2013 年第 16 周。
+     *
+     * 拼成 YYWW 这样的四位整数方便比大小（21w19a → 2119），比拆成两个字段更省事。
+     * 后缀放宽到任意字符，是为了让 23w13a_or_b、24w14potato 这类特殊 id 也能认出来。
+     */
+    private val WeekVersionRegex = Regex("""^(\d{2})w(\d{2})""", RegexOption.IGNORE_CASE)
+
+    private fun weekOf(id: String): Int? {
+        val g = WeekVersionRegex.find(id) ?: return null
+        val year = g.groupValues[1].toIntOrNull() ?: return null
+        val week = g.groupValues[2].toIntOrNull() ?: return null
+        return year * 100 + week
+    }
+
+    /**
+     * 年份式版本号（26.1 / 26.3 / 26.4-snapshot-8）开头的年份。
+     *
+     * 只认「两位数字 + 点 + 数字」这种开头，所以：
+     * - 1.20.1 不会被误判（点前面只有一位）；
+     * - 26w01a 那种周号快照也不会（没有点）。
+     */
+    private val YearVersionRegex = Regex("""^(\d{2})\.\d""")
+
+    private fun yearOf(id: String): Int? =
+        YearVersionRegex.find(id)?.groupValues?.get(1)?.toIntOrNull()
 }

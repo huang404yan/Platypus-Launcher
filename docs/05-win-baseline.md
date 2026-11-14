@@ -186,7 +186,8 @@ suggestRuntimeModules
 - `VersionMeta`：version_manifest 与 version json 解析、`inheritsFrom`、库 rules/os 过滤、natives 分类、`RuleEvaluator`、`LibraryName.parse`、`OsFamily.current()`、`requiredJavaMajor`。
 - `DownloadPlanner`：client.jar / assetIndex / libraries / assets 的落盘路径与 bmclapi2 镜像前缀替换，按 sha1 前两位分桶。
 - `InstanceScanner`：扫 `versions/<id>/<id>.json`，识别 vanilla/forge/neoforge/fabric/quilt/optifine，PCL 风格版本目录，`isGameDirectory` 判定，warning 收集。
-- `GameJavaRules.requiredMajor`：按游戏版本推 Java 主版本（>20 → 21；20.5+ → 21；≥17 → 17；否则 8）。
+- `GameJavaRules.requiredMajor`：按游戏版本推 Java 主版本（>20 → 21；20.5+ → 21；≥17 → 17；否则 8）。**2026-11-14 扩充**：26.1 起的年份式版本号（26.1 / 26.3 / 26.4-snapshot-8，没有 `1.` 前缀）→ 25。依据是官方 version json 的 `javaVersion`：26.1 / 26.2 / 26.3 / 26.1.1 / 26.1.2 与 26.4-snapshot-1…8 全是 `{component: java-runtime-epsilon, majorVersion: 25}`，1.21.11 与 24w14a 仍是 `java-runtime-delta / 21`。
+  **周号快照同日改成按年份分段**（原来是「一律 21」）：把 version_manifest_v2 里 744 个快照的 `javaVersion.majorVersion` 全拉下来统计，真实跃迁点只有五个 —— `13w16a` → 8、`21w19a` → 16、`22w03a` → 17、`24w14a` → 21、`26.1-snapshot-1` → 25。按这套规则本地复算 744 个快照，只有 1 个对不上（`1.18-pre1` 官方 16、我们 17，因为它走的是 `1.x` 分支而不是周号分支）。例外还有 `24w14potato`（愚人节快照，官方 17 而同周 `24w14a` 是 21），已单独判。原始数据落在 `dist/_snapjava_all.txt`。
 - UI（仅 JVM）：`App` 骨架 + 侧栏 6 个入口 + `InstancePage`（目录输入框、扫描按钮、实例列表、loader 徽标）+ `AboutPage`（版本/通道/协议/仓库/完整免责声明）。
 - 桌面入口 `MainKt`：参数 / `PLATYPUS_GAME_DIR` / `%APPDATA%\.minecraft` 三级取值，启动即扫描并打印，窗口标题按 `isPreview` 切换，窗口图标从资源加载（失败不阻断）。
 - 打包链路：`createDistributable -PskipWix` → 125M app-image + 可双击运行的 `Platypus Preview.exe`（实测出窗口）。

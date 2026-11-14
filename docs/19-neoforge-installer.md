@@ -173,7 +173,7 @@ Reloading ResourceManager: vanilla, mod_resources, mod/neoforge
 
 ## 九、还没做到
 
-- **`GameJavaRules.requiredMajor` 对 26.x 这类无 `1.` 前缀的版本会落到 else → Java 8**（正则 `^(1)\.(\d+)…` 不匹配）。实际路径上 `OneClickInstaller` 优先用版本 json 的 `javaVersion.majorVersion`，所以只在版本文档缺该字段时才出错。**未验证会不会真踩到。**
+- ~~**`GameJavaRules.requiredMajor` 对 26.x 这类无 `1.` 前缀的版本会落到 else → Java 8**~~ —— **2026-11-14 已修**：新增年份式分支（`YearVersionRegex = ^(\d{2})\.\d`），26.1 起返回 25。同日把周号快照也从「一律 21」改成分段（`13w16a–21w18a`→8、`21w19a–22w02a`→16、`22w03a–24w13a`→17、`24w14a–25w46a`→21、`26w14a` 起→25），边界取自官方 744 个快照的 `javaVersion.majorVersion` 实测跃迁点，复算只差 `1.18-pre1` 一个。依据见 docs/05 的 `GameJavaRules` 条目。
 - 安装器升级判断：按 `versionId` 命中就跳过，不比对 installer 自身版本
 - NeoForge 的 `--offline` / `--skip-hash-check` 没用上（预铺已覆盖需求）
 - 老版本（`20.2.x` 之前）没测过
