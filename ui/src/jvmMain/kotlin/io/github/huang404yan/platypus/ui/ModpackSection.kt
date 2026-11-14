@@ -19,6 +19,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -47,23 +48,6 @@ import kotlinx.coroutines.launch
 import java.io.File
 import java.util.Locale
 
-/** 整合包导入的整体阶段。 */
-private sealed interface ImportPhase {
-    data object Idle : ImportPhase
-    data object Running : ImportPhase
-    data class Finished(val outcome: ModpackImportOutcome) : ImportPhase
-    data class Failed(val step: ModpackStep, val message: String) : ImportPhase
-
-    /**
-     * 用户点了「取消」，或者页面被关掉/切走导致协程被取消。
-     *
-     * 单独一态而不是悄悄留在 [Running]：之前取消后 phase 一直是 Running，
-     * 界面就永远停在半截进度上、旁边还挂着一个「取消」按钮，看起来像卡死；
-     * 更糟的是用户会以为「没报错 = 装好了」。取消必须说出来。
-     */
-    data class Canceled(val step: ModpackStep) : ImportPhase
-}
-
 /** 整合包从哪来：本地已有的压缩包，还是当场从 Modrinth 下一个。 */
 private enum class ModpackSource { LOCAL, REMOTE }
 
@@ -90,16 +74,18 @@ internal fun ModpackSection(
     initialGameVersion: String = "",
 ) {
     var source by remember { mutableStateOf(ModpackSource.LOCAL) }
-
-    var archivePath by remember { mutableStateOf("") }
-    var preview by remember { mutableStateOf<ModpackPreview?>(null) }
-    var previewError by remember { mutableStateOf<String?>(null) }
-    var loadingPreview by remember { mutableStateOf(false) }
     var allowOverwrite by remember { mutableStateOf(false) }
-    var phase by remember { mutableStateOf<ImportPhase>(ImportPhase.Idle) }
-    var progress by remember { mutableStateOf<ModpackProgress?>(null) }
-    var message by remember { mutableStateOf("") }
-    var job by remember { mutableStateOf<Job?>(null) }
+
+    // 导入状态住在进程级的 ModpackRunner 里：切页 / 切 tab 都不会打断，
+    // 回来还能看到「下到第几个文件」，只有点「取消」才停。
+    val importState = ModpackRunner.state.collectAsState().value
+    val archivePath = importState.archivePath
+    val preview = importState.preview
+    val previewError = importState.previewError
+    val loadingPreview = importState.loadingPreview
+    val phase = importState.phase
+    val progress = importState.progress
+    val message = importState.message
 
     // 远程搜索那一段的状态。与导入阶段分开：搜索失败不该把「已装好」的结果清掉。
     var query by remember { mutableStateOf("") }
@@ -109,88 +95,44 @@ internal fun ModpackSection(
     var searchError by remember { mutableStateOf("") }
     var results by remember { mutableStateOf<List<ModProject>>(emptyList()) }
     var searched by remember { mutableStateOf(false) }
-    var preparingSlug by remember { mutableStateOf("") }
-    var preparingDetail by remember { mutableStateOf("") }
-    var downloadProgress by remember { mutableStateOf<ModpackDownloadProgress?>(null) }
-    var remoteNotice by remember { mutableStateOf("") }
+    val preparingSlug = importState.preparingSlug
+    val preparingDetail = importState.preparingDetail
+    val downloadProgress = importState.downloadProgress
+    val remoteNotice = importState.remoteNotice
     var searchJob by remember { mutableStateOf<Job?>(null) }
-    var prepareJob by remember { mutableStateOf<Job?>(null) }
 
     val scope = rememberCoroutineScope()
     val running = phase is ImportPhase.Running
     val busy = running || searching || preparingSlug.isNotBlank()
 
     fun inspectArchive(file: File) {
-        archivePath = file.absolutePath
-        preview = null
-        previewError = null
-        phase = ImportPhase.Idle
-        progress = null
-        message = ""
-        loadingPreview = true
-        scope.launch {
-            try {
-                preview = ModpackImporter.inspect(file)
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                previewError = describeImportError(e)
-            } finally {
-                // 取消时也要收掉，否则界面永远停在「正在读压缩包…」
-                loadingPreview = false
-            }
-        }
+        ModpackRunner.inspect(file)
     }
 
     fun startImport(archive: File) {
         val dirText = gameDir.trim()
         if (dirText.isEmpty()) {
-            message = "先在上面填一个目标目录，比如 D:/mc-test。"
+            ModpackRunner.hint("先在上面填一个目标目录，比如 D:/mc-test。")
             return
         }
         if (backend == null) {
-            message = "后端未装配：导入整合包需要桌面端注入 Java 与实例存储实现。"
+            ModpackRunner.hint("后端未装配：导入整合包需要桌面端注入 Java 与实例存储实现。")
             return
         }
-        job?.cancel()
-        progress = null
-        message = ""
-        phase = ImportPhase.Running
-        job = scope.launch {
-            try {
-                val outcome = ModpackImporter.import(
-                    archive = archive,
-                    gameDir = File(dirText),
-                    javaRuntimes = backend.javaRuntimes,
-                    instances = backend.instances,
-                    memoryMb = defaultMemoryMb,
-                    allowOverwriteUserData = allowOverwrite,
-                ) { step ->
-                    progress = step
-                    if (step.detail.isNotBlank()) message = step.detail
-                }
-                progress = null
-                phase = ImportPhase.Finished(outcome)
-                message = ""
-            } catch (e: CancellationException) {
-                // 先记下来再原样抛：抛出是协程的规矩（吞掉会让外层以为跑完了），
-                // 但界面得知道「这次导入断了」——留在 Running 会一直转灰条。
-                val step = progress?.step ?: ModpackStep.PARSING
-                progress = null
-                phase = ImportPhase.Canceled(step)
-                message = ""
-                throw e
-            } catch (e: Exception) {
-                progress = null
-                phase = ImportPhase.Failed(stepOf(e), describeImportError(e))
-            }
-        }
+        // 跑在进程级作用域里：切页不会打断，回来进度还在。
+        ModpackRunner.startImport(
+            archive = archive,
+            gameDir = File(dirText),
+            memoryMb = defaultMemoryMb,
+            allowOverwrite = allowOverwrite,
+            javaRuntimes = backend.javaRuntimes,
+            instances = backend.instances,
+        )
     }
 
     fun runSearch() {
         searchJob?.cancel()
         searchError = ""
-        remoteNotice = ""
         searching = true
         searchJob = scope.launch {
             try {
@@ -215,54 +157,14 @@ internal fun ModpackSection(
 
     fun installRemote(project: ModProject) {
         if (backend == null) {
-            remoteNotice = "后端未装配：装整合包需要桌面端注入 Java 与实例存储实现。"
+            ModpackRunner.hint("后端未装配：装整合包需要桌面端注入 Java 与实例存储实现。")
             return
         }
-        prepareJob?.cancel()
-        preparingSlug = project.slug
-        preparingDetail = "查版本…"
-        downloadProgress = null
-        remoteNotice = ""
-        prepareJob = scope.launch {
-            try {
-                val versions = ModpackBrowser.versionsOf(
-                    slug = project.slug,
-                    gameVersion = remoteVersion.trim().ifBlank { null },
-                    loader = remoteLoader,
-                )
-                if (versions.isEmpty()) {
-                    remoteNotice = "《" + project.title + "》没有适配" +
-                        (if (remoteVersion.isBlank()) "" else " " + remoteVersion.trim()) +
-                        " / " + loaderNameOf(remoteLoader) + " 的 .mrpack。换个游戏版本或加载器再试。"
-                    return@launch
-                }
-                preparingDetail = "共 " + versions.size + " 个 .mrpack，挑最新的一个…"
-                val picked = ModrinthMeta.pickBest(versions) ?: versions.first()
-                preparingDetail = "下载 " + picked.fileName
-                val local = ModpackBrowser.download(picked, ModpackBrowser.defaultCacheDir()) { p ->
-                    downloadProgress = p
-                    preparingDetail = p.step + " " + p.detail
-                }
-                downloadProgress = null
-                preparingDetail = "读取压缩包…"
-                val parsed = ModpackImporter.inspect(local)
-                archivePath = local.absolutePath
-                preview = parsed
-                previewError = null
-                phase = ImportPhase.Idle
-                message = ""
-                remoteNotice = "已下载《" + parsed.manifest.name + "》" + picked.versionNumber +
-                    "（" + formatSize(local.length()) + "），下面确认后开始导入。"
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                downloadProgress = null
-                remoteNotice = describeImportError(e)
-            } finally {
-                preparingSlug = ""
-                preparingDetail = ""
-            }
-        }
+        ModpackRunner.downloadRemote(
+            project = project,
+            gameVersion = remoteVersion.trim().ifBlank { null },
+            loader = remoteLoader,
+        )
     }
 
     Card(
@@ -456,7 +358,7 @@ internal fun ModpackSection(
                     enabled = enabled && !running && preview != null && preparingSlug.isBlank(),
                 ) { Text("开始导入") }
                 if (running) {
-                    OutlinedButton(onClick = { job?.cancel() }) { Text("取消") }
+                    OutlinedButton(onClick = { ModpackRunner.cancelImport() }) { Text("取消") }
                 }
             }
 

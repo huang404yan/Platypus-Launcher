@@ -94,6 +94,8 @@ Windows 下也可以用 `gradlew.bat`。首次构建会下载约 300 MB 依赖�
 - `docs/29-guangying-ziyuanbao.md`：**光影与资源包**（光影查 `loaders=["iris","optifine"]`、资源包查 `["minecraft"]`、元数据读不出只记 problem 不吞、文件夹形态拒绝停用的原因、安卓端为什么改成页内切换）
 - `docs/30-mods-chongtu.md`：**模组冲突检测**（Modrinth 的 `dependency_type=incompatible`、为什么用 sha1 反查而不是读 modId、双向声明合成一条、`present` 为什么定义为「对面文件真在」、措辞只能写「作者声明」）
 - `docs/31-zhenghebao-yuancheng.md`：**远程整合包**（只补「取包」这一段、`project_type=modpack` 的 facet、只留 `.mrpack` 但不硬排除 server 包、缓存落 `%TEMP%` 的理由、远程与本地共用同一条导入流水线）
+- `docs/34-jie-mian-baohuo.md`：**桌面端下载 / 导入跨页保活**（切页会销毁页面、`rememberCoroutineScope` 随之取消、进程级 runner 与 `StateFlow`、幂等与速度采样两个坑、取消的三档语义）
+- `docs/33-lianji-zhilian.md`：**联机页「直接进」**（用官方 `--quickPlayMultiplayer` 而不是自己实现协议栈、特性开关不打开参数根本不会出现、版本不支持时抛错而不是静默停主菜单、地址为什么存在 App 层）
 - `docs/32-daoru-hedui.md`：**导入后核对磁盘**（为什么要「再看一眼」而不是信下载器、先比大小必要时才算 sha1、失败不抛而是收集成清单、取消要显示 `Canceled` 而不是停在 `Running`）
 
 ## 下载
@@ -161,6 +163,6 @@ M0（骨架）+ M1（实例扫描）+ M2（下载器）+ M3（**Windows 一键�
 
 **光影和资源包也能装了**：左侧导航多一项「光影资源包」，下面分「光影」「资源包」两个二级页。已装的从 `shaderpacks/` 与 `resourcepacks/` 扫出来，勾选框就是启停（改文件名 `.zip` ↔ `.zip.disabled`），删除要二次确认；文件夹形态的包明确拒绝停用——对目录改名游戏照样认，假装停用只会让人困惑。搜装走 Modrinth：光影用 `loaders=["iris","optifine"]`、资源包用 `["minecraft"]`，都不带 categories facet。实测搜 `complementary` 装进 `shaderpacks/`，落盘 `ComplementaryReimagined_r5.9.3.zip` 553 397 B，已装列表同时列出旧的文件夹形态包并标「· 文件夹」。
 
-**联机页**：扫描局域网广播（`224.0.2.60:4445`，读 `[MOTD]`/`[AD]`）列出同网段的世界，也能手动解析 `host:port` 并复制地址。**不在启动器里「点一下就进」**——绕过游戏会丢皮肤与会话，界面里写清了原因。
+**联机页**：扫描局域网广播（`224.0.2.60:4445`，读 `[MOTD]`/`[AD]`）列出同网段的世界，也能手动解析 `host:port`。每个世界后面有「直接进」：用它带的地址拼出官方的 `--quickPlayMultiplayer` 参数启动游戏，跳过主菜单直接进那个世界——走的是游戏自己的连接流程，皮肤、会话、模组一概不少。1.20 之前的版本文件里没有这条参数，界面会提前标红并说明换实例（`docs/33-lianji-zhilian.md`）。
 
-尚未实现：正版/微软登录（`core/auth` 只有接口）、跨网络联机（NAT 穿透/中转，本版没做）。模组依赖的 `required` / `optional` / `incompatible` 三类声明都已解析：`required` 自动装齐，`optional` 在依赖树卡片里单独列出「作者建议一起装」但**不替你装**，`incompatible` 由模组页的「查冲突」提示。
+尚未实现：正版/微软登录（`core/auth` 只有接口）、跨网络联机（NAT 穿透/中转，本版没做；「直接进」只在同一局域网里拿得到地址时有用）。模组依赖的 `required` / `optional` / `incompatible` 三类声明都已解析：`required` 自动装齐，`optional` 在依赖树卡片里单独列出「作者建议一起装」但**不替你装**，`incompatible` 由模组页的「查冲突」提示。

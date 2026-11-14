@@ -27,6 +27,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -44,22 +45,17 @@ import io.github.huang404yan.platypus.core.loader.NeoForgeVersion
 import io.github.huang404yan.platypus.core.version.VersionManifest
 import io.github.huang404yan.platypus.core.install.FabricInstaller
 import io.github.huang404yan.platypus.core.install.ForgeInstaller
-import io.github.huang404yan.platypus.core.install.InstallOutcome
 import io.github.huang404yan.platypus.core.install.InstallStep
-import io.github.huang404yan.platypus.core.install.InstallStepException
 import io.github.huang404yan.platypus.core.install.LoaderChoice
 import io.github.huang404yan.platypus.core.install.NeoForgeInstaller
-import io.github.huang404yan.platypus.core.install.OneClickInstaller
 import io.github.huang404yan.platypus.core.install.StepProgress
 import io.github.huang404yan.platypus.core.install.VanillaInstaller
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
-import java.util.Locale
 
 /** 下拉里的一项：版本号 + 右侧标签（stable/beta、推荐/最新）。 */
 private data class LoaderOption(val version: String, val tag: String, val selected: Boolean)
@@ -273,32 +269,6 @@ private fun NeoForgeRow(
     )
 }
 
-/** 单个安装步骤在界面上的状态。 */
-private sealed interface StepState {
-    data object Pending : StepState
-    data object Running : StepState
-    data object Succeeded : StepState
-    data class Failed(val message: String) : StepState
-}
-
-/** 一键装的整体阶段。 */
-private sealed interface InstallPhase {
-    data object Idle : InstallPhase
-    data object Running : InstallPhase
-    data class Finished(val outcome: InstallOutcome) : InstallPhase
-    data class Failed(val step: InstallStep, val message: String) : InstallPhase
-}
-
-/** 界面上依次展示的步骤（不含 IDLE 与 DONE）。 */
-private val VISIBLE_STEPS = listOf(
-    InstallStep.PLANNING,
-    InstallStep.DOWNLOADING,
-    InstallStep.JAVA_CHECK,
-    InstallStep.JAVA_INSTALL,
-    InstallStep.LOADER_INSTALL,
-    InstallStep.REGISTERING,
-)
-
 /**
  * 下载页：选一个原版版本，一次完成「下载 → 补 Java → 建实例」。
  *
@@ -342,17 +312,20 @@ fun DownloadsPage(
     var manifestError by remember { mutableStateOf<String?>(null) }
     var loadingManifest by remember { mutableStateOf(false) }
 
-    var phase by remember { mutableStateOf<InstallPhase>(InstallPhase.Idle) }
-    var currentStep by remember { mutableStateOf(InstallStep.IDLE) }
-    var stepStates by remember { mutableStateOf<Map<InstallStep, StepState>>(emptyMap()) }
-    var progress by remember { mutableStateOf<StepProgress?>(null) }
-    var speedBytesPerSecond by remember { mutableStateOf(0L) }
-    var elapsedMs by remember { mutableStateOf(0L) }
-    var message by remember { mutableStateOf("") }
+    // 安装状态住在进程级的 OneClickRunner 里，不跟着页面走：
+    // 用 remember 存的话，切到「实例」页再切回来，下载到一半的协程会被取消。
+    val install = OneClickRunner.state.collectAsState().value
+    val phase = install.phase
+    val currentStep = install.currentStep
+    val stepStates = install.stepStates
+    val progress = install.progress
+    val speedBytesPerSecond = install.speedBytesPerSecond
+    val elapsedMs = install.elapsedMs
+    val message = install.message
 
+    // 这个 scope 只跑「刷新版本列表」这类跟着页面走也无所谓的请求；
+    // 真正的一键装跑在 OneClickRunner 里，切页不会中断。
     val scope = rememberCoroutineScope()
-    var job by remember { mutableStateOf<Job?>(null) }
-    val meter = remember { SpeedMeter() }
 
     suspend fun refreshManifest() {
         loadingManifest = true
@@ -370,138 +343,47 @@ fun DownloadsPage(
     fun startInstall() {
         val dirText = gameDirText.trim()
         if (dirText.isEmpty()) {
-            message = "先填一个目标目录，比如 D:/mc-test。"
+            OneClickRunner.hint("先填一个目标目录，比如 D:/mc-test。")
             return
         }
         val id = versionText.trim()
         if (id.isEmpty()) {
-            message = "先选或手填一个版本号，比如 1.20.1。"
+            OneClickRunner.hint("先选或手填一个版本号，比如 1.20.1。")
             return
         }
         if (backend == null) {
-            message = "后端未装配：一键安装需要桌面端注入 Java 与实例存储实现。"
+            OneClickRunner.hint("后端未装配：一键安装需要桌面端注入 Java 与实例存储实现。")
             return
         }
         if (installFabric && loaderVersion.isBlank()) {
-            message = "还没选 Fabric 版本：等下面的 loader 列表拉出来，或者取消「装 Fabric」。"
+            OneClickRunner.hint("还没选 Fabric 版本：等下面的 loader 列表拉出来，或者取消「装 Fabric」。")
             return
         }
         if (installForge && forgeVersion.isBlank()) {
-            message = "还没选 Forge 版本：等下面的版本列表拉出来，或者取消「装 Forge」。"
+            OneClickRunner.hint("还没选 Forge 版本：等下面的版本列表拉出来，或者取消「装 Forge」。")
             return
         }
         if (installNeoForge && neoforgeVersion.isBlank()) {
-            message = "还没选 NeoForge 版本：等下面的版本列表拉出来，或者取消「装 NeoForge」。"
+            OneClickRunner.hint("还没选 NeoForge 版本：等下面的版本列表拉出来，或者取消「装 NeoForge」。")
             return
         }
         val dir = File(dirText)
-        job?.cancel()
-        meter.reset()
-        stepStates = emptyMap()
-        progress = null
-        speedBytesPerSecond = 0L
-        elapsedMs = 0L
-        currentStep = InstallStep.PLANNING
-        phase = InstallPhase.Running
-        message = "正在解析 " + id + " 的版本元数据…"
-        val startedAt = System.currentTimeMillis()
-
-        job = scope.launch {
-            try {
-                val choice = when {
-                    installFabric -> LoaderChoice.Fabric(loaderVersion)
-                    installForge -> LoaderChoice.Forge(forgeVersion)
-                    installNeoForge -> LoaderChoice.NeoForge(neoforgeVersion)
-                    else -> LoaderChoice.Vanilla
-                }
-                val outcome = OneClickInstaller.install(
-                    gameDir = dir,
-                    versionId = id,
-                    javaRuntimes = backend.javaRuntimes,
-                    instances = backend.instances,
-                    manifest = manifest,
-                    memoryMb = defaultMemoryMb,
-                    loader = choice,
-                ) { step ->
-                    if (step.step != currentStep) {
-                        val previous = currentStep
-                        if (previous != InstallStep.IDLE && previous != InstallStep.DONE) {
-                            stepStates = stepStates + (previous to StepState.Succeeded)
-                        }
-                        currentStep = step.step
-                    }
-                    if (step.step != InstallStep.IDLE && step.step != InstallStep.DONE) {
-                        stepStates = stepStates + (step.step to StepState.Running)
-                    }
-                    progress = step
-                    if (step.detail.isNotBlank()) message = step.detail
-                    elapsedMs = System.currentTimeMillis() - startedAt
-                    if (step.step == InstallStep.DOWNLOADING) {
-                        val speed = meter.sample(step.done)
-                        if (speed >= 0) speedBytesPerSecond = speed
-                    }
-                }
-                elapsedMs = System.currentTimeMillis() - startedAt
-                progress = null
-                // 只把真跑过的步骤标成成功：只装原版时不该给「安装 Fabric 加载器」打勾。
-                stepStates = stepStates.mapValues { StepState.Succeeded }
-                currentStep = InstallStep.DONE
-                phase = InstallPhase.Finished(outcome)
-                message = buildString {
-                    append("已完成：")
-                    append(outcome.versionId)
-                    outcome.fabric?.let {
-                        append("（Fabric ")
-                        append(it.loaderVersion)
-                        append("，")
-                        append(it.libraryFiles)
-                        append(" 个库")
-                        if (it.downloadedBytes > 0) {
-                            append("，")
-                            append(formatBytes(it.downloadedBytes))
-                        }
-                        append("）")
-                    }
-                    outcome.forge?.let {
-                        append("（Forge ")
-                        append(it.forgeVersion)
-                        append("，官方安装器退出码 ")
-                        append(it.installerExitCode)
-                        append("，日志 ")
-                        append(it.logFile.name)
-                        append("）")
-                    }
-                    outcome.neoforge?.let {
-                        append("（NeoForge ")
-                        append(it.neoforgeVersion)
-                        append("，官方安装器退出码 ")
-                        append(it.installerExitCode)
-                        append("，日志 ")
-                        append(it.logFile.name)
-                        append("）")
-                    }
-                    append("，Java ")
-                    append(outcome.java.majorVersion)
-                    append(if (outcome.javaInstalled) "（这次新下的）" else "（本机已有）")
-                    append("，内存 ")
-                    append(outcome.instance.memoryMb)
-                    append(" MB（可在启动页改），用时 ")
-                    append(formatDuration(outcome.elapsedMs))
-                }
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: InstallStepException) {
-                stepStates = stepStates + (e.step to StepState.Failed(e.message ?: "失败"))
-                currentStep = e.step
-                phase = InstallPhase.Failed(e.step, e.message ?: "失败")
-                message = "卡在「" + e.step.label + "」：" + (e.message ?: "未知错误")
-            } catch (e: Exception) {
-                val step = currentStep.takeIf { it != InstallStep.IDLE } ?: InstallStep.PLANNING
-                stepStates = stepStates + (step to StepState.Failed(e.message ?: "失败"))
-                phase = InstallPhase.Failed(step, e.message ?: (e::class.simpleName ?: "未知错误"))
-                message = "卡在「" + step.label + "」：" + (e.message ?: (e::class.simpleName ?: "未知错误"))
-            }
+        val choice = when {
+            installFabric -> LoaderChoice.Fabric(loaderVersion)
+            installForge -> LoaderChoice.Forge(forgeVersion)
+            installNeoForge -> LoaderChoice.NeoForge(neoforgeVersion)
+            else -> LoaderChoice.Vanilla
         }
+        // 跑在 OneClickRunner 的进程级作用域里：切页不会打断，回来还能看到进度。
+        OneClickRunner.start(
+            gameDir = dir,
+            versionId = id,
+            memoryMb = defaultMemoryMb,
+            loader = choice,
+            manifest = manifest,
+            javaRuntimes = backend.javaRuntimes,
+            instances = backend.instances,
+        )
     }
 
     /** 拉某个原版版本的 Fabric loader 列表；失败只记原因，不弹错。 */
@@ -591,12 +473,7 @@ fun DownloadsPage(
     }
 
     fun cancelInstall() {
-        job?.cancel()
-        job = null
-        phase = InstallPhase.Idle
-        currentStep = InstallStep.IDLE
-        speedBytesPerSecond = 0L
-        message = "已取消。已下好的文件不会丢，再点一次会跳过校验通过的部分。"
+        OneClickRunner.cancel()
     }
 
     LaunchedEffect(versionText) {
@@ -988,56 +865,4 @@ private fun DownloadHint(text: String, error: Boolean = false) {
     )
 }
 
-/** 用相邻采样点的字节差算瞬时速度；间隔太短就沿用上一次的值。 */
-private class SpeedMeter {
-    private var lastBytes = Long.MIN_VALUE
-    private var lastAt = 0L
 
-    fun reset() {
-        synchronized(this) {
-            lastBytes = Long.MIN_VALUE
-            lastAt = 0L
-        }
-    }
-
-    /** 返回字节/秒；样本不足时返回 -1，调用方应保留原值。 */
-    fun sample(totalBytes: Long): Long {
-        synchronized(this) {
-            val now = System.currentTimeMillis()
-            if (lastBytes == Long.MIN_VALUE || lastAt == 0L) {
-                lastBytes = totalBytes
-                lastAt = now
-                return -1L
-            }
-            val elapsed = now - lastAt
-            if (elapsed < 300L) return -1L
-            val delta = totalBytes - lastBytes
-            lastBytes = totalBytes
-            lastAt = now
-            return if (delta <= 0L) 0L else delta * 1000L / elapsed
-        }
-    }
-}
-
-private fun formatBytes(bytes: Long): String {
-    if (bytes <= 0L) return "0 B"
-    if (bytes < 1024L) return bytes.toString() + " B"
-    val units = arrayOf("KB", "MB", "GB", "TB")
-    var value = bytes.toDouble() / 1024.0
-    var index = 0
-    while (value >= 1024.0 && index < units.size - 1) {
-        value /= 1024.0
-        index++
-    }
-    return String.format(Locale.ROOT, "%.1f ", value) + units[index]
-}
-
-private fun formatSpeed(bytesPerSecond: Long): String =
-    if (bytesPerSecond <= 0L) "—" else formatBytes(bytesPerSecond) + "/s"
-
-private fun formatDuration(millis: Long): String {
-    val totalSeconds = millis / 1000L
-    val minutes = totalSeconds / 60L
-    val seconds = totalSeconds % 60L
-    return if (minutes > 0L) minutes.toString() + " 分 " + seconds + " 秒" else seconds.toString() + " 秒"
-}
