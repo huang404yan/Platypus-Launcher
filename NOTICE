@@ -1,5 +1,39 @@
 鸭嘴兽启动器 (Platypus Launcher)
 Copyright 2026 Platypus contributors
 
-This product includes software developed by third parties.
-第三方组件清单在依赖确定后补充；当前 M0 阶段仅使用 Kotlin、Compose Multiplatform、kotlinx 系列（均为 Apache-2.0）。
+本产品以 Apache License 2.0 发布，全文见 LICENSE。
+
+== 本产品中包含的第三方代码 ==
+
+目前没有。本项目的实现代码为自己编写；产品设计上的参照对象（PCL2、HMCL、Prism Launcher 等）
+只用于理解问题怎么解，其 GPL-3.0 / 专有许可的代码没有进入本仓库。
+
+若将来确实引入了第三方代码，必须在本节列出：项目名、来源链接、所取文件的路径、对方许可全文，
+并在关于页「开源致谢 · 使用了代码」一组中同步标注。core 的 Credits 与界面同源。
+
+== 第三方库（编译进安装包，各自保留原版权与许可） ==
+
+  Kotlin / kotlinx-coroutines / kotlinx-serialization   Apache-2.0
+  Compose Multiplatform                                 Apache-2.0
+  AndroidX (core-ktx / activity-compose / Compose BOM)   Apache-2.0
+
+完整清单与版本号见 gradle/libs.versions.toml 与各模块 build.gradle.kts。
+
+== 用到的公开接口、数据格式与社区约定 ==
+
+  Modrinth API           https://docs.modrinth.com/api/      检索、下载、依赖声明、.mrpack 格式
+  Fabric Meta            https://meta.fabricmc.net/          加载器版本清单与 profile 格式
+  Forge / NeoForge       官方 installer 以子进程调用，不链接、不修改其代码
+  MCBBS v2 整合包格式    社区约定（manifest.json + modpack.json + overrides）
+  离线登录 UUID 规则     OfflinePlayer:<名字> 的 MD5 转 v3 UUID
+
+== 设计参考（未使用其代码） ==
+
+  PCL2（Plain Craft Launcher 2）  专有许可。下载页左侧栏分组、刷新按钮挂在菜单项、
+                                  启动页左栏放版本选择与启动按钮等交互形态参照了它。
+                                  其内置中文名数据库（WikiEntries.txt）未使用 —— 该项目
+                                  源码树未附带 LICENSE，许可状态不明。
+  HMCL                             GPL-3.0。实例目录布局、离线命名、Java 挑选方式的公开文档。
+  Prism Launcher                   GPL-3.0。实例隔离形态（每实例独立目录，共享 libraries/assets）。
+
+关于页「开源致谢」由 core/Credits.kt 驱动，内容与本节保持一致。

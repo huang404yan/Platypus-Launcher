@@ -69,6 +69,14 @@ object SearchKeywords {
         SearchTerm("高清修复", "optifine", SearchTerm.Kind.MOD),
         SearchTerm("内嵌副手", "embeddium", SearchTerm.Kind.MOD),
         SearchTerm("遥远地平线", "distant-horizons", SearchTerm.Kind.MOD),
+        SearchTerm("内存泄漏修复", "memoryleakfix", SearchTerm.Kind.MOD),
+        SearchTerm("经验球合并", "clumps", SearchTerm.Kind.MOD),
+        SearchTerm("快速加载", "fastload", SearchTerm.Kind.MOD),
+        SearchTerm("加速启动", "lazydfu", SearchTerm.Kind.MOD),
+        SearchTerm("区块预生成", "chunky", SearchTerm.Kind.MOD),
+        SearchTerm("连接纹理", "continuity", SearchTerm.Kind.MOD),
+        SearchTerm("着色器兼容", "indium", SearchTerm.Kind.MOD),
+        SearchTerm("钠选项", "reeses-sodium-options", SearchTerm.Kind.MOD),
 
         // —— 界面与体验 ——
         SearchTerm("小地图", "xaeros-minimap", SearchTerm.Kind.MOD),
@@ -83,8 +91,18 @@ object SearchKeywords {
         SearchTerm("护甲显示", "armor-hud", SearchTerm.Kind.MOD),
         SearchTerm("物品信息显示", "jade", SearchTerm.Kind.MOD),
         SearchTerm("提示框", "jade", SearchTerm.Kind.MOD),
-        SearchTerm("苹果皮", "apple-skin", SearchTerm.Kind.MOD),
-        SearchTerm("饥饿显示", "apple-skin", SearchTerm.Kind.MOD),
+        SearchTerm("苹果皮", "appleskin", SearchTerm.Kind.MOD),
+        SearchTerm("饥饿显示", "appleskin", SearchTerm.Kind.MOD),
+        SearchTerm("苹果皮显示", "appleskin", SearchTerm.Kind.MOD),
+        SearchTerm("物品管理器2", "emi", SearchTerm.Kind.MOD),
+        SearchTerm("方块信息", "wthit", SearchTerm.Kind.MOD),
+        SearchTerm("小地图世界地图", "xaeros-world-map", SearchTerm.Kind.MOD),
+        SearchTerm("世界地图", "xaeros-world-map", SearchTerm.Kind.MOD),
+        SearchTerm("迷你hud", "minihud", SearchTerm.Kind.MOD),
+        SearchTerm("f3 信息", "betterf3", SearchTerm.Kind.MOD),
+        SearchTerm("按键冲突", "controlling", SearchTerm.Kind.MOD),
+        SearchTerm("鼠标优化", "mouse-tweaks", SearchTerm.Kind.MOD),
+        SearchTerm("平滑滚动", "smooth-scroll", SearchTerm.Kind.MOD),
 
         // —— 内容向大型模组 ——
         SearchTerm("机械动力", "create", SearchTerm.Kind.MOD),
@@ -108,16 +126,57 @@ object SearchKeywords {
         SearchTerm("帕秋莉手册", "patchouli", SearchTerm.Kind.MOD),
         SearchTerm("手册", "patchouli", SearchTerm.Kind.MOD),
         SearchTerm("村民繁殖", "guard-villagers", SearchTerm.Kind.MOD),
+        SearchTerm("末地扩展", "enderscape", SearchTerm.Kind.MOD),
+
+        // —— 存储与物流 ——
+        SearchTerm("精致存储", "refined-storage", SearchTerm.Kind.MOD),
+        SearchTerm("存储抽屉", "storagedrawers", SearchTerm.Kind.MOD),
+        SearchTerm("抽屉", "storagedrawers", SearchTerm.Kind.MOD),
+        SearchTerm("精致背包", "sophisticated-backpacks", SearchTerm.Kind.MOD),
+        SearchTerm("背包", "sophisticated-backpacks", SearchTerm.Kind.MOD),
+        SearchTerm("精致存储箱", "sophisticated-storage", SearchTerm.Kind.MOD),
+        SearchTerm("铁箱子", "iron-chests", SearchTerm.Kind.MOD),
+        SearchTerm("功能存储", "functional-storage", SearchTerm.Kind.MOD),
+        SearchTerm("终端", "refined-storage", SearchTerm.Kind.MOD),
+
+        // —— 科技与魔法 ——
+        SearchTerm("热力膨胀", "thermal-expansion", SearchTerm.Kind.MOD),
+        SearchTerm("工业先锋", "industrial-foregoing", SearchTerm.Kind.MOD),
+        SearchTerm("末影接口", "enderio", SearchTerm.Kind.MOD),
+        SearchTerm("新星魔法", "ars-nouveau", SearchTerm.Kind.MOD),
+        SearchTerm("血魔法", "blood-magic", SearchTerm.Kind.MOD),
+        SearchTerm("秘术", "occultism", SearchTerm.Kind.MOD),
+        SearchTerm("机械动力附属", "createaddition", SearchTerm.Kind.MOD),
+
+        // —— 冒险与生物 ——
+        SearchTerm("更多生物", "alexs-mobs", SearchTerm.Kind.MOD),
+        SearchTerm("亚历克斯生物", "alexs-mobs", SearchTerm.Kind.MOD),
+        SearchTerm("深层世界", "the-undergarden", SearchTerm.Kind.MOD),
+        SearchTerm("地形生成", "terralith", SearchTerm.Kind.MOD),
+        SearchTerm("起源", "origins", SearchTerm.Kind.MOD),
+        SearchTerm("简单剑", "simply-swords", SearchTerm.Kind.MOD),
+
+        // —— 生活质量 ——
+        SearchTerm("创世神", "worldedit", SearchTerm.Kind.MOD),
+        SearchTerm("世界编辑", "worldedit", SearchTerm.Kind.MOD),
+        SearchTerm("投影", "litematica", SearchTerm.Kind.MOD),
+        SearchTerm("建筑小工具", "effortless-building-gadgets", SearchTerm.Kind.MOD),
+        SearchTerm("轻松建造", "effortless-building", SearchTerm.Kind.MOD),
+        SearchTerm("砍树", "fallingtree", SearchTerm.Kind.MOD),
+        SearchTerm("一键砍树", "fallingtree", SearchTerm.Kind.MOD),
 
         // —— 前置与开发 ——
         SearchTerm("前置", "fabric-api", SearchTerm.Kind.MOD),
         SearchTerm("模组前置", "fabric-api", SearchTerm.Kind.MOD),
         SearchTerm("皮肤", "skin-shuffle", SearchTerm.Kind.MOD),
         SearchTerm("宝可梦", "cobblemon", SearchTerm.Kind.MOD),
+        SearchTerm("依赖库", "fabric-api", SearchTerm.Kind.MOD),
+        SearchTerm("客户端api", "fabric-api", SearchTerm.Kind.MOD),
+        SearchTerm("配置库", "cloth-config", SearchTerm.Kind.MOD),
 
         // —— 光影 ——
-        SearchTerm("互补", "complementary", SearchTerm.Kind.SHADER),
-        SearchTerm("互补光影", "complementary", SearchTerm.Kind.SHADER),
+        SearchTerm("互补", "complementary-reimagined", SearchTerm.Kind.SHADER),
+        SearchTerm("互补光影", "complementary-reimagined", SearchTerm.Kind.SHADER),
         SearchTerm("重想体素", "rethinking-voxels", SearchTerm.Kind.SHADER),
         SearchTerm("体素光影", "rethinking-voxels", SearchTerm.Kind.SHADER),
         SearchTerm("光子", "photon", SearchTerm.Kind.SHADER),
@@ -126,8 +185,15 @@ object SearchKeywords {
         SearchTerm("轻量光影", "makeup-ultra-fast", SearchTerm.Kind.SHADER),
         SearchTerm("香草增强", "vanilla-plus", SearchTerm.Kind.SHADER),
         SearchTerm("原版增强", "vanilla-plus", SearchTerm.Kind.SHADER),
-        SearchTerm("写实光影", "seus", SearchTerm.Kind.SHADER),
+        // SEUS 系列在 Modrinth 上没有可检索的工程：seus / seus-shaders / seus-renewed /
+        // seus-renewed-shaders 四个都实测过，hits 全空。不放一个点了什么都搜不到的候选。
         SearchTerm("光影", "shaders", SearchTerm.Kind.SHADER),
+        SearchTerm("互补重想", "complementary-reimagined", SearchTerm.Kind.SHADER),
+        SearchTerm("bsl", "bsl-shaders", SearchTerm.Kind.SHADER),
+        SearchTerm("bsl光影", "bsl-shaders", SearchTerm.Kind.SHADER),
+        SearchTerm("卡帕光影", "kappa-shader", SearchTerm.Kind.SHADER),
+        SearchTerm("sildur光影", "sildurs-vibrant-shaders", SearchTerm.Kind.SHADER),
+        SearchTerm("鲜艳光影", "sildurs-vibrant-shaders", SearchTerm.Kind.SHADER),
 
         // —— 资源包 ——
         SearchTerm("忠实", "faithful", SearchTerm.Kind.RESOURCE_PACK),
@@ -137,6 +203,9 @@ object SearchKeywords {
         SearchTerm("更好的树叶", "better-leaves", SearchTerm.Kind.RESOURCE_PACK),
         SearchTerm("树叶", "better-leaves", SearchTerm.Kind.RESOURCE_PACK),
         SearchTerm("低配材质", "stay-true", SearchTerm.Kind.RESOURCE_PACK),
+        SearchTerm("极简材质", "bare-bones", SearchTerm.Kind.RESOURCE_PACK),
+        SearchTerm("十六倍材质", "modern-mizunos", SearchTerm.Kind.RESOURCE_PACK),
+        SearchTerm("水野材质", "modern-mizunos", SearchTerm.Kind.RESOURCE_PACK),
 
         // —— 整合包 ——
         SearchTerm("空岛", "skyblock", SearchTerm.Kind.MODPACK),
@@ -144,6 +213,8 @@ object SearchKeywords {
         SearchTerm("冒险整合包", "adventure", SearchTerm.Kind.MODPACK),
         SearchTerm("空岛整合包", "skyblock", SearchTerm.Kind.MODPACK),
         SearchTerm("整合包", "modpack", SearchTerm.Kind.MODPACK),
+        SearchTerm("rpg整合包", "rpg", SearchTerm.Kind.MODPACK),
+        SearchTerm("角色扮演整合包", "rpg", SearchTerm.Kind.MODPACK),
     )
 
     /**
