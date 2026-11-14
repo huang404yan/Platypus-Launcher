@@ -179,6 +179,9 @@ internal object ServerRunner {
 fun ServerPage(initialGameRoot: String? = null, backend: LauncherBackend? = null) {
     val state = ServerRunner.state.collectAsState().value
     val running = state.phase is ServerPhase.Running
+    // 服务端的运行态是另一条流：下载安装是一次性任务，开服是长驻进程，
+    // 两者的生命周期与「能不能重复点」完全不同。
+    val console = ServerRuntime.state.collectAsState().value
 
     // 默认落在游戏目录旁边的 server/，不和 .minecraft 混在一起
     var dirText by remember { mutableStateOf(defaultServerDir(initialGameRoot)) }
@@ -501,6 +504,11 @@ fun ServerPage(initialGameRoot: String? = null, backend: LauncherBackend? = null
             ServerRegistryCard(
                 entries = entries,
                 onOpen = { entry -> registryNotice = openDirectory(File(entry.directory)) },
+                onStart = { entry ->
+                    // 直接执行目录里现成的开服脚本。Forge 的 run.bat 带着安装器生成的
+                    // 一长串参数，自己拼 java 命令只会拼错。
+                    ServerRuntime.start(entry.directory)
+                },
                 onForget = { entry ->
                     val repo = backend?.servers
                     if (repo == null) {
@@ -518,6 +526,16 @@ fun ServerPage(initialGameRoot: String? = null, backend: LauncherBackend? = null
                         }
                     }
                 },
+            )
+        }
+
+        // 只要有活动会话（正在跑，或者跑过一次刚停下）就显示控制台：
+        // 排查「为什么没开起来」全靠这段输出，收起来等于让人回去双击脚本。
+        if (console.dir.isNotBlank()) {
+            ServerConsoleCard(
+                state = console,
+                onStop = { ServerRuntime.stop() },
+                onSend = { ServerRuntime.send(it) },
             )
         }
     }
@@ -781,14 +799,19 @@ private fun ServerReadyCard(result: ServerInstallResult) {
 /**
  * 装过的服务端列表。
  *
- * 只有「打开目录」和「从列表里去掉」两个动作，刻意没有「启动」：开服是长驻进程，
- * 要接控制台输入输出、要能看日志，属于另一件事。现在给一个按钮只会让人以为点完就开好了。
+ * 三个动作：打开目录、启动、从列表里去掉。
+ *
+ * 「启动」执行的是目录里现成的开服脚本，输出与命令都走下面的 [ServerConsoleCard]。
+ * 早先刻意不给启动按钮，理由是「开服是长驻进程，要接控制台」——但那样等于把服务端
+ * 这条线断在最后一步：装好了却还得自己去目录里双击。现在控制台补齐了，按钮就该给。
+ *
  * 去掉只是不显示，不动磁盘上的任何文件 —— 这句话要写在按钮旁边，否则用户不敢点。
  */
 @Composable
 private fun ServerRegistryCard(
     entries: List<ServerEntry>,
     onOpen: (ServerEntry) -> Unit,
+    onStart: (ServerEntry) -> Unit,
     onForget: (ServerEntry) -> Unit,
 ) {
     Card(
@@ -821,6 +844,7 @@ private fun ServerRegistryCard(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                     OutlinedButton(onClick = { onOpen(entry) }) { Text("打开目录") }
+                    Button(onClick = { onStart(entry) }) { Text("启动") }
                     OutlinedButton(onClick = { onForget(entry) }) { Text("从列表里去掉") }
                 }
             }
