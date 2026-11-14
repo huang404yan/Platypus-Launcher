@@ -100,6 +100,7 @@ object JavaRuntimeComponents {
     const val ALPHA = "java-runtime-alpha"
     const val BETA = "java-runtime-beta"
     const val GAMMA = "java-runtime-gamma"
+    const val GAMMA_SNAPSHOT = "java-runtime-gamma-snapshot"
     const val DELTA = "java-runtime-delta"
     const val EPSILON = "java-runtime-epsilon"
 
@@ -110,6 +111,40 @@ object JavaRuntimeComponents {
         major == 21 -> DELTA
         major >= 25 -> EPSILON
         else -> null
+    }
+
+    /**
+     * 组件 id 反过来推主版本号，界面列表要按它显示「Java 21」。
+     *
+     * 只认上面这张表里的六个组件：清单里还有 gamma-snapshot（旧快照用的 17）与
+     * minecraft-java-exe（不是完整的 Java，只是给启动器自己用的 exe），后者必须排除，
+     * 否则列表里会多一行点了装不上的东西。
+     */
+    fun majorOfComponent(component: String): Int? = when (component) {
+        JRE_LEGACY -> 8
+        ALPHA -> 16
+        BETA, GAMMA -> 17
+        GAMMA_SNAPSHOT -> 17
+        DELTA -> 21
+        EPSILON -> 25
+        else -> null
+    }
+
+    /**
+     * 从官方清单的 version.name 推主版本号。
+     *
+     * 实测三种写法（2026-11-14 的 windows-x64）：
+     * - `21.0.7` / `25.0.1` / `17.0.15` —— 点分隔的现代版本号，取第一段
+     * - `16.0.1.9.1` —— 同一个 16 的旧写法，第一段仍是 16
+     * - `8u51-cacert462b08` —— jre-legacy 的老写法，主版本在 `u` 前面
+     *
+     * 认不出来（比如 `14` 那种非 Java 版本号）返回 null。
+     */
+    fun majorOfVersionName(name: String): Int? {
+        val trimmed = name.trim()
+        if (trimmed.isEmpty()) return null
+        val head = trimmed.substringBefore('.').substringBefore('u').substringBefore('+')
+        return head.toIntOrNull()
     }
 }
 
@@ -207,3 +242,58 @@ private fun JsonObject.longAt(key: String): Long? =
 
 private fun JsonObject.booleanAt(key: String): Boolean? =
     (this[key] as? JsonPrimitive)?.content?.toBooleanStrictOrNull()
+
+/**
+ * 把运行时索引摊平成「这台机器能装哪几个 Java」的列表。
+ *
+ * 三条过滤，都是实测踩出来的：
+ * - **只留这张表里认得的六个组件**：清单里还有 `gamma-snapshot`（旧快照用的 17）与
+ *   `minecraft-java-exe`（14 / 12，不是 Java，是启动器自己要用的 exe，装下来只有一个
+ *   几百字节的清单、根本不是 JRE）。不筛的话列表里会多出点了装不上的行。
+ * - **同一个主版本只留一行**：beta 与 gamma 实测都是 17（beta 是旧的一支），
+ *   留 gamma 那一支 —— 新版游戏 json 里写的就是 gamma。
+ * - **按主版本升序**：8 / 16 / 17 / 21 / 25，用户从上往下看是「从老到新」。
+ *
+ * @param componentOf 组件 → 主版本号；测试里可以塞一个假的映射表
+ * @param installedOf 组件 → 本地已有的 java 路径（没有就返回 null）
+ */
+fun buildRuntimeOffers(
+    index: JavaRuntimeIndex,
+    platform: String,
+    installedOf: (String) -> String? = { null },
+): List<JavaRuntimeOffer> {
+    // 同一主版本里优先取的组件：gamma 胜过 beta，其余一一对应。
+    val preferred = LinkedHashMap<Int, JavaRuntimeEntry>()
+    for (entry in index.entries(platform)) {
+        val major = JavaRuntimeComponents.majorOfComponent(entry.component) ?: continue
+        if (entry.component == JavaRuntimeComponents.GAMMA_SNAPSHOT) continue
+        val existing = preferred[major]
+        if (existing == null || rank(entry.component) < rank(existing.component)) {
+            preferred[major] = entry
+        }
+    }
+    return preferred.entries
+        .sortedBy { it.key }
+        .map { (major, entry) ->
+            val path = installedOf(entry.component)
+            JavaRuntimeOffer(
+                component = entry.component,
+                majorVersion = major,
+                versionName = entry.versionName,
+                manifestSize = entry.manifestSize,
+                installed = path != null,
+                installedPath = path,
+            )
+        }
+}
+
+/** 同主版本时哪个组件更该被推荐：数字越小越优先（gamma 与 beta 都是 17，要 gamma）。 */
+private fun rank(component: String): Int = when (component) {
+    JavaRuntimeComponents.GAMMA -> 0
+    JavaRuntimeComponents.BETA -> 1
+    JavaRuntimeComponents.ALPHA -> 2
+    JavaRuntimeComponents.DELTA -> 3
+    JavaRuntimeComponents.EPSILON -> 4
+    JavaRuntimeComponents.JRE_LEGACY -> 5
+    else -> 9
+}

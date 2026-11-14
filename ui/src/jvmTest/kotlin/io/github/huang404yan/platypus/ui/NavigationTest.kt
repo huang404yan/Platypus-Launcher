@@ -50,6 +50,28 @@ class NavigationTest {
     }
 
     @Test
+    fun `设置里有一项 Java`() {
+        val subs = PAGE_SUB_TABS.getValue(Page.SETTINGS)
+        assertEquals(SETTINGS_TAB_JAVA, subs[1].id, "Java 紧跟在「启动」后面：它决定「用什么跑」，不是「跑成什么样」")
+        assertEquals("Java", subs[1].label)
+    }
+
+    @Test
+    fun `Java 页可以刷新官方清单`() {
+        val sub = PAGE_SUB_TABS.getValue(Page.SETTINGS).first { it.id == SETTINGS_TAB_JAVA }
+        // 这一页的清单来自远端，用户重装 / 换目录后需要一个手动重读的入口
+        assertTrue(sub.refreshable)
+    }
+
+    @Test
+    fun `界面和其他两页仍然不带刷新按钮`() {
+        val settings = PAGE_SUB_TABS.getValue(Page.SETTINGS)
+        for (id in listOf(SETTINGS_TAB_LAUNCH, SETTINGS_TAB_UI, SETTINGS_TAB_OTHER)) {
+            assertFalse(settings.first { it.id == id }.refreshable, id + " 没有远端清单可刷新")
+        }
+    }
+
+    @Test
     fun `每个二级项都有中文名`() {
         PAGE_SUB_TABS.values.flatten().forEach {
             assertTrue(it.label.isNotBlank(), it.id + " 没有名字")

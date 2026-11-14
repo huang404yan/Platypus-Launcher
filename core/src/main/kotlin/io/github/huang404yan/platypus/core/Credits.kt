@@ -62,7 +62,8 @@ object Credits {
             license = "专有许可（源码公开但未声明开源许可）",
             note = "下载页左侧栏的分组方式（原版游戏 / 社区资源：Mod、整合包、数据包、资源包、" +
                 "服务器、插件、光影包）、把刷新按钮挂在菜单项而不是内容区、中文名搜索的整体思路、" +
-                "启动页把版本选择与启动按钮放在左栏，都来自它。没有复制任何源码，也没有使用它内置的" +
+                "启动页把版本选择与启动按钮放在左栏、Java 下载列表按版本 json 里声明的 component 精确匹配" +
+                "（匹配不上才退回主版本区间），都来自它。没有复制任何源码，也没有使用它内置的" +
                 "中文名数据库（该项目未附带 LICENSE，许可状态不明）。",
         ),
         Credit(
@@ -77,6 +78,15 @@ object Credits {
             kind = CreditKind.REFERENCE,
             license = "GPL-3.0",
             note = "实例隔离的形态（每个实例一份独立目录，共享 libraries 与 assets）参考了它的设计。",
+        ),
+        Credit(
+            name = "美西螈启动器（Axolotl Launcher）",
+            kind = CreditKind.REFERENCE,
+            license = "GPL-3.0",
+            url = "https://github.com/Axolotl-Launcher/Axolotl",
+            note = "设置页按「改了会影响什么」分组、把 Java 运行时单独列成一张带已装标记的表，" +
+                "这两处排版参考了它。它是 Rust + Vue 的桌面应用，技术栈与本项目完全不同，" +
+                "一行代码都搬不过来。",
         ),
 
         // —— 格式与协议 ——
