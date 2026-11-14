@@ -162,6 +162,28 @@ installer 自己挑的是 Microsoft 17.0.15（本机 `%APPDATA%\.minecraft\runti
 
 installer 日志里有大量 `Cant Find Class: org/lwjgl/glfw/GLFWErrorCallback`、`com/google/gson/JsonParseException`，属正常噪声（它把整个 classpath 都扫一遍找可选适配器），**不影响成功**。
 
+### 5.3b 幂等复跑（2026-11-14，`dist/_forge-e2e`，同目录连跑三遍）
+
+同一目录连跑三次 `:app-desktop:forgeE2e`，第三遍专门验「装过就不再跑 installer」：
+
+| 遍次 | 场景 | 耗时 | 关键行 |
+| --- | --- | --- | --- |
+| 1 | 空目录（`emptyDir=true`） | 6m14s | 下完 3643 个原版文件 → 补 Java 17 → `LOADER_INSTALL` 时**崩了**：`java.lang.NoClassDefFoundError: io/github/huang404yan/platypus/core/loader/ForgeMetaKt`（见下） |
+| 2 | 原版已齐，installer 真跑 | 3m12s | installer 自跑约 146 s，`Successfully installed client into launcher.` → `补齐版本 jar：复制原版 1.20.1.jar → 1.20.1-forge-47.4.28.jar` → `INSTALL OK in 146381 ms` → `RESULT menuReached=true launchMs=13158` |
+| 3 | 全部已装 | 27.9 s（安装段 9.2 s） | `查询 Forge 版本：本机已装好 1.20.1-forge-47.4.28，跳过安装` → `INSTALL OK in 9151 ms` → `RESULT menuReached=true launchMs=13505` |
+
+第 3 遍是这次补测的重点：**安装段 9 151 ms vs 第 2 遍 146 381 ms（16 倍差）**，说明 installer 子进程确实没再起；
+同时 `launchMs` 与第 2 遍基本一致（13 505 vs 13 158 ms），说明跳过安装没有把版本目录弄坏——
+Forge 47.4.28 照样初始化，照样进主菜单（游戏日志里有 `Forge mod loading, version 47.4.28`）。
+
+第 1 遍的 `NoClassDefFoundError: io/github/huang404yan/platypus/core/loader/ForgeMetaKt` 出现在
+`ForgeInstaller.listVersions`（`ForgeInstaller.kt:47`），**不在安装器子进程里**——即我们自己的代码没加载到这个类。
+
+已知：同一命令原样重跑第 2、3 遍都正常，所以不是代码回归、也不是网络问题。
+**未验证**：推测是首次运行前 `core` jar 正被重新打包（该次 `20 actionable tasks: 4 executed`，含 `:ui` 相关编译），
+JVM 加载到一半的类路径与最终 jar 不一致；但没有单独做过对照实验，不下结论。
+下次若复现，先跑一次 `:core:jar` 让产物稳定，再跑 e2e。
+
 ### 5.4 装出来的目录（1.20.1 + 47.4.0，约 100 MB）
 
 ```

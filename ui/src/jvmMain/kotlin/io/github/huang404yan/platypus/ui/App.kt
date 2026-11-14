@@ -58,6 +58,10 @@ fun App(initialGameRoot: String? = null, backend: LauncherBackend? = null) {
         // 实例页点「去启动」时带上这个实例：只交一个 key，不把整个对象塞给启动页当长期状态。
         var focusKey by remember { mutableStateOf<String?>(null) }
 
+        // 联机页点「直接进」时把地址交给启动页。存在这一层而不是启动页里：
+        // 切页会把启动页整个销毁，地址跟着丢，回去就变成停在主菜单。
+        var quickPlay by remember { mutableStateOf("") }
+
         // 每页选中了哪个二级项。存在这里而不是页面里：页面切走就被销毁了，
         // 记在页面里的话，去下载页看一眼再回来，设置页会跳回第一个 tab。
         val subSelection = remember { mutableStateMapOf<String, String>() }
@@ -76,7 +80,7 @@ fun App(initialGameRoot: String? = null, backend: LauncherBackend? = null) {
                 Modifier.weight(1f).fillMaxHeight().padding(24.dp),
             ) {
                 when (page) {
-                    Page.LAUNCH -> LaunchPage(backend, initialGameRoot, focusKey)
+                    Page.LAUNCH -> LaunchPage(backend, initialGameRoot, focusKey, quickPlay)
                     Page.INSTANCE -> InstancePage(backend, initialGameRoot) { instance: Instance ->
                         focusKey = instanceKey(instance)
                         page = Page.LAUNCH
@@ -84,7 +88,10 @@ fun App(initialGameRoot: String? = null, backend: LauncherBackend? = null) {
                     Page.DOWNLOAD -> DownloadsPage(initialGameRoot, backend) { page = Page.LAUNCH }
                     Page.MODS -> ModsPage(initialGameRoot, backend, subTabOf(Page.MODS))
                     Page.PACKS -> PacksPage(initialGameRoot, backend, subTabOf(Page.PACKS))
-                    Page.LINK -> LinkPage()
+                    Page.LINK -> LinkPage { address ->
+                        quickPlay = address
+                        page = Page.LAUNCH
+                    }
                     Page.SETTINGS -> SettingsPage(backend, subTabOf(Page.SETTINGS))
                     Page.ABOUT -> AboutPage()
                 }

@@ -319,4 +319,79 @@ class LaunchArgumentsTest {
     fun `非数组的 rules 返回空列表`() {
         assertTrue(LaunchArguments.parseRules(Json.parseToJsonElement("""{ "action": "allow" }""")).isEmpty())
     }
+
+    /** 1.20.1 的 game 段里真实存在的那条直接连接规则。 */
+    private val quickPlayVersion = version(
+        """
+        {
+          "id": "1.20.1",
+          "mainClass": "net.minecraft.client.main.Main",
+          "arguments": {
+            "jvm": [],
+            "game": [
+              { "rules": [{ "action": "allow", "features": { "is_quick_play_multiplayer": true } }],
+                "value": ["--quickPlayMultiplayer", "@D@{quickPlayMultiplayer}"] },
+              "--version", "1.20.1"
+            ]
+          }
+        }
+        """.trimIndent(),
+    )
+
+    @Test
+    fun `填了直连地址并打开特性开关才会有 quickPlayMultiplayer`() {
+        val command = LaunchArguments.build(
+            quickPlayVersion,
+            context().copy(features = LaunchArguments.quickPlayFeatures(), quickPlayMultiplayer = "192.168.1.10:54321"),
+        )
+        val i = command.gameArgs.indexOf("--quickPlayMultiplayer")
+        assertTrue(i >= 0)
+        assertEquals("192.168.1.10:54321", command.gameArgs[i + 1])
+    }
+
+    @Test
+    fun `不打开特性开关时直连参数整段不出现`() {
+        // 只填占位符是不够的：这条参数被 rules 挡着，特性不打开根本不会被拼进来。
+        val command = LaunchArguments.build(
+            quickPlayVersion,
+            context().copy(quickPlayMultiplayer = "192.168.1.10:54321"),
+        )
+        assertFalse(command.gameArgs.contains("--quickPlayMultiplayer"))
+        assertFalse(command.gameArgs.any { it.contains("192.168.1.10") })
+    }
+
+    @Test
+    fun `1_20 之前的版本文件不认直接连接`() {
+        assertTrue(LaunchArguments.supportsQuickPlay(quickPlayVersion))
+        assertFalse(LaunchArguments.supportsQuickPlay(vanilla))
+        assertFalse(
+            LaunchArguments.supportsQuickPlay(
+                version("""{ "id": "1.12.2", "minecraftArguments": "--username @D@{auth_player_name}" }"""),
+            ),
+        )
+    }
+
+    @Test
+    fun `rules 里 feature 为假时直连参数同样不出现`() {
+        val meta = version(
+            """
+            {
+              "id": "1.20.1",
+              "mainClass": "net.minecraft.client.main.Main",
+              "arguments": {
+                "jvm": [],
+                "game": [
+                  { "rules": [{ "action": "allow", "features": { "is_quick_play_multiplayer": false } }],
+                    "value": ["--quickPlayMultiplayer", "@D@{quickPlayMultiplayer}"] }
+                ]
+              }
+            }
+            """.trimIndent(),
+        )
+        val command = LaunchArguments.build(
+            meta,
+            context().copy(features = LaunchArguments.quickPlayFeatures(), quickPlayMultiplayer = "1.2.3.4:25565"),
+        )
+        assertFalse(command.gameArgs.contains("--quickPlayMultiplayer"))
+    }
 }

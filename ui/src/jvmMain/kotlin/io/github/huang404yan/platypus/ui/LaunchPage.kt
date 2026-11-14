@@ -49,6 +49,7 @@ import io.github.huang404yan.platypus.core.instance.mergeInstances
 import io.github.huang404yan.platypus.core.launch.CrashReport
 import io.github.huang404yan.platypus.core.launch.CrashReports
 import io.github.huang404yan.platypus.core.launch.GameHandle
+import io.github.huang404yan.platypus.core.launch.LaunchArguments
 import io.github.huang404yan.platypus.core.launch.LaunchDiagnosis
 import io.github.huang404yan.platypus.core.launch.LaunchEvent
 import io.github.huang404yan.platypus.core.launch.LaunchRequest
@@ -83,6 +84,8 @@ fun LaunchPage(
     initialGameRoot: String?,
     /** 从实例页点「去启动」时带过来的实例键；只有它能对上时才会改变默认选中项。 */
     focusKey: String? = null,
+    /** 从联机页点「直接进」时带过来的服务器地址；非空就启动后直达那个世界。 */
+    quickPlayServer: String = "",
 ) {
     if (backend == null) {
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -124,6 +127,20 @@ fun LaunchPage(
     // 本次启动的开始时刻：退出后只认比它新的 crash-report，
     // 否则实例上一次崩过的话，这次正常退出也会把旧报告当成新的挂出来。
     var startedAt by remember { mutableStateOf(0L) }
+    // 联机页点「直接进」带过来的地址。用户清掉（或换实例）就回到普通启动。
+    var quickTarget by remember { mutableStateOf(quickPlayServer.trim()) }
+    LaunchedEffect(quickPlayServer) { quickTarget = quickPlayServer.trim() }
+    // 这个版本的版本文件认不认 --quickPlayMultiplayer（1.20 起才有）。
+    // 先问清楚再给按钮，比让用户点完发现停在主菜单强。
+    var quickSupported by remember { mutableStateOf(true) }
+    LaunchedEffect(selected?.directory) {
+        val instance = selected ?: return@LaunchedEffect
+        quickSupported = runCatching {
+            val json = File(File(instance.directory), File(instance.directory).name + ".json")
+            if (!json.isFile) return@runCatching true
+            LaunchArguments.supportsQuickPlay(parseVersionJson(json.readText()))
+        }.getOrDefault(true)
+    }
 
     /** 扫描目录 + 读登记，登记的排在前面。 */
     suspend fun rescan() {
@@ -254,6 +271,7 @@ fun LaunchPage(
             instance = instance,
             java = java,
             session = OfflineProfile.session(username.trim().ifBlank { "Dev" }),
+            quickPlayServer = quickTarget,
         )
         scope.launch {
             try {
@@ -475,6 +493,41 @@ fun LaunchPage(
                     }
                 }
             }
+        }
+
+        // ③.5 直连：联机页点「直接进」会填到这里，也可以手填
+        Row(
+            Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            OutlinedTextField(
+                value = quickTarget,
+                onValueChange = { quickTarget = it.trim() },
+                modifier = Modifier.weight(1f),
+                label = { Text("直连服务器（留空 = 停在主菜单）") },
+                singleLine = true,
+                enabled = !busy,
+                isError = quickTarget.isNotBlank() && !quickSupported,
+                supportingText = {
+                    Text(
+                        if (quickTarget.isBlank()) {
+                            "填 192.168.1.10:54321 这种地址，启动后直接进那个世界。"
+                        } else {
+                            "启动后跳过主菜单，直连这个地址。"
+                        },
+                    )
+                },
+            )
+            if (quickTarget.isNotBlank()) {
+                OutlinedButton(onClick = { quickTarget = "" }, enabled = !busy) { Text("清空") }
+            }
+        }
+        if (quickTarget.isNotBlank() && !quickSupported) {
+            SectionHint(
+                "这个版本的版本文件里没有 --quickPlayMultiplayer（1.20 起才有），点启动会直接报错。换 1.20+ 的实例，或清空上面的地址。",
+                error = true,
+            )
         }
 
         // ④ 启动

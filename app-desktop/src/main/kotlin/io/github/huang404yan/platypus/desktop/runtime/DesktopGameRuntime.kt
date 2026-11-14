@@ -163,6 +163,15 @@ class DesktopGameRuntime(
         resolvedJar: File?,
     ): LaunchContext {
         val nativesDir = layout.nativesDir
+        // 「直接连接」：地址非空才开特性开关，否则一条 --quickPlayMultiplayer 都不该出现。
+        val quickPlay = request.quickPlayServer.trim()
+        if (quickPlay.isNotEmpty() && !LaunchArguments.supportsQuickPlay(version)) {
+            // 静默忽略等于骗人：用户点的是「进这个服务器」，结果停在主菜单。
+            throw IllegalStateException(
+                "这个版本（" + version.id + "）的版本文件里没有 --quickPlayMultiplayer，不支持直接连接。" +
+                    "1.20 起才有这条参数；换一个 1.20+ 的实例，或者去掉直连地址再启动。",
+            )
+        }
         val placeholder = LaunchContext(
             gameDir = layout.gameDir,
             assetsDir = layout.assetsDir,
@@ -172,6 +181,8 @@ class DesktopGameRuntime(
             session = request.session,
             versionName = layout.versionDir.name,
             memoryMb = request.instance.memoryMb,
+            features = if (quickPlay.isEmpty()) emptyMap() else LaunchArguments.quickPlayFeatures(),
+            quickPlayMultiplayer = quickPlay,
             launcherName = launcherName,
             launcherVersion = launcherVersion,
             extraJvmArgs = request.instance.extraJvmArgs + request.jvmArgs,

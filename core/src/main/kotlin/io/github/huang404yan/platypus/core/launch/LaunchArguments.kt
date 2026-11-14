@@ -36,6 +36,13 @@ data class LaunchContext(
     val memoryMb: Int = 2048,
     /** rules 里用到的特性开关；默认全关，所以 --demo、自定义分辨率这类参数不会出现。 */
     val features: Map<String, Boolean> = emptyMap(),
+    /**
+     * 多人游戏「直接连接」的目标，形如 `192.168.1.10:54321`；空串表示不直接进。
+     *
+     * 只有在 [features] 里打开 [QUICK_PLAY_MULTIPLAYER_FEATURE] 时这个值才会被
+     * 拼进命令行——version json 里那条规则带 features 条件，两处必须同时给。
+     */
+    val quickPlayMultiplayer: String = "",
     val os: OsFamily = OsFamily.current(),
     val arch: String = OsFamily.currentArch(),
     val launcherName: String = "Platypus Launcher",
@@ -74,6 +81,40 @@ object LaunchArguments {
     /** 占位符的两个边界；拆开写是为了绕开 Kotlin 的字符串模板语法。 */
     private const val PLACEHOLDER_OPEN = "$" + "{"
     private const val PLACEHOLDER_CLOSE = "}"
+
+    /**
+     * 「直接连接服务器」那条规则依赖的特性名。
+     *
+     * version json 里 `--quickPlayMultiplayer` 是包在
+     * `{"rules":[{"action":"allow","features":{"is_quick_play_multiplayer":true}}]}` 里的，
+     * 特性开关不打开这条参数根本不会出现——只填占位符是不够的。
+     */
+    const val QUICK_PLAY_MULTIPLAYER_FEATURE = "is_quick_play_multiplayer"
+
+    /** 直接连接时要打开的整套特性开关。 */
+    fun quickPlayFeatures(): Map<String, Boolean> = mapOf(QUICK_PLAY_MULTIPLAYER_FEATURE to true)
+
+    /**
+     * 这个版本 json 认不认 `--quickPlayMultiplayer`。
+     *
+     * 1.20 起 arguments.game 里才有这条规则，更早的版本 json 根本没有：
+     * 传了也不会被拼进命令行，游戏照样停在主菜单。界面必须提前说清楚，
+     * 不然用户点完「直接进」只会觉得按钮没反应。
+     */
+    fun supportsQuickPlay(version: VersionJson): Boolean {
+        val needle = PLACEHOLDER_OPEN + "quickPlayMultiplayer" + PLACEHOLDER_CLOSE
+        return version.arguments?.game.orEmpty().any { element ->
+            when (element) {
+                is JsonPrimitive -> element.isString && element.content.contains(needle)
+                is JsonObject -> when (val value = element["value"]) {
+                    is JsonPrimitive -> value.content.contains(needle)
+                    is JsonArray -> value.any { (it as? JsonPrimitive)?.content?.contains(needle) == true }
+                    else -> false
+                }
+                else -> false
+            }
+        }
+    }
 
     fun build(version: VersionJson, context: LaunchContext): LaunchCommand {
         val classpath = context.classpath.joinToString(context.classpathSeparator) { it.path }
@@ -225,7 +266,7 @@ object LaunchArguments {
         put("resolution_height", "480")
         put("quickPlayPath", "")
         put("quickPlaySingleplayer", "")
-        put("quickPlayMultiplayer", "")
+        put("quickPlayMultiplayer", context.quickPlayMultiplayer)
         put("quickPlayRealms", "")
     }
 

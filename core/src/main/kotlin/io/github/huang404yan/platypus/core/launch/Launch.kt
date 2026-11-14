@@ -10,6 +10,13 @@ data class LaunchRequest(
     val session: Session,
     val jvmArgs: List<String> = emptyList(),
     val gameArgs: List<String> = emptyList(),
+    /**
+     * 多人游戏「直接连接」的目标，形如 `192.168.1.10:54321`；空串 = 正常启动，停在主菜单。
+     *
+     * 对应游戏命令行里的 `--quickPlayMultiplayer`，1.20 起才有。桌面实现会顺手打开
+     * [LaunchArguments.QUICK_PLAY_MULTIPLAYER_FEATURE]，否则那条参数根本不会被拼进去。
+     */
+    val quickPlayServer: String = "",
 )
 
 sealed interface LaunchEvent {
