@@ -39,6 +39,9 @@ import io.github.huang404yan.platypus.core.instance.LoaderKind
 import io.github.huang404yan.platypus.core.instance.instanceKey
 import io.github.huang404yan.platypus.core.mods.InstanceMods
 import io.github.huang404yan.platypus.core.mods.InstanceModsSnapshot
+import io.github.huang404yan.platypus.core.mods.ModConflict
+import io.github.huang404yan.platypus.core.mods.ModConflictChecker
+import io.github.huang404yan.platypus.core.mods.ModConflictReport
 import io.github.huang404yan.platypus.core.mods.ModEntry
 import io.github.huang404yan.platypus.core.mods.ModFileOps
 import io.github.huang404yan.platypus.core.mods.ModInstallProgress
@@ -95,6 +98,12 @@ internal fun ModsPage() {
     // P2 的四件事，与桌面端一一对应：检查更新、更新单条、启用停用、删除
     var updates by remember { mutableStateOf<List<ModUpdateResult>>(emptyList()) }
     var checkingUpdates by remember { mutableStateOf(false) }
+
+    // 冲突检测：与桌面端同一份核心逻辑（ModConflictChecker），null = 还没查过、不显示卡片
+    var conflictReport by remember { mutableStateOf<ModConflictReport?>(null) }
+    var checkingConflicts by remember { mutableStateOf(false) }
+    var conflictProgress by remember { mutableStateOf("") }
+    var conflictError by remember { mutableStateOf("") }
     var updatingFile by remember { mutableStateOf("") }
     var opError by remember { mutableStateOf("") }
     var opNotice by remember { mutableStateOf("") }
@@ -152,6 +161,9 @@ internal fun ModsPage() {
         } finally {
             scanning = false
         }
+        // 文件集合变了，上一轮的冲突结论就过期了 —— 留着比没有更误导（与桌面端同一条规则）
+        conflictReport = null
+        conflictProgress = ""
     }
 
     suspend fun rescan() {
@@ -331,6 +343,41 @@ internal fun ModsPage() {
             opError = e.message ?: e.toString()
         } finally {
             checkingUpdates = false
+        }
+    }
+
+    /**
+     * 查冲突：读每个 jar 的作者声明（Modrinth 的 dependency_type = "incompatible"）。
+     *
+     * 与桌面端共用 [ModConflictChecker]，措辞也一样：只报「作者声明不兼容」，不下「你必崩」的结论。
+     */
+    suspend fun checkConflicts() {
+        val target = current ?: run {
+            conflictError = "先选一个实例。"
+            return
+        }
+        checkingConflicts = true
+        conflictError = ""
+        conflictProgress = ""
+        try {
+            val report = withContext(Dispatchers.IO) {
+                ModConflictChecker.check(ModScanner.modsDir(File(target.directory.trim().trim('"')))) { conflictProgress = it }
+            }
+            conflictReport = report
+            conflictProgress = when {
+                report.scanned == 0 -> "这个实例没有可查的 .jar。"
+                report.presentConflicts.isNotEmpty() ->
+                    "查出 " + report.presentConflicts.size + " 条已经装着的冲突，见下面的卡片。"
+                report.conflicts.isNotEmpty() -> "两个都装着的不兼容没发现；另有作者提到但没装的，列在卡片里。"
+                else -> "没查到作者声明的不兼容。"
+            }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            conflictReport = null
+            conflictError = e.message ?: e.toString()
+        } finally {
+            checkingConflicts = false
         }
     }
 
@@ -590,6 +637,11 @@ internal fun ModsPage() {
                         enabled = !checkingUpdates && !scanning,
                         contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
                     ) { Text(if (checkingUpdates) "检查中…" else "检查更新", style = MaterialTheme.typography.labelSmall) }
+                    OutlinedButton(
+                        onClick = { scope.launch { checkConflicts() } },
+                        enabled = !checkingConflicts && !scanning,
+                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                    ) { Text(if (checkingConflicts) "查冲突…" else "查冲突", style = MaterialTheme.typography.labelSmall) }
                 }
             }
         }
@@ -608,6 +660,24 @@ internal fun ModsPage() {
         }
         if (opNotice.isNotBlank()) {
             item { Text(opNotice, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+        }
+
+        if (conflictError.isNotBlank()) {
+            item { Text("查冲突失败：" + conflictError, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
+        } else if (conflictProgress.isNotBlank()) {
+            item { Text(conflictProgress, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+        }
+        val report = conflictReport
+        if (report != null) {
+            item {
+                ConflictCard(
+                    report = report,
+                    onDismiss = {
+                        conflictReport = null
+                        conflictProgress = ""
+                    },
+                )
+            }
         }
 
         val installed = snap?.let { it.scan.mods + it.scan.disabled }.orEmpty()
@@ -741,6 +811,85 @@ private fun InstalledModRow(
                 TextButton(onClick = { confirmDelete = false }) { Text("取消") }
             },
         )
+    }
+}
+
+/**
+ * 冲突卡片（手机）。
+ *
+ * 与桌面端同一套结构与措辞：先「现在就装着」的组合，再「作者提到但没装」的预防性提醒。
+ * 手机屏窄，条目一律单行，长文件名靠换行；不放「展开全部」—— 手机滚动本来就便宜，
+ * 有条就全列出来，少一个「点开才知道」的隐藏状态。
+ */
+@Composable
+private fun ConflictCard(report: ModConflictReport, onDismiss: () -> Unit) {
+    val present = report.presentConflicts
+    val potential = report.potentialConflicts
+
+    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
+        Column(Modifier.fillMaxWidth().padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text(
+                if (present.isEmpty()) "作者声明的模组冲突（没有两个都装着的）" else "模组冲突 · " + present.size + " 条已经装着",
+                style = MaterialTheme.typography.bodySmall,
+                fontWeight = FontWeight.SemiBold,
+                color = if (present.isEmpty()) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.error,
+            )
+            Text(
+                "来源是模组作者在 Modrinth 上写的「不兼容」声明，不是启动器猜的。功能重复的模组也会这么标，两个都装着不一定崩 —— 但作者这么说，出问题先从这里排查。",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+
+            present.forEach { conflict: ModConflict ->
+                Text(
+                    "· " + conflict.sourceTitle + "  ↔  " + conflict.otherLabel +
+                        if (conflict.mutual) "（双方都声明了）" else "",
+                    style = MaterialTheme.typography.labelSmall,
+                )
+                Text(
+                    "　都装在这个实例里：" + conflict.sourceFile +
+                        (conflict.otherFile?.let { " 与 " + it } ?: ""),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+
+            if (potential.isNotEmpty()) {
+                Text(
+                    "作者提到但不兼容的还有 " + potential.size + " 个项目（没装，别去装就行）：",
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                potential.forEach { conflict: ModConflict ->
+                    Text(
+                        "· " + conflict.sourceTitle + "  ✕  " + conflict.otherLabel,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+
+            if (report.failures.isNotEmpty()) {
+                Text(
+                    report.failures.size.toString() + " 个文件读不了，没参与比对：" + report.failures.take(3).joinToString("；"),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.error,
+                )
+            }
+            if (report.recognized < report.scanned) {
+                Text(
+                    "另有 " + (report.scanned - report.recognized) + " 个文件 Modrinth 不认识（自己改过、或不是从 Modrinth 下的），查不到它们的声明。",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("", modifier = Modifier.weight(1f))
+                TextButton(onClick = onDismiss) { Text("知道了") }
+            }
+        }
     }
 }
 
