@@ -1,5 +1,9 @@
 package io.github.huang404yan.platypus.desktop
 
+import io.github.huang404yan.platypus.core.auth.AccountAuth
+import io.github.huang404yan.platypus.core.auth.AccountRepository
+import io.github.huang404yan.platypus.core.auth.JsonAccountRepository
+import io.github.huang404yan.platypus.core.auth.MicrosoftAccountAuth
 import io.github.huang404yan.platypus.core.install.JsonServerRepository
 import io.github.huang404yan.platypus.core.install.ServerRepository
 import io.github.huang404yan.platypus.core.instance.InstanceRepository
@@ -31,6 +35,10 @@ class DesktopServices private constructor(
     override val settings: SettingsRepository,
     /** 服务端登记（与实例索引平级）。 */
     override val servers: ServerRepository,
+    /** 正版账号登记（同样与实例索引平级）。 */
+    override val accounts: AccountRepository,
+    /** 正版登录。 */
+    override val auth: AccountAuth,
 ) : LauncherBackend {
     companion object {
         /**
@@ -43,13 +51,32 @@ class DesktopServices private constructor(
          * @param instanceIndex 实例索引文件；null 时按 gameRoot 推导，gameRoot 也为 null 时
          *   退到用户目录下的 .platypus/instances.json（先能存下来，之后用户指了目录再迁移）。
          */
-        fun create(gameRoot: File?, instanceIndex: File?): DesktopServices = DesktopServices(
+        fun create(gameRoot: File?, instanceIndex: File?): DesktopServices {
+            // 账号仓库要被登录流程和界面共用一份：两边各 new 一个会让「刚登录的账号
+            // 没出现在列表里」这类问题变成偶发。
+            val accountRepository = JsonAccountRepository(defaultAccountIndex(gameRoot))
+            return assemble(gameRoot, instanceIndex, accountRepository)
+        }
+
+        private fun assemble(
+            gameRoot: File?,
+            instanceIndex: File?,
+            accountRepository: AccountRepository,
+        ): DesktopServices = DesktopServices(
             javaRuntimes = DesktopJavaRuntimeService(gameRoot = gameRoot),
             gameRuntime = DesktopGameRuntime(),
             instances = JsonInstanceRepository(instanceIndex ?: defaultInstanceIndex(gameRoot)),
             settings = JsonSettingsRepository(settingsFile(gameRoot)),
             servers = JsonServerRepository(defaultServerIndex(gameRoot)),
+            accounts = accountRepository,
+            auth = MicrosoftAccountAuth(repository = accountRepository),
         )
+
+        /** 账号索引与实例索引同层：有游戏目录时 <gameRoot>/platypus/accounts.json。 */
+        private fun defaultAccountIndex(gameRoot: File?): File {
+            if (gameRoot != null) return JsonAccountRepository.defaultIndexFile(gameRoot)
+            return JsonAccountRepository.defaultIndexFile(fallbackHome())
+        }
 
         /** 服务端索引与实例索引同层：有游戏目录时 <gameRoot>/platypus/servers.json。 */
         private fun defaultServerIndex(gameRoot: File?): File {

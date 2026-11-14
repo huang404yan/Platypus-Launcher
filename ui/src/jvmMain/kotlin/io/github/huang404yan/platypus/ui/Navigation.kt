@@ -55,6 +55,8 @@ val PAGE_SUB_TABS: Map<Page, List<SubTab>> = mapOf(
     ),
     Page.SETTINGS to listOf(
         SubTab("launch", "启动"),
+        // 账号紧跟「启动」：它决定「以谁的身份进游戏」，比目录和内存更靠前。
+        SubTab("account", "账号"),
         // Java 单独一项：它不属于「启动参数」，而是「往盘上装一份运行时」，
         // 和下载页那几项是同一类动作，只是入口挂在设置里（PCL 也是这么分的）。
         SubTab("java", "Java", refreshable = true),

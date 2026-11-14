@@ -1,5 +1,7 @@
 package io.github.huang404yan.platypus.ui
 
+import io.github.huang404yan.platypus.core.auth.AccountAuth
+import io.github.huang404yan.platypus.core.auth.AccountRepository
 import io.github.huang404yan.platypus.core.install.ServerRepository
 import io.github.huang404yan.platypus.core.instance.InstanceRepository
 import io.github.huang404yan.platypus.core.launch.GameRuntime
@@ -33,4 +35,19 @@ interface LauncherBackend {
      * 同样给默认 null：服务端不进实例列表，不给它也不影响其它页面。
      */
     val servers: ServerRepository? get() = null
+
+    /**
+     * 正版账号登记（只存 refresh_token 的那份）。
+     *
+     * 给默认 null：不登录也能玩，没有账号存储时「账号」页会明说这一点。
+     */
+    val accounts: AccountRepository? get() = null
+
+    /**
+     * 正版登录与会话。
+     *
+     * 与 [accounts] 分开是因为两件事的失败方式完全不同：仓库读不出来只影响列表，
+     * 登录失败要给用户看微软那边的原话。
+     */
+    val auth: AccountAuth? get() = null
 }

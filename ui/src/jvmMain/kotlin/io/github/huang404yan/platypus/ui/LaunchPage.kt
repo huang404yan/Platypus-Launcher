@@ -46,6 +46,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import io.github.huang404yan.platypus.core.auth.OfflineProfile
+import io.github.huang404yan.platypus.core.auth.StoredAccount
 import io.github.huang404yan.platypus.core.instance.Instance
 import io.github.huang404yan.platypus.core.instance.InstanceScanner
 import io.github.huang404yan.platypus.core.instance.ScanResult
@@ -69,6 +70,7 @@ import java.awt.datatransfer.StringSelection
 import java.io.File
 import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -120,6 +122,8 @@ fun LaunchPage(
     var username by remember { mutableStateOf("Dev") }
     // 上次从设置文件里读到的名字；启动时只有在用户改过名的情况下才回写，避免每次启动都写盘
     var savedUsername by remember { mutableStateOf("") }
+    // 设置里选中的正版账号；null = 离线模式。令牌不在这里，只有 UUID 与名字。
+    var activeAccount by remember { mutableStateOf<StoredAccount?>(null) }
     var phase by remember { mutableStateOf<LaunchPhase>(LaunchPhase.Idle) }
     var stageText by remember { mutableStateOf("") }
     // 启动阶段的假进度（准备版本文件 0.05 → 解压原生库 0.15 → 起进程 0.2）。
@@ -282,14 +286,38 @@ fun LaunchPage(
         handle = null
         startedAt = System.currentTimeMillis()
         phase = LaunchPhase.Starting
-        val request = LaunchRequest(
-            instance = instance,
-            java = java,
-            session = OfflineProfile.session(username.trim().ifBlank { "Dev" }),
-            quickPlayServer = quickTarget,
-        )
+        val offlineSession = OfflineProfile.session(username.trim().ifBlank { "Dev" })
+        val account = activeAccount
         scope.launch {
             try {
+                // 正版账号每次启动现换一份会话：MC 令牌两小时就过期，缓存下来十个九个是废的。
+                // 换不到就停在这儿说清楚 —— 静默退回离线会让人以为自己登录着，
+                // 等进了服务器才发现是个离线号，那时候已经说不清了。
+                val auth = backend.auth
+                val session = if (account != null && auth != null) {
+                    stageText = "正在验证正版账号"
+                    stageFraction = 0f
+                    try {
+                        withContext(Dispatchers.IO) { auth.sessionFor(account) }
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (e: Exception) {
+                        phase = LaunchPhase.Failed(
+                            "正版账号验证失败：" + (e.message ?: e.javaClass.simpleName) +
+                                " 去「设置 → 账号」重新登录，或者在那里改用离线模式。",
+                        )
+                        stageText = ""
+                        return@launch
+                    }
+                } else {
+                    offlineSession
+                }
+                val request = LaunchRequest(
+                    instance = instance,
+                    java = java,
+                    session = session,
+                    quickPlayServer = quickTarget,
+                )
                 val started = backend.gameRuntime.launch(request) { event ->
                     when (event) {
                         is LaunchEvent.Stage -> {
@@ -366,6 +394,15 @@ fun LaunchPage(
                     rootText = stored.defaultGameRoot
                 }
                 if (selected == null) memoryText = stored.defaultMemoryMb.toString()
+                val wanted = stored.activeAccountUuid
+                if (wanted.isNotBlank()) {
+                    val accounts = backend.accounts
+                    if (accounts != null) {
+                        activeAccount = withContext(Dispatchers.IO) {
+                            runCatching { accounts.list() }.getOrNull().orEmpty()
+                        }.firstOrNull { it.key == wanted.trim().lowercase() }
+                    }
+                }
             }
         }
         if (rootText.isNotBlank()) rescan()
@@ -399,6 +436,7 @@ fun LaunchPage(
             stageText = stageText,
             username = username,
             onUsernameChange = { username = it },
+            accountName = activeAccount?.name.orEmpty(),
             memoryText = memoryText,
             onMemoryChange = { memoryText = it },
             memoryNotice = memoryNotice,
@@ -944,6 +982,8 @@ private fun LaunchSidePanel(
     stageText: String,
     username: String,
     onUsernameChange: (String) -> Unit,
+    /** 正版账号名；空串 = 离线模式。正版进游戏时用户名由会话决定，输入框就没意义了。 */
+    accountName: String,
     memoryText: String,
     onMemoryChange: (String) -> Unit,
     memoryNotice: String,
@@ -998,15 +1038,20 @@ private fun LaunchSidePanel(
                     }
                 }
             }
-            OutlinedTextField(
-                value = username,
-                onValueChange = onUsernameChange,
-                modifier = Modifier.fillMaxWidth(),
-                label = { Text("离线用户名") },
-                singleLine = true,
-                enabled = !busy,
-                supportingText = { Text("点「启动」会记住这个名字。") },
-            )
+            if (accountName.isBlank()) {
+                OutlinedTextField(
+                    value = username,
+                    onValueChange = onUsernameChange,
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("离线用户名") },
+                    singleLine = true,
+                    enabled = !busy,
+                    supportingText = { Text("点「启动」会记住这个名字。") },
+                )
+            } else {
+                // 正版模式下列这一行而不是输入框：名字来自微软账号，改不动也不该改。
+                SectionHint("正版账号：" + accountName + "（要换去「设置 → 账号」）")
+            }
             Row(
                 Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
