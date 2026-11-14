@@ -9,6 +9,18 @@
 
 两边各自再按平台分：`android/`、`windows/`、`linux/`。
 
+## 孵化版就是测试版，也就是开源版
+
+这条线**不是**「先发个阉割包探路，完整功能留给正式版」。孵化版的功能集合与正式版是同一份源码，
+差别只有三处：版本号带 `-preview.N`、安装包里不带任何人的私有凭据、发布时标 Pre-release。
+换言之——
+
+- **功能上它就是完整版**：这一版做了什么，孵化版里就有什么，不存在「这个功能正式版才有」。
+- **作为测试版发布**：勾 Pre-release、不标 Latest，用户看到的风险提示与之相符。
+- **源码完全公开**：与仓库主干同源，打的 tag 指向同一个 commit。
+- **不含私有凭据**：见下面的「不放什么」。安装包发出的那一刻，它必须能被任何人拿去审查、
+  自己重新构建，并且不欠任何人一份账号或密钥。
+
 ## 孵化版不占正式版版本号
 
 `0.x-preview.N` 与 `1.0.0` 是两条独立的号段，**互不占用**：
@@ -72,3 +84,26 @@ set PLATYPUS_WIX_DIR=D:\ruanjian\kaifa\wix314                                   
 - 签名私钥、`keystore`、`*.jks` —— 永远不进仓库
 - 构建中间产物（`build/`、`.gradle/`）—— 已在 `.gitignore`
 - 调试版 —— 只放对外可安装的包
+
+### 测试版不带别人的凭据，也不带任何隐私
+
+孵化版是公开分发的包，下面是硬约束，出包前逐条过一遍：
+
+- **不内置第三方 Client ID**。OAuth 的 `client_id` 不是密钥，但内置一个人家注册的 ID，
+  等于让所有下载者共用同一份配额、共享同一个被随时关闭的风险。安装包里
+  `MicrosoftEndpoints.DEFAULT_CLIENT_ID` 必须是空串，正版登录由用户自己注册
+  （步骤见 `docs/41-zishen-client-id.md`，界面「设置 → 账号」第一张卡里也有一份缩写）。
+- **不带任何隐私内容**：真实账号 / UUID / refresh_token、本机路径与用户名、
+  诊断页导出的现场、日志文件、`settings.json`、`accounts.json`、`.minecraft` 里的任何东西。
+- **不留申请指引的缺口**：Release 说明必须有一段讲「正版登录要先自己填一个应用 ID」，
+  并指向 `docs/41-zishen-client-id.md`。指引只写在仓库里不算 —— 用户拿到的是附件。
+
+出包前自检（改完代码到打包之间跑一次）：
+
+```bash
+# 排除 src/test：单测里那串 ID 只是「形状合法的样本」，不是真要用的凭据
+grep -rn "04b07795\|1950a258" --include=*.kt --exclude-dir=test .   # 应无输出
+grep -rn "C:\\Users\\|/home/[a-z]" --include=*.kt --include=*.json .   # 应无输出
+grep -n "DEFAULT_CLIENT_ID" core/src/main/kotlin/io/github/huang404yan/platypus/core/auth/MicrosoftAuth.kt
+# 最后一条应打印：const val DEFAULT_CLIENT_ID = ""
+```

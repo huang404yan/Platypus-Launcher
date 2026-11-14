@@ -4,6 +4,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
+import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 
 /**
@@ -183,7 +184,55 @@ class MicrosoftAuthTest {
     fun ClientID不被接受时提示去设置里换() {
         val text = MicrosoftAuth.describeOAuthError("unauthorized_client", "")
         assertTrue(text.contains("Client ID"), text)
-        assertTrue(text.contains("设置页"), text)
+        // 文案要指到具体位置（设置 → 账号），只说「去设置里」等于没说。
+        assertTrue(text.contains("设置 → 账号") || text.contains("设置页"), text)
+    }
+
+    @Test
+    fun 没填ClientID时说的是去申请而不是微软的错() {
+        val problem = MicrosoftAuth.clientIdProblem("")
+        assertNotNull(problem)
+        assertTrue(problem.contains("Client ID"), problem)
+        assertTrue(problem.contains("申请") || problem.contains("说明"), problem)
+    }
+
+    @Test
+    fun ClientID的空白与引号会被抹掉() {
+        assertEquals(
+            "12345678-1234-1234-1234-123456789abc",
+            MicrosoftAuth.normalizeClientId("  \"12345678-1234-1234-1234-123456789abc\"  "),
+        )
+    }
+
+    @Test
+    fun 粘错的ClientID会被挡在发请求之前() {
+        // 少一位、少一个横线、混进非十六进制字符，三种都算形状不对。
+        val bad = listOf(
+            "12345678-1234-1234-1234-123456789ab",
+            "123456781234-1234-1234-123456789abc",
+            "12345678-1234-1234-1234-123456789zzz",
+            "hello world",
+        )
+        bad.forEach { id ->
+            val problem = MicrosoftAuth.clientIdProblem(id)
+            assertNotNull(problem, id)
+            assertTrue(problem.contains("36") || problem.contains("不像"), problem)
+        }
+    }
+
+    @Test
+    fun 形状对的ClientID能通过并要求归一化后再用() {
+        assertEquals(null, MicrosoftAuth.clientIdProblem("04b07795-8ddb-461a-bbee-02f9e1bf7b46"))
+        assertEquals(
+            "04b07795-8ddb-461a-bbee-02f9e1bf7b46",
+            MicrosoftAuth.requireClientId(" 04b07795-8ddb-461a-bbee-02f9e1bf7b46 "),
+        )
+    }
+
+    @Test
+    fun 空ClientID在require这一步就抛而不是返回空串() {
+        val error = assertFailsWith<MicrosoftAuthException> { MicrosoftAuth.requireClientId("") }
+        assertTrue(error.message.orEmpty().contains("Client ID"), error.message.orEmpty())
     }
 
     @Test

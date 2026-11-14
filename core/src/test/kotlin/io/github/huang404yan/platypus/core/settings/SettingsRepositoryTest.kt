@@ -106,6 +106,39 @@ class SettingsRepositoryTest {
     }
 
     @Test
+    fun clientIdRoundTripsAndIsTrimmed() = runBlocking {
+        val dir = tempDir()
+        try {
+            val repo = JsonSettingsRepository(JsonSettingsRepository.defaultFile(dir))
+            // 用户是从 Azure 门户复制的，前后很容易带空格或引号。
+            val saved = repo.save(
+                LauncherSettings(microsoftClientId = "  \"12345678-1234-1234-1234-123456789abc\" "),
+            )
+            assertEquals("12345678-1234-1234-1234-123456789abc", saved.microsoftClientId)
+
+            val reloaded = JsonSettingsRepository(JsonSettingsRepository.defaultFile(dir)).load()
+            assertEquals("12345678-1234-1234-1234-123456789abc", reloaded.microsoftClientId)
+        } finally {
+            dir.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun oldSettingsFileWithoutClientIdStillLoads() = runBlocking {
+        val dir = tempDir()
+        try {
+            val file = JsonSettingsRepository.defaultFile(dir)
+            file.parentFile.mkdirs()
+            // preview.9 之前的文件没有这个字段，读出来必须是空串而不是抛异常。
+            file.writeText("""{"offlineUsername":"Notch","defaultMemoryMb":4096}""", Charsets.UTF_8)
+            val settings = JsonSettingsRepository(file).load()
+            assertEquals("", settings.microsoftClientId)
+        } finally {
+            dir.deleteRecursively()
+        }
+    }
+
+    @Test
     fun defaultFileLivesNextToInstancesIndex() {
         val dir = tempDir()
         try {

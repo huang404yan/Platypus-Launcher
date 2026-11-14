@@ -33,7 +33,9 @@ class MicrosoftAuthClient(
      * 拿设备码。这一步不需要任何凭据，调用完就该把 [DeviceCodeGrant.userCode] 显示给用户。
      */
     suspend fun requestDeviceCode(clientId: String = MicrosoftEndpoints.DEFAULT_CLIENT_ID): DeviceCodeGrant {
-        val body = postForm(MicrosoftEndpoints.DEVICE_CODE_URL, MicrosoftAuth.deviceCodeForm(clientId))
+        // 空 ID 在本地就挡掉：发出去只会换回一个 AADSTS700016，用户看不懂。
+        val resolved = MicrosoftAuth.requireClientId(clientId)
+        val body = postForm(MicrosoftEndpoints.DEVICE_CODE_URL, MicrosoftAuth.deviceCodeForm(resolved))
         return MicrosoftAuth.parseDeviceCode(body)
     }
 
@@ -50,6 +52,8 @@ class MicrosoftAuthClient(
         clientId: String = MicrosoftEndpoints.DEFAULT_CLIENT_ID,
         onTick: (remainingSeconds: Int) -> Unit = {},
     ): OAuthTokens {
+        // 轮询用的 ID 必须与拿设备码那一步是同一个，否则微软会说码对不上。
+        val resolved = MicrosoftAuth.requireClientId(clientId)
         val deadline = System.currentTimeMillis() + grant.expiresInSeconds * 1000L
         var interval = grant.intervalSeconds.coerceAtLeast(1).toLong()
         while (true) {
@@ -62,7 +66,7 @@ class MicrosoftAuthClient(
             delay(interval * 1000L)
 
             val outcome = try {
-                val body = postForm(MicrosoftEndpoints.TOKEN_URL, MicrosoftAuth.pollForm(clientId, grant.deviceCode))
+                val body = postForm(MicrosoftEndpoints.TOKEN_URL, MicrosoftAuth.pollForm(resolved, grant.deviceCode))
                 PollOutcome.Success(MicrosoftAuth.parseTokens(body))
             } catch (e: HttpFailure) {
                 val code = e.oauthError
@@ -94,7 +98,9 @@ class MicrosoftAuthClient(
      * 空的 refresh_token 要由调用方保留旧值 —— 这里不替它做主。
      */
     suspend fun refresh(refreshToken: String, clientId: String = MicrosoftEndpoints.DEFAULT_CLIENT_ID): OAuthTokens {
-        val body = postForm(MicrosoftEndpoints.TOKEN_URL, MicrosoftAuth.refreshForm(clientId, refreshToken))
+        // 刷新必须用登录时那个 ID：微软把 refresh_token 与应用绑定，换了 ID 一律 invalid_grant。
+        val resolved = MicrosoftAuth.requireClientId(clientId)
+        val body = postForm(MicrosoftEndpoints.TOKEN_URL, MicrosoftAuth.refreshForm(resolved, refreshToken))
         return MicrosoftAuth.parseTokens(body)
     }
 

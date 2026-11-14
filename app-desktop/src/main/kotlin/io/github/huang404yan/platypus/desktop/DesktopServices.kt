@@ -62,15 +62,24 @@ class DesktopServices private constructor(
             gameRoot: File?,
             instanceIndex: File?,
             accountRepository: AccountRepository,
-        ): DesktopServices = DesktopServices(
-            javaRuntimes = DesktopJavaRuntimeService(gameRoot = gameRoot),
-            gameRuntime = DesktopGameRuntime(),
-            instances = JsonInstanceRepository(instanceIndex ?: defaultInstanceIndex(gameRoot)),
-            settings = JsonSettingsRepository(settingsFile(gameRoot)),
-            servers = JsonServerRepository(defaultServerIndex(gameRoot)),
-            accounts = accountRepository,
-            auth = MicrosoftAccountAuth(repository = accountRepository),
-        )
+        ): DesktopServices {
+            // 设置仓库与登录共用同一份：Client ID 存在设置里，登录时现读，
+            // 两个实例指向同一个文件也问题不大，但共用一份能少一次「为什么刚填的没生效」。
+            val settingsRepository = JsonSettingsRepository(settingsFile(gameRoot))
+            return DesktopServices(
+                javaRuntimes = DesktopJavaRuntimeService(gameRoot = gameRoot),
+                gameRuntime = DesktopGameRuntime(),
+                instances = JsonInstanceRepository(instanceIndex ?: defaultInstanceIndex(gameRoot)),
+                settings = settingsRepository,
+                servers = JsonServerRepository(defaultServerIndex(gameRoot)),
+                accounts = accountRepository,
+                // Client ID 从设置里现读：用户注册完填进去，下一次点登录就该生效。
+                auth = MicrosoftAccountAuth(
+                    repository = accountRepository,
+                    clientIdProvider = { settingsRepository.load().microsoftClientId },
+                ),
+            )
+        }
 
         /** 账号索引与实例索引同层：有游戏目录时 <gameRoot>/platypus/accounts.json。 */
         private fun defaultAccountIndex(gameRoot: File?): File {

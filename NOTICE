@@ -27,8 +27,10 @@ Copyright 2026 Platypus contributors
   MCBBS v2 整合包格式    社区约定（manifest.json + modpack.json + overrides）
   离线登录 UUID 规则     OfflinePlayer:<名字> 的 MD5 转 v3 UUID
   Microsoft 账号登录      OAuth 2.0 设备码授权 + Xbox Live / XSTS / Minecraft Services 的公开
-                          REST 接口；内置的 Client ID 是公开文档里被各类命令行工具引用的
-                          公共客户端，不归本项目所有，也不代表微软对本项目的授权
+                          REST 接口。安装包内不内置任何 Client ID：OAuth 的 client_id 是
+                          应用注册者名下的配额，随包分发等于让所有下载者共用一个别人的注册，
+                          所以由使用者自己申请并填进本机设置（docs/41）。这与微软是否授权
+                          本项目无关，本项目与 Microsoft 无任何关联。
 
 == 设计参考（未使用其代码） ==
 

@@ -15,8 +15,8 @@ android {
         applicationId = "io.github.huang404yan.platypus.launcher.preview"
         minSdk = 26
         targetSdk = 37
-        versionCode = 80008
-        versionName = "0.8.0-preview.8"
+        versionCode = 80010
+        versionName = "0.8.0-preview.10"
 
         // 通道由版本号决定：0.x-preview.N 是孵化版，1.0.0 起是正式版。
         // 名字与包名都跟着它走，发正式版时忘了改包名会在这里直接构建失败。

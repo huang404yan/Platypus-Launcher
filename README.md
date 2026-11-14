@@ -26,6 +26,11 @@
 
 图标：正式版用成年全身版，孵化版用幼体半壳版。仓库里只留一张总图（`docs/logo.png`），各平台成品已接进源码（Android 自适应图标、桌面窗口图标、jpackage 安装包图标）。
 
+> **孵化版 = 测试版 = 开源版。** 它不是「先发个阉割包探路」：功能集合与正式版同源同量，
+> 差别只有三处 —— 版本号带 `-preview.N`、安装包里不带任何私有凭据（含 OAuth 的 Client ID，
+> 正版登录要用自己注册的一个，见 `docs/41-zishen-client-id.md`）、发布时标 Pre-release。
+> 规则写在 `releases/README.md`。
+
 > 不是 PCL / HMCL / Prism 的分支。这些项目只作为产品设计参考，代码一行不抄（见 `CONTRIBUTING.md`）。
 
 ## 技术栈
@@ -102,7 +107,8 @@ Windows 下也可以用 `gradlew.bat`。首次构建会下载约 300 MB 依赖�
 - `docs/37-zuolan-shujubao-geli-yu-duanxucan.md`：**启动页左栏化、数据包与服务端、版本隔离开关、安装器中断续跑**（54 高大按钮与目录为什么留右栏、`loaders=["datapack"]` 的实测理由、插件为什么不做、`isolated` 推翻 `docs/22` 的来龙去脉、`InstallerProcess` 的杀进程时机与两个易错点）。**其中「服务端只做原版」「启动浮层没做」两条已被 `docs/38` 推翻**
 - `docs/38-qidong-fuceng-yu-fuwuduan.md`：**启动浮层、服务端加载器与服务端登记**（进度只准前进的理由、取消为什么不砍协程、Paper 老 API 410 与只给 sha256、Fabric 的 server jar 必须带 installer 版本、Forge 的 Java 为什么让用户挑、服务端为什么单开一套登记、为什么没有「启动服务端」按钮）
 - `docs/39-java-xiazai.md`：**两端下载 Java**（为什么要 `ensure` 与 `download` 两套语义、`minecraft-java-exe` 与 gamma-snapshot 为什么要丢、安卓 JRE 的 universal + bin 两包结构、gh-proxy 的实测速率、tar 自己解析时的路径穿越与可执行位、为什么安卓只能下不能启动）
-- `docs/40-zhengban-denglu.md`：**微软正版登录**（为什么用设备码而不是本地回调端口、七步链路与 v1/v2 不能混用、RpsTicket 的 `d=` 规则、`entitlements/mcstore` 为什么必须查、四个服务各说各话的报错怎么翻、只存 refresh_token 与它的轮换、换不到会话时为什么停下来报错、内置 Client ID 是别人的）
+- `docs/40-zhengban-denglu.md`：**微软正版登录**（为什么用设备码而不是本地回调端口、七步链路与 v1/v2 不能混用、RpsTicket 的 `d=` 规则、`entitlements/mcstore` 为什么必须查、四个服务各说各话的报错怎么翻、只存 refresh_token 与它的轮换、换不到会话时为什么停下来报错、**preview.10 起内置 Client ID 已改成空串**）
+- `docs/41-zishen-client-id.md`：**自己申请一个 Azure 应用 ID**（为什么不再内置：配额共享、随时被收紧、仓库公开就能被抄走；门户四步与每步为什么；`XboxLive.signin offline_access` 之外什么都不要；四条报错对照；这个 ID 不是密钥；测试版的发布约定）
 
 ## 下载
 
@@ -121,7 +127,7 @@ releases/preview/{android,windows,linux}/   Platypus Preview 孵化版
 
 ## 状态
 
-M0（骨架）+ M1（实例扫描）+ M2（下载器）+ M3（**Windows 一键装闭环**）+ M4（**整合包导入**）已完成，当前版本 **0.8.0-preview.9**（孵化线）。
+M0（骨架）+ M1（实例扫描）+ M2（下载器）+ M3（**Windows 一键装闭环**）+ M4（**整合包导入**）已完成，当前版本 **0.8.0-preview.10**（孵化线）。
 
 **Windows 端已经能双击玩起来**：选版本 → 下载（客户端 jar / libraries / assets）→ 缺 Java 自动从 Mojang 官方运行时清单补 → 登记成实例 → 启动进主菜单，全程不需要人替启动器干活。实例内存可在启动页改（512–32768 MB）。
 
@@ -131,7 +137,9 @@ M0（骨架）+ M1（实例扫描）+ M2（下载器）+ M3（**Windows 一键�
 
 **Android 端仍未在真机跑过**：这一批新页面（模组、光影资源包、服务端、关于页致谢）和原有的下载页、诊断页一样，验证止于「编译通过 + APK 的 dex 里有这些类」，没有一份真机截图或日志。
 
-**能登录正版了**：设置页新增「账号」二级项。点「用微软账号登录」→ 界面给出一个八位短码 → 手机或浏览器打开 `microsoft.com/link` 输码 → 这边轮询到结果自动继续，全过程不用起本地回调端口（防火墙、端口占用、浏览器关联都不碰）。登录成功后本地只留一枚 `refresh_token`，存在 `<游戏目录>/platypus/accounts.json`，**那个文件等价于账号密码**。启动游戏时每次现换一份会话（MC 令牌两小时就过期，缓存没意义）；换不到就停下来把原因说清楚，不静默退回离线 —— 静默退回会让人以为自己登录着，等进了服务器才发现是个离线号。当前是正版账号时，启动页侧栏不再显示「离线用户名」输入框（`docs/40`）。
+**能登录正版了，但 Client ID 要自己申请**：设置页新增「账号」二级项。点「用微软账号登录」→ 界面给出一个八位短码 → 手机或浏览器打开 `microsoft.com/link` 输码 → 这边轮询到结果自动继续，全过程不用起本地回调端口（防火墙、端口占用、浏览器关联都不碰）。登录成功后本地只留一枚 `refresh_token`，存在 `<游戏目录>/platypus/accounts.json`，**那个文件等价于账号密码**。启动游戏时每次现换一份会话（MC 令牌两小时就过期，缓存没意义）；换不到就停下来把原因说清楚，不静默退回离线 —— 静默退回会让人以为自己登录着，等进了服务器才发现是个离线号。当前是正版账号时，启动页侧栏不再显示「离线用户名」输入框（`docs/40`）。
+
+**安装包里不内置 Client ID**：微软不发放通用客户端 ID，任何随包发出的 ID 都等于让所有下载者共用一份别人名下的应用注册（配额共享、随时可能被关闭、仓库公开后谁都能抄走）。所以登录流程的第一步是「填一个自己的应用 ID」——「设置 → 账号」第一张卡里有申请步骤，「打开 Azure 门户」按钮直接跳到对应的门户页面，填完点「保存 ID」立刻生效（Client ID 是每次登录与刷新时现读设置的，不用重启）。三分钟一次，之后一直用。详见 `docs/41-zishen-client-id.md`。
 
 设置已经能存住：离线用户名、默认游戏目录、新实例默认内存、当前用哪个账号，落在 `<游戏目录>/platypus/settings.json`，关掉再打开还在（`docs/13`）。
 
@@ -141,7 +149,7 @@ M0（骨架）+ M1（实例扫描）+ M2（下载器）+ M3（**Windows 一键�
 
 **下载断点续传**：先写 `<文件>.part`，校验通过才转正；`.part` 有内容就发 `Range` 接着下，断网不清半成品，下次自动接上。进度条会额外显示「其中 N 个接着上次下（省了 M MB）」（`docs/14`）。
 
-单测 **616 例全过**（53 个测试类，`./gradlew :core:test :ui:jvmTest`；`ui` 从这一版起有 `jvmTest` 源集，格式化函数与导航常量也进单测了）。另有十二个无头冒烟任务（`e2eInstall` / `settingsSmoke` / `instanceFlowSmoke` / `resumeSmoke` / `deleteSmoke` / `fabricE2e` / `modpackE2e` / `forgeE2e` / `neoForgeE2e` / `modsE2e` / `modUpdateE2e` / `isolationSmoke`），走的是界面按钮同一批函数；`resumeSmoke` / `fabricE2e` / `modpackE2e` / `forgeE2e` / `neoForgeE2e` / `modsE2e` 需要联网，分别在空目录真装 Fabric、真跑 Forge 与 NeoForge 官方安装器、真从 Modrinth 下模组、真把一个 `.mrpack` 从解析装到进主菜单；`deleteSmoke` 在 `dist/_delete-smoke` 里全程造假数据，不碰真实 `.minecraft`。
+单测 **623 例全过**（53 个测试类，`./gradlew :core:test :ui:jvmTest`；`ui` 从这一版起有 `jvmTest` 源集，格式化函数与导航常量也进单测了）。另有十二个无头冒烟任务（`e2eInstall` / `settingsSmoke` / `instanceFlowSmoke` / `resumeSmoke` / `deleteSmoke` / `fabricE2e` / `modpackE2e` / `forgeE2e` / `neoForgeE2e` / `modsE2e` / `modUpdateE2e` / `isolationSmoke`），走的是界面按钮同一批函数；`resumeSmoke` / `fabricE2e` / `modpackE2e` / `forgeE2e` / `neoForgeE2e` / `modsE2e` 需要联网，分别在空目录真装 Fabric、真跑 Forge 与 NeoForge 官方安装器、真从 Modrinth 下模组、真把一个 `.mrpack` 从解析装到进主菜单；`deleteSmoke` 在 `dist/_delete-smoke` 里全程造假数据，不碰真实 `.minecraft`。
 
 **能装 Fabric 了**：下载页勾「顺带装 Fabric」→ 拉 meta.fabricmc.net 的 loader 列表（默认落在最新 stable）→ 装 profile json（只改 `id`，保留 `inheritsFrom`）→ 按 maven 坐标补全 8 个库的地址并下载 → 登记成 `1.20.1-fabric-0.20.1` 这样的实例。实测空目录全流程 4 分 29 秒进主菜单，日志首行 `Loading Minecraft 1.20.1 with Fabric Loader 0.20.1`（`docs/15`）。
 
