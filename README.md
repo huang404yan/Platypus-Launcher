@@ -100,7 +100,8 @@ Windows 下也可以用 `gradlew.bat`。首次构建会下载约 300 MB 依赖�
 - `docs/30-mods-chongtu.md`：**模组冲突检测**（Modrinth 的 `dependency_type=incompatible`、为什么用 sha1 反查而不是读 modId、双向声明合成一条、`present` 为什么定义为「对面文件真在」、措辞只能写「作者声明」）
 - `docs/31-zhenghebao-yuancheng.md`：**远程整合包**（只补「取包」这一段、`project_type=modpack` 的 facet、只留 `.mrpack` 但不硬排除 server 包、缓存落 `%TEMP%` 的理由、远程与本地共用同一条导入流水线）
 - `docs/34-jie-mian-baohuo.md`：**桌面端下载 / 导入跨页保活**（切页会销毁页面、`rememberCoroutineScope` 随之取消、进程级 runner 与 `StateFlow`、幂等与速度采样两个坑、取消的三档语义）
-- `docs/33-lianji-zhilian.md`：**联机页「直接进」**（用官方 `--quickPlayMultiplayer` 而不是自己实现协议栈、特性开关不打开参数根本不会出现、版本不支持时抛错而不是静默停主菜单、地址为什么存在 App 层）
+- `docs/33-lianji-zhilian.md`：**联机页「直接进」**（用官方 `--quickPlayMultiplayer` 而不是自己实现协议栈、特性开关不打开参数根本不会出现、地址为什么存在 App 层。**原文「版本不支持时抛错」已被 `docs/43` 推翻**）
+- `docs/43-zhilian-jiangji.md`：**直连在 1.19 及更早版本的降级**（两条路的效果等价、参照 PCL 但把判定换成「json 有没有那条规则」、五种地址形态与八种坏输入、`--server` 为什么排在用户额外参数之前）
 - `docs/32-daoru-hedui.md`：**导入后核对磁盘**（为什么要「再看一眼」而不是信下载器、先比大小必要时才算 sha1、失败不抛而是收集成清单、取消要显示 `Canceled` 而不是停在 `Running`）
 - `docs/35-jiemian-ke-yongxing.md`：**界面可用性**（窗口默认尺寸与最小尺寸、实例页为什么整页滚动而不是「固定头 + 权重列表」、用 Swing `JFileChooser` 而不是 AWT `FileDialog`、下载页状态条、中文搜索与不引外部词库的理由）
 - `docs/36-xinxi-jiagou-yu-zhixie.md`：**信息架构重排与开源致谢**（左栏收成六项、下载下五个二级项、刷新按钮挂导航项、整合包独立成页、致谢四分类与「使用了代码」为空的意义）
@@ -152,7 +153,7 @@ M0（骨架）+ M1（实例扫描）+ M2（下载器）+ M3（**Windows 一键�
 
 **下载断点续传**：先写 `<文件>.part`，校验通过才转正；`.part` 有内容就发 `Range` 接着下，断网不清半成品，下次自动接上。进度条会额外显示「其中 N 个接着上次下（省了 M MB）」（`docs/14`）。
 
-单测 **635 例全过**（54 个测试类，`./gradlew :core:test :ui:jvmTest`；`ui` 从这一版起有 `jvmTest` 源集，格式化函数与导航常量也进单测了）。另有十二个无头冒烟任务（`e2eInstall` / `settingsSmoke` / `instanceFlowSmoke` / `resumeSmoke` / `deleteSmoke` / `fabricE2e` / `modpackE2e` / `forgeE2e` / `neoForgeE2e` / `modsE2e` / `modUpdateE2e` / `isolationSmoke`），走的是界面按钮同一批函数；`resumeSmoke` / `fabricE2e` / `modpackE2e` / `forgeE2e` / `neoForgeE2e` / `modsE2e` 需要联网，分别在空目录真装 Fabric、真跑 Forge 与 NeoForge 官方安装器、真从 Modrinth 下模组、真把一个 `.mrpack` 从解析装到进主菜单；`deleteSmoke` 在 `dist/_delete-smoke` 里全程造假数据，不碰真实 `.minecraft`。
+单测 **644 例全过**（55 个测试类，`./gradlew :core:test :ui:jvmTest`；`ui` 从这一版起有 `jvmTest` 源集，格式化函数与导航常量也进单测了）。另有十二个无头冒烟任务（`e2eInstall` / `settingsSmoke` / `instanceFlowSmoke` / `resumeSmoke` / `deleteSmoke` / `fabricE2e` / `modpackE2e` / `forgeE2e` / `neoForgeE2e` / `modsE2e` / `modUpdateE2e` / `isolationSmoke`），走的是界面按钮同一批函数；`resumeSmoke` / `fabricE2e` / `modpackE2e` / `forgeE2e` / `neoForgeE2e` / `modsE2e` 需要联网，分别在空目录真装 Fabric、真跑 Forge 与 NeoForge 官方安装器、真从 Modrinth 下模组、真把一个 `.mrpack` 从解析装到进主菜单；`deleteSmoke` 在 `dist/_delete-smoke` 里全程造假数据，不碰真实 `.minecraft`。
 
 **能装 Fabric 了**：下载页勾「顺带装 Fabric」→ 拉 meta.fabricmc.net 的 loader 列表（默认落在最新 stable）→ 装 profile json（只改 `id`，保留 `inheritsFrom`）→ 按 maven 坐标补全 8 个库的地址并下载 → 登记成 `1.20.1-fabric-0.20.1` 这样的实例。实测空目录全流程 4 分 29 秒进主菜单，日志首行 `Loading Minecraft 1.20.1 with Fabric Loader 0.20.1`（`docs/15`）。
 
@@ -182,7 +183,7 @@ M0（骨架）+ M1（实例扫描）+ M2（下载器）+ M3（**Windows 一键�
 
 **光影和资源包也能装了**：左侧导航多一项「光影资源包」，下面分「光影」「资源包」两个二级页。已装的从 `shaderpacks/` 与 `resourcepacks/` 扫出来，勾选框就是启停（改文件名 `.zip` ↔ `.zip.disabled`），删除要二次确认；文件夹形态的包明确拒绝停用——对目录改名游戏照样认，假装停用只会让人困惑。搜装走 Modrinth：光影用 `loaders=["iris","optifine"]`、资源包用 `["minecraft"]`，都不带 categories facet。实测搜 `complementary` 装进 `shaderpacks/`，落盘 `ComplementaryReimagined_r5.9.3.zip` 553 397 B，已装列表同时列出旧的文件夹形态包并标「· 文件夹」。
 
-**联机页**：扫描局域网广播（`224.0.2.60:4445`，读 `[MOTD]`/`[AD]`）列出同网段的世界，也能手动解析 `host:port`。每个世界后面有「直接进」：用它带的地址拼出官方的 `--quickPlayMultiplayer` 参数启动游戏，跳过主菜单直接进那个世界——走的是游戏自己的连接流程，皮肤、会话、模组一概不少。1.20 之前的版本文件里没有这条参数，界面会提前标红并说明换实例（`docs/33-lianji-zhilian.md`）。
+**联机页**：扫描局域网广播（`224.0.2.60:4445`，读 `[MOTD]`/`[AD]`）列出同网段的世界，也能手动解析 `host:port`。每个世界后面有「直接进」：1.20+ 拼官方的 `--quickPlayMultiplayer`，1.19 及更早自动退回 `--server` + `--port`，两条都跳过主菜单直接进那个世界——走的是游戏自己的连接流程，皮肤、会话、模组一概不少（`docs/33-lianji-zhilian.md`、`docs/43-zhilian-jiangji.md`）。
 
 联机页还多一段「让朋友连到你」：填游戏里「对局域网开放」给的端口，下面按地址种类列出本机的「地址:端口」（局域网 / 公网 IPv6 / 其它），一条一个复制按钮，并写清每条能用在什么场合。跨网络真正能连的两条路是「双方都有公网 IPv6」和「路由器端口转发」，界面把这两条说明白；**UDP 打洞与公网中转服务器仍然不做**——那需要一台常驻服务器。
 
@@ -222,4 +223,4 @@ M0（骨架）+ M1（实例扫描）+ M2（下载器）+ M3（**Windows 一键�
 
 **取消安装不再留一个后台 java**：Forge / NeoForge 的官方安装器以前是「起进程 + 循环读日志」，点「取消」只是取消协程，那个 java 还在往 `libraries/` 里写；超时检查也因为装在读循环里而对不出声的进程永不生效。现在抽成 `core/install/InstallerProcess.kt`：协程一结束就 `destroyForcibly`（连派生的子进程一起杀）、日志由独立协程读而主循环用 `waitFor(100ms)` 盯超时与取消、取消以 `CancellationException` 的形式冒出去而不是被包成「安装失败」。下次再点安装，installer 自己会跳过 `libraries/` 里已经存在的库（`docs/37`）。
 
-尚未实现：安卓端没有登录页（那边还不能启动游戏，登录了也没有消费方）、Yggdrasil 外置登录仍是空壳（`core/auth/Account.kt` 只有接口）、服务端不能从界面启动也看不到控制台输出（只能打开目录、自己双击脚本，见上）、安卓端下好的 Java 暂时没有消费方（`runtime-android` 还没开始，下完只能先存着）、Modrinth 上的插件（`project_type:plugin` facet 实测不可用，见上）、NAT 穿透与公网中转（「直接进」+ 本机地址枚举已能把局域网与公网 IPv6 的场景走通）、中文搜索的完整词库（只有常用对照表，冷门模组仍需用户给英文名）。模组依赖的 `required` / `optional` / `incompatible` 三类声明都已解析：`required` 自动装齐，`optional` 在依赖树卡片里单独列出「作者建议一起装」但**不替你装**，`incompatible` 由模组页的「查冲突」提示。
+尚未实现：安卓端没有登录页（那边还不能启动游戏，登录了也没有消费方）、Yggdrasil 外置登录仍是空壳（`core/auth/Account.kt` 只有接口）、服务端的「端口被占」只在控制台日志里出现而没有结构化提示（启动与看输出已经能做了，服务端卡片上有「启动」与控制台）、安卓端下好的 Java 暂时没有消费方（`runtime-android` 还没开始，下完只能先存着）、Modrinth 上的插件（`project_type:plugin` facet 实测不可用，见上）、NAT 穿透与公网中转（「直接进」+ 本机地址枚举已能把局域网与公网 IPv6 的场景走通）、中文搜索的完整词库（只有常用对照表，冷门模组仍需用户给英文名）。模组依赖的 `required` / `optional` / `incompatible` 三类声明都已解析：`required` 自动装齐，`optional` 在依赖树卡片里单独列出「作者建议一起装」但**不替你装**，`incompatible` 由模组页的「查冲突」提示。

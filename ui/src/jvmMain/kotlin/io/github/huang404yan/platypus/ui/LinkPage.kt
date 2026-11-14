@@ -44,8 +44,8 @@ import kotlinx.coroutines.withContext
 /**
  * 联机页：把局域网里「对局域网开放」的世界找出来，并且能直接用这个地址把游戏拉起来。
  *
- * 连接本身仍然交给游戏 —— 走的是 1.20 起的 `--quickPlayMultiplayer`，也就是官方的
- * 「直接连接」参数。不自己实现协议栈：绕过游戏连进去会丢皮肤、丢会话、和大部分模组不兼容。
+ * 连接本身仍然交给游戏 —— 1.20+ 走 `--quickPlayMultiplayer`，1.19 及更早走 `--server` + `--port`，
+ * 都是官方参数。不自己实现协议栈：绕过游戏连进去会丢皮肤、丢会话、和大部分模组不兼容。
  *
  * 不做 NAT 穿透、不做房间服务器：那是另一套东西（陶瓦、e4mc 那类），
  * 跟「局域网里几台机器互相看得见」不是一个问题，混在一起会把可用性拖垮。
@@ -258,7 +258,7 @@ fun LinkPage(onPlay: (String) -> Unit = {}) {
                 Text(
                     "用的不是自己写的协议栈，而是游戏自带的 --quickPlayMultiplayer 参数（1.20 起才有）。" +
                         "启动时跳过主菜单，进游戏后由游戏自己走正版校验与会话服务，皮肤、会话、模组都和手动连一样。" +
-                        "1.19 及更早的版本没有这条参数，点了会提示换实例——不会假装进了。",
+                        "1.19 及更早的版本没有这条参数，会自动改用老式的 --server/--port 直连，同样跳过主菜单。",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )

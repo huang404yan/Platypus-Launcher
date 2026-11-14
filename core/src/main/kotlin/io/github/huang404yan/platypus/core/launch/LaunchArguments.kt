@@ -66,6 +66,19 @@ data class LaunchCommand(
     fun toArgumentList(): List<String> = jvmArgs + mainClass + gameArgs
 }
 
+/**
+ * 「直接连接服务器」用哪条参数。
+ *
+ * 两条路能到同一个地方，但可用的版本段不同：
+ * - [QUICK_PLAY] —— 1.20 起，`--quickPlayMultiplayer host:port`，参数在版本 json 里，带 feature 条件。
+ * - [SERVER_ARG] —— 1.20 之前，`--server host --port port`，需要自己追加。
+ * - [NONE] —— 没填地址。
+ */
+enum class DirectConnectMode { NONE, QUICK_PLAY, SERVER_ARG }
+
+/** 拆开的服务器地址：[host] 不带方括号，[port] 已确认是数字。 */
+data class ServerAddress(val host: String, val port: Int)
+
 /** 一条待解压的 natives jar；[exclude] 是要跳过的条目前缀。 */
 data class NativeArchive(val jar: File, val exclude: List<String>)
 
@@ -98,8 +111,9 @@ object LaunchArguments {
      * 这个版本 json 认不认 `--quickPlayMultiplayer`。
      *
      * 1.20 起 arguments.game 里才有这条规则，更早的版本 json 根本没有：
-     * 传了也不会被拼进命令行，游戏照样停在主菜单。界面必须提前说清楚，
-     * 不然用户点完「直接进」只会觉得按钮没反应。
+     * 传了也不会被拼进命令行，游戏照样停在主菜单。所以更早的版本要走
+     * [DirectConnectMode.SERVER_ARG]（`--server` + `--port`），这条路从 Beta 1.8
+     * 就有，一直到现在都还认。
      */
     fun supportsQuickPlay(version: VersionJson): Boolean {
         val needle = PLACEHOLDER_OPEN + "quickPlayMultiplayer" + PLACEHOLDER_CLOSE
@@ -114,6 +128,63 @@ object LaunchArguments {
                 else -> false
             }
         }
+    }
+
+    /**
+     * 这个地址该走哪条直连参数。
+     *
+     * 光有地址还不够：1.19 及更早的版本 json 里没有 quickPlay 那条规则，
+     * 传了也拼不进命令行，用户点完「直接进」只会停在主菜单。那些版本改走
+     * `--server` + `--port`，效果一样（跳过主菜单直接连），只是参数得自己追加。
+     */
+    fun directConnectMode(version: VersionJson, address: String): DirectConnectMode = when {
+        address.isBlank() -> DirectConnectMode.NONE
+        supportsQuickPlay(version) -> DirectConnectMode.QUICK_PLAY
+        else -> DirectConnectMode.SERVER_ARG
+    }
+
+    /** 默认端口，与游戏里「对局域网开放」的默认值一致。 */
+    const val DEFAULT_PORT = 25565
+
+    /**
+     * 把 `host:port` 拆成两段。
+     *
+     * 要处理的形态有五种：
+     * `192.168.1.10:54321`、`example.com`（无端口）、`[fe80::1]:25565`（方括号 IPv6）、
+     * `[fe80::1]`（方括号无端口）、`fe80::1`（裸 IPv6，只能靠「多个冒号」认出）。
+     *
+     * 认不出来就返回 null —— 与其猜一个端口把游戏连到错误的地方，
+     * 不如让 `--server` 都不加，至少停在主菜单是用户能看懂的状态。
+     */
+    fun splitHostPort(address: String): ServerAddress? {
+        val text = address.trim()
+        if (text.isEmpty()) return null
+        if (text.startsWith("[")) {
+            val close = text.indexOf(']')
+            if (close <= 1) return null
+            val host = text.substring(1, close)
+            val rest = text.substring(close + 1)
+            val port = when {
+                rest.isEmpty() -> DEFAULT_PORT
+                rest.startsWith(":") -> rest.substring(1).toIntOrNull()
+                else -> null
+            } ?: return null
+            return if (port in 1..65535) ServerAddress(host, port) else null
+        }
+        // 裸 IPv6 里冒号不止一个，最后一个冒号后面那段是地址的一部分，不能当端口拆。
+        if (text.count { it == ':' } > 1) return ServerAddress(text, DEFAULT_PORT)
+        val colon = text.lastIndexOf(':')
+        if (colon < 0) return ServerAddress(text, DEFAULT_PORT)
+        val host = text.substring(0, colon)
+        if (host.isEmpty()) return null
+        val port = text.substring(colon + 1).toIntOrNull() ?: return null
+        return if (port in 1..65535) ServerAddress(host, port) else null
+    }
+
+    /** `--server` + `--port` 两条参数；地址拆不开就返回空列表。 */
+    fun serverArgs(address: String): List<String> {
+        val parsed = splitHostPort(address) ?: return emptyList()
+        return listOf("--server", parsed.host, "--port", parsed.port.toString())
     }
 
     fun build(version: VersionJson, context: LaunchContext): LaunchCommand {
@@ -140,6 +211,11 @@ object LaunchArguments {
             } else if (!version.minecraftArguments.isNullOrBlank()) {
                 // 上古版本只有一行 minecraftArguments 字符串，按空格切开。
                 addAll(substituteAll(splitPlainArguments(version.minecraftArguments), variables))
+            }
+            // 1.20 之前的版本：quickPlay 那条规则不存在，直连只能自己追加 --server/--port。
+            // 放在 extraGameArgs 之前，用户手填的参数仍然能覆盖。
+            if (directConnectMode(version, context.quickPlayMultiplayer) == DirectConnectMode.SERVER_ARG) {
+                addAll(serverArgs(context.quickPlayMultiplayer))
             }
             addAll(context.extraGameArgs)
         }

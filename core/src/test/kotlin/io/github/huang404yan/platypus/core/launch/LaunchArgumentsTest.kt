@@ -394,4 +394,74 @@ class LaunchArgumentsTest {
         )
         assertFalse(command.gameArgs.contains("--quickPlayMultiplayer"))
     }
+
+    // ---- 1.19 及更早：没有 quickPlay，退回 --server/--port ----
+
+    /** 1.12.2 那种只有一行 minecraftArguments 的老版本 json。 */
+    private val legacyVersion = version(
+        """{ "id": "1.12.2", "mainClass": "net.minecraft.client.main.Main",
+            "minecraftArguments": "--username @D@{auth_player_name} --version 1.12.2" }""",
+    )
+
+    @Test
+    fun `老版本填了地址会退成 --server 与 --port`() {
+        val command = LaunchArguments.build(legacyVersion, context().copy(quickPlayMultiplayer = "192.168.1.10:54321"))
+        val i = command.gameArgs.indexOf("--server")
+        assertTrue(i >= 0, "老版本应当拼出 --server")
+        assertEquals("192.168.1.10", command.gameArgs[i + 1])
+        assertEquals("--port", command.gameArgs[i + 2])
+        assertEquals("54321", command.gameArgs[i + 3])
+        // 老版本绝不能出现 quickPlay —— 那条参数在那时的 json 里根本不存在
+        assertFalse(command.gameArgs.contains("--quickPlayMultiplayer"))
+    }
+
+    @Test
+    fun `老版本不填地址时一条直连参数都不出现`() {
+        val command = LaunchArguments.build(legacyVersion, context())
+        assertFalse(command.gameArgs.contains("--server"))
+        assertFalse(command.gameArgs.contains("--port"))
+    }
+
+    @Test
+    fun `1_20 的版本不会同时出现 --server`() {
+        val command = LaunchArguments.build(
+            quickPlayVersion,
+            context().copy(features = LaunchArguments.quickPlayFeatures(), quickPlayMultiplayer = "192.168.1.10:54321"),
+        )
+        assertTrue(command.gameArgs.contains("--quickPlayMultiplayer"))
+        assertFalse(command.gameArgs.contains("--server"))
+    }
+
+    @Test
+    fun `directConnectMode 按版本与空地址三段判定`() {
+        assertEquals(DirectConnectMode.NONE, LaunchArguments.directConnectMode(legacyVersion, ""))
+        assertEquals(DirectConnectMode.NONE, LaunchArguments.directConnectMode(quickPlayVersion, "   "))
+        assertEquals(DirectConnectMode.SERVER_ARG, LaunchArguments.directConnectMode(legacyVersion, "1.2.3.4:25565"))
+        assertEquals(DirectConnectMode.QUICK_PLAY, LaunchArguments.directConnectMode(quickPlayVersion, "1.2.3.4:25565"))
+    }
+
+    @Test
+    fun `splitHostPort 认五种地址形态`() {
+        assertEquals(ServerAddress("192.168.1.10", 54321), LaunchArguments.splitHostPort("192.168.1.10:54321"))
+        assertEquals(ServerAddress("mc.example.com", 25565), LaunchArguments.splitHostPort("mc.example.com"))
+        assertEquals(ServerAddress("fe80::1", 25565), LaunchArguments.splitHostPort("[fe80::1]:25565"))
+        assertEquals(ServerAddress("fe80::1", 25565), LaunchArguments.splitHostPort("[fe80::1]"))
+        assertEquals(ServerAddress("fe80::1", 25565), LaunchArguments.splitHostPort("fe80::1"))
+        // 前后空格来自输入框，不该把地址带歪
+        assertEquals(ServerAddress("1.2.3.4", 2556), LaunchArguments.splitHostPort("  1.2.3.4:2556  "))
+    }
+
+    @Test
+    fun `splitHostPort 遇到坏地址返回空`() {
+        assertEquals(null, LaunchArguments.splitHostPort(""))
+        assertEquals(null, LaunchArguments.splitHostPort("  "))
+        assertEquals(null, LaunchArguments.splitHostPort("host:abc"))
+        assertEquals(null, LaunchArguments.splitHostPort("host:0"))
+        assertEquals(null, LaunchArguments.splitHostPort("host:70000"))
+        assertEquals(null, LaunchArguments.splitHostPort("[]:25565"))
+        assertEquals(null, LaunchArguments.splitHostPort(":25565"))
+        assertEquals(null, LaunchArguments.splitHostPort("[fe80::1]x"))
+        // 拆不开就不能拼 --server，否则会把游戏指到一个不存在的主机
+        assertTrue(LaunchArguments.serverArgs("host:abc").isEmpty())
+    }
 }

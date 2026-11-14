@@ -566,7 +566,6 @@ fun LaunchPage(
                     label = { Text("直连服务器（留空 = 停在主菜单）") },
                     singleLine = true,
                     enabled = !busy,
-                    isError = quickTarget.isNotBlank() && !quickSupported,
                     supportingText = {
                         Text(
                             if (quickTarget.isBlank()) {
@@ -583,8 +582,8 @@ fun LaunchPage(
             }
             if (quickTarget.isNotBlank() && !quickSupported) {
                 SectionHint(
-                    "这个版本的版本文件里没有 --quickPlayMultiplayer（1.20 起才有），点启动会直接报错。换 1.20+ 的实例，或清空上面的地址。",
-                    error = true,
+                    "这个版本的版本文件里没有 --quickPlayMultiplayer（1.20 起才有），" +
+                        "启动时会改用 --server/--port 直连，效果一样（同样跳过主菜单）。",
                 )
             }
 

@@ -13,8 +13,10 @@ data class LaunchRequest(
     /**
      * 多人游戏「直接连接」的目标，形如 `192.168.1.10:54321`；空串 = 正常启动，停在主菜单。
      *
-     * 对应游戏命令行里的 `--quickPlayMultiplayer`，1.20 起才有。桌面实现会顺手打开
-     * [LaunchArguments.QUICK_PLAY_MULTIPLAYER_FEATURE]，否则那条参数根本不会被拼进去。
+     * 1.20+ 拼成 `--quickPlayMultiplayer`（桌面实现会顺手打开
+     * [LaunchArguments.QUICK_PLAY_MULTIPLAYER_FEATURE]，否则那条参数根本不会被拼进去）；
+     * 1.19 及更早的版本 json 没有这条规则，自动降级成 `--server` + `--port`。
+     * 哪个走哪条由 [LaunchArguments.directConnectMode] 决定。
      */
     val quickPlayServer: String = "",
 )

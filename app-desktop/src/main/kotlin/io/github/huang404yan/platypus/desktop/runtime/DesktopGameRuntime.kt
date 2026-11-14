@@ -7,6 +7,7 @@ import io.github.huang404yan.platypus.core.instance.InstanceLayout
 import io.github.huang404yan.platypus.core.instance.InstanceLayouts
 import io.github.huang404yan.platypus.core.launch.GameHandle
 import io.github.huang404yan.platypus.core.launch.GameRuntime
+import io.github.huang404yan.platypus.core.launch.DirectConnectMode
 import io.github.huang404yan.platypus.core.launch.LaunchArguments
 import io.github.huang404yan.platypus.core.launch.LaunchContext
 import io.github.huang404yan.platypus.core.launch.LaunchDiagnosis
@@ -65,6 +66,14 @@ class DesktopGameRuntime(
 
         onEvent(LaunchEvent.Stage("整理 classpath", 0.1f))
         val context = buildContext(request, layout, version, resolved.clientJar)
+        // 降级要说一声：用户点的是「直接进」，命令行里却没有 quickPlay，不解释会以为没生效。
+        if (LaunchArguments.directConnectMode(version, request.quickPlayServer) == DirectConnectMode.SERVER_ARG) {
+            onEvent(
+                LaunchEvent.LogLine(
+                    "这个版本（" + version.id + "）的版本文件里没有 --quickPlayMultiplayer，改用 --server/--port 直连。",
+                ),
+            )
+        }
 
         onEvent(LaunchEvent.Stage("解压原生库", 0.15f))
         extractNatives(version, context) { message -> onEvent(LaunchEvent.LogLine(message)) }
@@ -163,15 +172,10 @@ class DesktopGameRuntime(
         resolvedJar: File?,
     ): LaunchContext {
         val nativesDir = layout.nativesDir
-        // 「直接连接」：地址非空才开特性开关，否则一条 --quickPlayMultiplayer 都不该出现。
-        val quickPlay = request.quickPlayServer.trim()
-        if (quickPlay.isNotEmpty() && !LaunchArguments.supportsQuickPlay(version)) {
-            // 静默忽略等于骗人：用户点的是「进这个服务器」，结果停在主菜单。
-            throw IllegalStateException(
-                "这个版本（" + version.id + "）的版本文件里没有 --quickPlayMultiplayer，不支持直接连接。" +
-                    "1.20 起才有这条参数；换一个 1.20+ 的实例，或者去掉直连地址再启动。",
-            )
-        }
+        // 「直接连接」：1.20+ 走版本 json 里的 quickPlay（要同时打开 feature 开关），
+        // 1.19 及更早没有那条规则，由 LaunchArguments 改拼 --server/--port，这里不用区别对待。
+        val address = request.quickPlayServer.trim()
+        val direct = LaunchArguments.directConnectMode(version, address)
         val placeholder = LaunchContext(
             gameDir = layout.gameDir,
             assetsDir = layout.assetsDir,
@@ -181,8 +185,8 @@ class DesktopGameRuntime(
             session = request.session,
             versionName = layout.versionDir.name,
             memoryMb = request.instance.memoryMb,
-            features = if (quickPlay.isEmpty()) emptyMap() else LaunchArguments.quickPlayFeatures(),
-            quickPlayMultiplayer = quickPlay,
+            features = if (direct == DirectConnectMode.QUICK_PLAY) LaunchArguments.quickPlayFeatures() else emptyMap(),
+            quickPlayMultiplayer = address,
             launcherName = launcherName,
             launcherVersion = launcherVersion,
             extraJvmArgs = request.instance.extraJvmArgs + request.jvmArgs,
