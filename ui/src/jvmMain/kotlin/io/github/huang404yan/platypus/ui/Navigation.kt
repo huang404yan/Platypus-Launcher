@@ -28,10 +28,15 @@ data class SubTab(
  *
  * 空表 = 这个一级页面暂时还是单页，侧边栏不展开第二层。
  *
- * 「下载」下面挂五件事，是照 PCL 的信息架构重排的（`PageDownloadLeft.xaml`）：
- * 装原版、装 Mod、装整合包、装资源包、装光影，都是「从网上下东西放进游戏目录」，
+ * 「下载」下面挂七件事，是照 PCL 的信息架构重排的（`PageDownloadLeft.xaml`）：
+ * 装原版、装 Mod、装整合包、装数据包、装资源包、装光影、下服务端，都是「从网上下东西」，
  * 只是产物落点不同。以前 Mod 与光影资源包是两个一级页，和人「我想装点什么」的心智
  * 对不上 —— 用户得先知道那东西叫「模组」，才找得到装它的入口。
+ *
+ * PCL 那一列还有「服务器」与「插件」两项。服务端这里做了（原版 server.jar + eula.txt +
+ * 开服脚本）；插件不做：Modrinth 的 `project_type:plugin` facet 实测会退化成全站模组搜索
+ * （返回的 hits 全是 project_type=mod），而且插件要落在服务端的 `plugins/` 目录里，
+ * 这一版还没有「服务端实例」这个概念，硬塞一个入口只会让人装到客户端目录里。
  */
 val PAGE_SUB_TABS: Map<Page, List<SubTab>> = mapOf(
     Page.DOWNLOAD to listOf(
@@ -40,8 +45,13 @@ val PAGE_SUB_TABS: Map<Page, List<SubTab>> = mapOf(
         // 整合包页没有「已经拉下来的清单」可刷新：搜到的结果随搜随出，导入进度也自带重试。
         // PCL 那一项挂刷新是因为它会缓存整合包列表，这里不缓存，就不放一个点了没反应的按钮。
         SubTab("modpack", "整合包"),
+        // 数据包与资源包的位置照 PCL 的 PageDownloadLeft.xaml：数据包挨着整合包（都是「改世界」），
+        // 资源包与光影包挨在一起（都是「改观感」）。
+        SubTab("datapacks", "数据包", refreshable = true),
         SubTab("resourcepacks", "资源包", refreshable = true),
         SubTab("shaders", "光影包", refreshable = true),
+        // 服务端是「下载一个能开服的东西」，没有已装清单可刷，也就不挂刷新。
+        SubTab("server", "服务端"),
     ),
     Page.SETTINGS to listOf(
         SubTab("launch", "启动"),
@@ -50,12 +60,14 @@ val PAGE_SUB_TABS: Map<Page, List<SubTab>> = mapOf(
     ),
 )
 
-/** 「下载」下的五个二级项 id。页面按下标判断自己该渲染哪一块。 */
+/** 「下载」下的七个二级项 id。页面按下标判断自己该渲染哪一块。 */
 const val DOWNLOAD_TAB_VANILLA = "vanilla"
 const val DOWNLOAD_TAB_MODS = "mods"
 const val DOWNLOAD_TAB_MODPACK = "modpack"
+const val DOWNLOAD_TAB_DATAPACKS = "datapacks"
 const val DOWNLOAD_TAB_RESOURCEPACKS = "resourcepacks"
 const val DOWNLOAD_TAB_SHADERS = "shaders"
+const val DOWNLOAD_TAB_SERVER = "server"
 
 /** 某个一级页面的默认二级项：没配就返回空串。 */
 fun defaultSubTab(page: Page): String = PAGE_SUB_TABS[page]?.firstOrNull()?.id.orEmpty()

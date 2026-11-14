@@ -11,8 +11,9 @@ import java.io.File
  * 现在把它搬进 core，桌面端与安卓端用同一套算法，也能单测。
  *
  * @param versionDir 版本目录 `<gameRoot>/versions/<id>`，也是实例的自包含目录
- * @param gameDir 传给 `--gameDir` 的目录。隔离后等于 [versionDir]：
- *   存档、模组、配置、日志、截图全部落在这个实例自己下面
+ * @param gameDir 传给 `--gameDir` 的目录。隔离时等于 [versionDir]：
+ *   存档、模组、配置、日志、截图全部落在这个实例自己下面；不隔离时等于 [gameRoot]，
+ *   和同目录下其他版本共用一份（见 [Instance.isolated]）
  * @param gameRoot 含 `versions/`、`libraries/`、`assets/` 的那一层，多个实例共享
  * @param librariesDir 库目录（共享，放在 gameRoot 下）
  * @param assetsDir 资源目录（共享，放在 gameRoot 下）
@@ -38,15 +39,18 @@ object InstanceLayouts {
     /** 标准布局下 `versions` 这一层的名字。 */
     const val VERSIONS_DIR_NAME = "versions"
 
-    fun of(instance: Instance): InstanceLayout = of(File(instance.directory.trim().trim('"')))
+    fun of(instance: Instance): InstanceLayout =
+        of(File(instance.directory.trim().trim('"')), isolated = instance.isolated)
 
-    fun of(versionDir: File): InstanceLayout {
+    fun of(versionDir: File, isolated: Boolean = true): InstanceLayout {
         val dir = versionDir.absoluteFile
         val root = gameRootOf(dir)
         return InstanceLayout(
             versionDir = dir,
-            // P1 的核心：--gameDir 指向实例自己的目录，而不是游戏根目录。
-            gameDir = dir,
+            // P1 的核心：默认 --gameDir 指向实例自己的目录，而不是游戏根目录。
+            // 但有人拿到的整合包是把 mods/ 平铺在游戏根目录的，那种包一旦隔离就一个模组都看不见
+            // （版本目录里干干净净，游戏的 --gameDir 又指进了版本目录）——所以留一个关掉的口子。
+            gameDir = if (isolated) dir else root,
             gameRoot = root,
             librariesDir = File(root, "libraries"),
             assetsDir = File(root, "assets"),
@@ -65,6 +69,18 @@ object InstanceLayouts {
         val versions = versionDir.parentFile ?: return versionDir
         if (!versions.name.equals(VERSIONS_DIR_NAME, ignoreCase = true)) return versionDir
         return versions.parentFile ?: versionDir
+    }
+
+    /**
+     * 这个目录能不能谈「隔离」。
+     *
+     * 只有父目录确实叫 `versions` 时才算标准布局：那时 [gameRootOf] 能往上一级拿到
+     * 真正的游戏根目录，关掉隔离才有意义。手填 `<gameRoot>/instances/xx` 这种目录
+     * 关不关都是同一个地方，界面该把开关藏起来而不是给一个点了没反应的东西。
+     */
+    fun supportsIsolation(versionDir: File): Boolean {
+        val parent = versionDir.absoluteFile.parentFile ?: return false
+        return parent.name.equals(VERSIONS_DIR_NAME, ignoreCase = true) && parent.parentFile != null
     }
 
     /** 实例之间会互相干扰的那些目录（隔离后应该各自一份）。 */

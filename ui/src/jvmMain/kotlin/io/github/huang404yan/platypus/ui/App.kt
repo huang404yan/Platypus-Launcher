@@ -119,10 +119,14 @@ fun App(initialGameRoot: String? = null, backend: LauncherBackend? = null) {
                         DOWNLOAD_TAB_MODS -> ModsPage(initialGameRoot, backend, tick)
                         // 整合包页没有可刷新的清单（见 Navigation.kt 里那一项的说明），不传 tick
                         DOWNLOAD_TAB_MODPACK -> ModpackPage(initialGameRoot, backend) { page = Page.LAUNCH }
+                        DOWNLOAD_TAB_DATAPACKS ->
+                            PacksPage(initialGameRoot, backend, PackKind.DATAPACK, tick)
                         DOWNLOAD_TAB_RESOURCEPACKS ->
                             PacksPage(initialGameRoot, backend, PackKind.RESOURCE_PACK, tick)
                         DOWNLOAD_TAB_SHADERS ->
                             PacksPage(initialGameRoot, backend, PackKind.SHADER, tick)
+                        // 服务端不登记实例，所以没有「装完去启动」的回调
+                        DOWNLOAD_TAB_SERVER -> ServerPage(initialGameRoot)
                         else -> DownloadsPage(initialGameRoot, backend, tick) { page = Page.LAUNCH }
                     }
                     Page.LINK -> LinkPage { address ->

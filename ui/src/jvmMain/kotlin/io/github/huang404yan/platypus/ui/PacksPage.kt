@@ -33,6 +33,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import io.github.huang404yan.platypus.core.instance.Instance
+import io.github.huang404yan.platypus.core.instance.InstanceLayouts
 import io.github.huang404yan.platypus.core.instance.InstanceScanner
 import io.github.huang404yan.platypus.core.instance.LoaderKind
 import io.github.huang404yan.platypus.core.instance.instanceKey
@@ -134,7 +135,7 @@ fun PacksPage(
         }
         scanning = true
         try {
-            val dir = File(target.directory.trim().trim('"'))
+            val dir = InstanceLayouts.of(target).gameDir
             snapshot = withContext(Dispatchers.IO) { runCatching { PackScanner.scan(kind, dir) }.getOrNull() }
         } finally {
             scanning = false
@@ -144,10 +145,15 @@ fun PacksPage(
         }
     }
 
-    /** 当前选中的实例目录（实例 = 版本目录），没有就返回 null。 */
+    /**
+     * 当前选中实例的游戏目录（光影/资源包目录从它推），没有就返回 null。
+     *
+     * 关掉版本隔离的实例，游戏读的是游戏根目录下的 shaderpacks/ 与 resourcepacks/，
+     * 这里必须跟着走，否则界面显示「没装光影」而游戏里明明有。
+     */
     fun currentInstanceDir(): File? {
         val target = instances.firstOrNull { instanceKey(it) == selectedKey } ?: return null
-        return File(target.directory.trim().trim('"'))
+        return InstanceLayouts.of(target).gameDir
     }
 
     /**
@@ -200,7 +206,7 @@ fun PacksPage(
         notice = ""
         val text = query.trim()
         if (text.isEmpty()) {
-            searchError = "先输入关键词，比如 " + if (kind == PackKind.SHADER) "complementary、bsl、photon" else "fresh、faithful、xali"
+            searchError = "先输入关键词，比如 " + packExampleOf(kind)
             return
         }
         if (gameVersion.isBlank()) {
@@ -300,16 +306,12 @@ fun PacksPage(
     Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         // 别拼 kind.label + "包"：「资源包」+「包」会变成「资源包包」（实测出来的）
         Text(
-            if (kind == PackKind.RESOURCE_PACK) "资源包" else "光影包",
+            packPageTitle(kind),
             style = MaterialTheme.typography.headlineSmall,
             fontWeight = FontWeight.SemiBold,
         )
         Text(
-            if (kind == PackKind.RESOURCE_PACK) {
-                "从 Modrinth 搜资源包，装进选中实例的 resourcepacks/。"
-            } else {
-                "从 Modrinth 搜光影，装进选中实例的 shaderpacks/。要先用 Iris 或 OptiFine 才能加载。"
-            },
+            packPageIntro(kind),
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -473,7 +475,7 @@ private fun BrowsePacksTab(
                 onValueChange = onQueryChange,
                 modifier = Modifier.weight(1f),
                 // 例子分开算：直接写成 a + if (…) x else y + z 会被解析成 a + (if … else (y + z))
-                label = { Text("在 Modrinth 搜" + kindLabel + "（如 " + packExampleOf(kindLabel) + "）") },
+                label = { Text("在 Modrinth 搜" + kindLabel + "（如 " + packExampleOf(kind) + "）") },
                 singleLine = true,
             )
             OutlinedTextField(
@@ -488,10 +490,15 @@ private fun BrowsePacksTab(
             }
         }
 
-        // 光影/资源包的中文叫法比模组更常用（「互补」「原味素材」），中文关键词一律搜不到。
+        // 光影/资源包/数据包的中文叫法比模组更常用（「互补」「原味素材」「泰拉瑞斯」），
+        // 中文关键词一律搜不到。
         ChineseSearchHint(
             query = query,
-            kind = if (kind == PackKind.SHADER) SearchTerm.Kind.SHADER else SearchTerm.Kind.RESOURCE_PACK,
+            kind = when (kind) {
+                PackKind.SHADER -> SearchTerm.Kind.SHADER
+                PackKind.RESOURCE_PACK -> SearchTerm.Kind.RESOURCE_PACK
+                PackKind.DATAPACK -> SearchTerm.Kind.DATAPACK
+            },
             onPick = onQueryChange,
         )
 
@@ -707,9 +714,29 @@ private fun formatBytesShort(bytes: Long): String = when {
     else -> String.format(java.util.Locale.ROOT, "%.1f MB", bytes / 1024.0 / 1024.0)
 }
 
-/** 搜索框里的示例关键词：光影和资源包的热门包完全不同。 */
-private fun packExampleOf(kindLabel: String): String =
-    if (kindLabel == "光影") "complementary、bsl、photon" else "fresh、faithful、xali"
+/** 搜索框里的示例关键词：三类包的热门包完全不同。 */
+private fun packExampleOf(kind: PackKind): String = when (kind) {
+    PackKind.SHADER -> "complementary、bsl、photon"
+    PackKind.RESOURCE_PACK -> "fresh、faithful、xali"
+    PackKind.DATAPACK -> "terralith、veinminer、tectonic"
+}
+
+/** 页面标题。数据包不是「XX包」的形状（「数据包包」读起来是错的），单独写。 */
+private fun packPageTitle(kind: PackKind): String = when (kind) {
+    PackKind.SHADER -> "光影包"
+    PackKind.RESOURCE_PACK -> "资源包"
+    PackKind.DATAPACK -> "数据包"
+}
+
+/** 页面说明：三类包的落盘目录与生效条件都不一样，别让用户猜。 */
+private fun packPageIntro(kind: PackKind): String = when (kind) {
+    PackKind.SHADER -> "从 Modrinth 搜光影，装进选中实例的 shaderpacks/。要先用 Iris 或 OptiFine 才能加载。"
+    PackKind.RESOURCE_PACK -> "从 Modrinth 搜资源包，装进选中实例的 resourcepacks/。"
+    // 数据包有两个常见坑：只对自己新建的世界生效，且被装的存档要开「允许作弊」才能用 /reload
+    PackKind.DATAPACK ->
+        "从 Modrinth 搜数据包，装进选中实例的 datapacks/，对所有存档生效。" +
+            "已经建好的世界要重新进一次才读取它。"
+}
 
 /** 加载器名：光影页的实例标签上要显示，模组页那个是 private，这里留一份。 */
 private fun loaderLabelOf(kind: LoaderKind): String = when (kind) {

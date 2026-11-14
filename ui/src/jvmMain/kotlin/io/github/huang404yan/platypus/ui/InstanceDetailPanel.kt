@@ -14,6 +14,7 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -33,6 +34,7 @@ import io.github.huang404yan.platypus.core.instance.InstanceDetails
 import io.github.huang404yan.platypus.core.instance.InstanceDetailsLoader
 import io.github.huang404yan.platypus.core.instance.InstanceEditResult
 import io.github.huang404yan.platypus.core.instance.InstanceEdits
+import io.github.huang404yan.platypus.core.instance.InstanceLayouts
 import io.github.huang404yan.platypus.core.instance.formatBytes
 import io.github.huang404yan.platypus.core.runtime.GameJavaRules
 import io.github.huang404yan.platypus.core.runtime.JavaRuntime
@@ -67,6 +69,12 @@ internal fun InstanceDetailPanel(
     var javaPath by remember(instance.directory, instance.javaPath) { mutableStateOf(instance.javaPath.orEmpty()) }
     var memoryText by remember(instance.directory, instance.memoryMb) { mutableStateOf(instance.memoryMb.toString()) }
     var jvmArgsText by remember(instance.directory) { mutableStateOf(instance.extraJvmArgs.joinToString("\n")) }
+    // 版本隔离：关掉之后 --gameDir 指回游戏根目录，存档/模组/配置与同目录下别的版本共用。
+    // 只有标准布局（versions/<id>）才给这个开关，别的目录关不关都是同一个地方。
+    val canToggleIsolation = remember(instance.directory) {
+        InstanceLayouts.supportsIsolation(File(instance.directory.trim().trim('"')))
+    }
+    var isolated by remember(instance.directory, instance.isolated) { mutableStateOf(instance.isolated) }
 
     var notice by remember(instance.directory) { mutableStateOf("") }
     var saving by remember(instance.directory) { mutableStateOf(false) }
@@ -92,7 +100,15 @@ internal fun InstanceDetailPanel(
         }
         // 输入合并规则在 core 的 InstanceEdits 里，安卓详情页用的是同一个函数：
         // 两端写同一份 instances.json，规则分开写迟早会对不上。
-        val result = when (val edited = InstanceEdits.fromInput(instance, memoryText, jvmArgsText, javaPath)) {
+        val result = when (
+            val edited = InstanceEdits.fromInput(
+                instance,
+                memoryText,
+                jvmArgsText,
+                javaPath,
+                isolated = if (canToggleIsolation) isolated else null,
+            )
+        ) {
             is InstanceEditResult.Invalid -> {
                 notice = edited.message
                 return
@@ -111,11 +127,16 @@ internal fun InstanceDetailPanel(
                 notice = "保存失败：" + (error.message ?: error.toString())
                 return@launch
             }
-            notice = if (result.memoryWasClamped) {
+            notice = when {
                 // 说清楚「你填的数没生效，是这个范围钳制的结果」，否则用户以为填的生效了
-                "已按允许范围（" + Instance.MIN_MEMORY_MB + "–" + Instance.MAX_MEMORY_MB + " MB）改成 " + memoryMb + " MB。"
-            } else {
-                InstanceEdits.savedMessage(result)
+                result.memoryWasClamped ->
+                    "已按允许范围（" + Instance.MIN_MEMORY_MB + "–" + Instance.MAX_MEMORY_MB + " MB）改成 " + memoryMb + " MB。"
+                // 关了隔离要明说存档挪到哪去了，否则用户回游戏发现「存档没了」
+                canToggleIsolation && updated.isolated != instance.isolated && !updated.isolated ->
+                    "已关掉版本隔离：存档、模组、配置现在读写 " + details?.gameRoot?.absolutePath + " 下那一份（和同目录其他版本共用）。"
+                canToggleIsolation && updated.isolated != instance.isolated ->
+                    "已打开版本隔离：存档、模组、配置读写 " + updated.directory + " 下那一份。"
+                else -> InstanceEdits.savedMessage(result)
             }
             // 保存成功后调用方会立刻把详情页关掉（InstancePage 的 onNotice 里 detailKey = null），
             // 上面那句 notice 用户根本来不及看见 —— 真机点过一次：填 99999 保存，界面直接跳回列表，
@@ -152,13 +173,57 @@ internal fun InstanceDetailPanel(
             DetailLine("版本目录", d.versionDir.absolutePath)
             DetailLine("游戏根目录", d.gameRoot.absolutePath)
             DetailLine(
+                "存档与模组在",
+                d.gameDir.absolutePath + if (d.isolated) "" else "（与同目录其他版本共用）",
+            )
+            DetailLine(
                 "共享目录",
-                "libraries/ 与 assets/ 由所有实例共用（放不下第二份）；" +
-                    "存档、模组、配置、日志都在上面的版本目录里。",
+                "libraries/ 与 assets/ 由所有实例共用（放不下第二份）。",
             )
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 OutlinedButton(onClick = { openFolder(d.versionDir) }) { Text("打开实例目录") }
-                OutlinedButton(onClick = { openFolder(d.gameRoot) }) { Text("打开游戏根目录") }
+                OutlinedButton(onClick = { openFolder(d.gameDir) }) { Text("打开存档目录") }
+            }
+        }
+
+        DetailCard("版本隔离") {
+            Row(
+                Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Column(Modifier.fillMaxWidth(0.78f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text(
+                        if (isolated) "开：这个实例自己一份存档、模组、配置" else "关：与同目录下的其他版本共用一份",
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                    Text(
+                        if (canToggleIsolation) {
+                            if (isolated) {
+                                "装模组、存档、改配置都只影响这一个实例。整合包把 mods/ 平铺在游戏根目录时，要关掉才看得见那些模组。"
+                            } else {
+                                "游戏读写 " + d.gameRoot.absolutePath + " 下的 mods/、saves/、options.txt。" +
+                                    "别的版本改了配置、换了模组，这边也会跟着变。"
+                            }
+                        } else {
+                            "这个目录不是 versions/<id> 的形状，开不开隔离都落在同一处，所以不给开关。"
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Switch(
+                    checked = isolated,
+                    onCheckedChange = { isolated = it },
+                    enabled = canToggleIsolation && !saving,
+                )
+            }
+            if (canToggleIsolation && isolated != instance.isolated) {
+                Text(
+                    "改完要点下面的「保存」才生效，下次启动游戏才用新目录。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.primary,
+                )
             }
         }
 

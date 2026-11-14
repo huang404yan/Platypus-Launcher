@@ -12,6 +12,11 @@
 
 不新增 `Instance` 字段、不加「隔离开关」、不复制共享库。唯一真源仍然是 `Instance.directory`。
 
+> **2026-11-14 更新：这条已经改了。** 现在 `Instance` 多了 `isolated: Boolean = true`（默认值等于旧行为），
+> 实例详情页有一个「版本隔离」开关。触发场景是「整合包把 `mods/` 平铺在游戏根目录」那种包 ——
+> 隔离开着等于一个模组都看不见，而用户没有任何手段关掉。原因、落点与实测见 `docs/37` 第三节。
+> 下面「为什么不加新字段」一节保留原文，作为当时的判断记录。
+
 ## 隔离前的三方矛盾
 
 改之前代码里有三条互相打架的假设，谁都没错，合起来就是错的：
@@ -57,13 +62,19 @@ fun gameRootOf(versionDir: File): File {
 用户完全看不出是路径猜错了。宁可把 `libraries/assets` 指到实例目录下（找不到 → 启动时明确报缺库），
 也不要凭空猜一层。这一条有单测（`InstanceLayoutTest` 的「父目录不叫 versions 时不上溯」）。
 
-### 为什么不加新字段
+### 为什么不加新字段（当时的判断，2026-11-14 已被推翻）
 
 考虑过给 `Instance` 加 `gameDirOverride` 或 `isolated: Boolean`。放弃的理由：
 
 1. `Instance` 是 `@Serializable` 且写进 `<gameRoot>/platypus/instances.json`。加字段要同时考虑旧文件没有该字段时的默认值、以及未来要不要迁移。
 2. 字段一旦存在，就必然出现「字段说 A、目录实际是 B」的漂移，而 `directory` 已经能唯一确定布局。
 3. 隔离**不做开关**。开关意味着两条代码路径都得测，而共享 mods 这个能力用户从没要过。
+
+**这三条里第 1、3 条已经被实际情况推翻。** 最终加的是 `isolated: Boolean = true`（第 1 条担心的
+「旧文件没有该字段」由默认值解决，`true` 就是旧行为，不需要迁移）；第 3 条担心的「两条路径都得测」
+确实付了代价 —— `InstanceLayoutTest` 与 `InstanceEditsTest` 各多两例，`InstanceModsTest` 多一例。
+第 2 条（字段说 A、目录实际是 B）仍然成立，所以 `InstanceDetails.isolated` 干脆不看字段，
+只看 `layout.gameDir != layout.gameRoot`。
 
 ### 为什么不走 `-Dminecraft.gameDir` 或切换 cwd
 
@@ -197,12 +208,16 @@ gradle :app-desktop:isolationSmoke -PisoDir=dist/_test-mc/_nf1211 -PisoInstance=
 
 全量 `:core:test`：**27 个测试类 / 272 例 / failures 0 / errors 0 / skipped 0**（当时的数字；写完本文后又加了三轮测试，现为 32 类 / 340 例）。
 
+**2026-11-14 最新全量：45 个测试类 / 512 例 / failures 0 / errors 0 / skipped 0。**
+其中与隔离相关的三例是本轮新加的：`InstanceLayoutTest` 的「关掉版本隔离后游戏目录指回游戏根目录」、
+`InstanceEditsTest` 的「传了隔离开关就按传的存」、`InstanceModsTest` 的「关掉隔离后 mods 目录回到游戏根目录」。
+
 ## 已知取舍
 
 | 取舍 | 代价 | 为什么接受 |
 | --- | --- | --- |
 | `libraries/` 与 `assets/` 不按实例复制 | 实例目录不是 100% 自包含，导出实例时得另带库 | 一份 assets 就是 700 MB 上下，按实例复制会让磁盘立刻爆掉；D16 里记了「暂不复制」 |
 | 旧的 `<gameRoot>/mods` 不自动搬 | 老用户升级后看不到原来的模组 | 自动搬会改变用户磁盘上的文件；界面给了「搬进这个实例」按钮，且是复制 |
-| 不做隔离开关 | 没法「共用一份 mods 给所有实例」 | 用户从没要过；两个路径都要测，成本翻倍 |
+| ~~不做隔离开关~~ **已改：做了开关，默认开着** | 两条路径都要测 | 整合包把 `mods/` 平铺在根目录时，用户没有任何手段让游戏看见那些模组（`docs/37` 第三节） |
 | 详情页不显示日志内容 | 查问题还得去「启动」页 | 日志是启动页的职责；详情页只管「这个实例是什么配置」 |
 | 删除器的判断没变 | 仍然按 `<版本目录>/mods` 统计 | 隔离之后这条终于自洽了，不改反而是对的 |

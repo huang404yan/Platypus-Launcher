@@ -20,6 +20,7 @@
 | --- | --- | --- | --- | --- |
 | 光影 | `shaderpacks/` | zip 里有没有 `shaders/` | `shader` | `["iris","optifine"]` |
 | 资源包 | `resourcepacks/` | 有没有 `pack.mcmeta` | `resourcepack` | `["minecraft"]` |
+| 数据包（2026-11-14 补） | `datapacks/` | 有没有 `pack.mcmeta` | `datapack` | `["datapack"]` |
 
 两边都写成常量放在 `PackKind` 枚举里（`core/src/main/kotlin/io/github/huang404yan/platypus/core/packs/PackScanner.kt:19`），不让调用点各写各的字符串：
 
@@ -27,8 +28,13 @@
 enum class PackKind(val dirName: String, val label: String, val projectType: String) {
     SHADER("shaderpacks", "光影", "shader"),
     RESOURCE_PACK("resourcepacks", "资源包", "resourcepack"),
+    DATAPACK("datapacks", "数据包", "datapack"),
 }
 ```
+
+> 数据包那一行是 2026-11-14 补的。**它的 `loaders` 必须是 `["datapack"]`，不能跟资源包共用 `["minecraft"]`**：
+> 实测 Terralith 2.5.4 同时发两条文件，`loaders=["datapack"]` 的才是数据包本体（`.zip`），
+> 另一条是 `loaders=["fabric","forge","neoforge","quilt"]` 的 `.jar`。详见 `docs/37` 第 2.1 节。
 
 **`loaders` 那两个值不是猜的。** 照模组的 `fabric` 去查光影，一条都查不到——Modrinth 给光影标的加载器是 `iris` / `optifine`（它俩是能读这个格式的渲染器），资源包标的是 `minecraft`。光影写成两个值是 OR 语义：只写 `iris` 会漏掉只标了 `optifine` 的老包，而 Iris 本体能读绝大多数 OptiFine 光影。
 
@@ -151,9 +157,22 @@ LaunchedEffect(kind) {
 
 ---
 
-## 七、还没做到
+## 七、数据包（2026-11-14 补）
+
+PCL 的下载栏里数据包紧挨着整合包（`PageDownloadLeft.xaml` 的 `ItemDataPack` / `ItemPack`，都是「改世界」），
+本项目照这个位置挂在「下载 / 数据包」，复用同一套 `PackScanner` / `PackInstaller` / `PackFileOps` ——
+它和资源包在磁盘上都是 zip、都靠 `pack.mcmeta` 认，差别只有目录名与查询用的 `loaders`。
+
+界面上的文案跟着改成三支（标题、说明、搜索占位词），中文词典也加了 11 条数据包条目。
+这一项**没有 `PackInstaller` 之外的新逻辑**，所以测试只补了 `PackScannerTest` 之外既有用例覆盖的范围，
+数据包这条路径的验证方式是编过 + 搜索实测（terralith 31 条、dungeons-and-taverns 18 条、veinminer 15 条）。
+
+细节见 `docs/37` 第 2.1 节。
+
+## 八、还没做到
 
 - 安卓端这一页**没有真机验证**（无设备、无模拟器），只验证了编译与 apk 内含新类。
+- **安卓端没有数据包入口**：本轮只给桌面端加了「下载 / 数据包」，安卓侧边栏仍是「光影资源包」两项。
 - 不读光影包内部信息（比如作者、版本号），只靠文件名与 Modrinth 返回的 `versionNumber`。
 - 不支持「从本地 zip 导入」——只能从 Modrinth 装。
 - 资源包的 `pack_format` 只显示不比对本机版本，装了不匹配的资源包不会有任何提示。

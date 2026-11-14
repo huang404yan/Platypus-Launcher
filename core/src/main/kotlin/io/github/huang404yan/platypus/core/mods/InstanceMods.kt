@@ -55,10 +55,17 @@ data class LegacyAdoptResult(
  */
 object InstanceMods {
 
-    /** 实例自己的 mods/ 目录：`<instance.directory>/mods`。 */
-    fun modsDirOf(instance: Instance): File = modsDirOf(File(instance.directory.trim().trim('"')))
+    /**
+     * 实例自己的 mods/ 目录。
+     *
+     * 隔离的实例是 `<instance.directory>/mods`；关掉隔离的实例（[Instance.isolated] = false）
+     * 是 `<gameRoot>/mods` —— 那时候游戏自己就读游戏根目录下的那份，界面再指着
+     * 版本目录里的空 mods/，用户会看到「一个模组都没有」却装不进去也删不掉。
+     */
+    fun modsDirOf(instance: Instance): File = ModScanner.modsDir(InstanceLayouts.of(instance).gameDir)
 
-    fun modsDirOf(instanceDir: File): File = ModScanner.modsDir(instanceDir)
+    fun modsDirOf(instanceDir: File, isolated: Boolean = true): File =
+        ModScanner.modsDir(InstanceLayouts.of(instanceDir, isolated).gameDir)
 
     /**
      * 隔离前所有实例共用的那个 mods/：游戏根目录下的 `mods`。
@@ -74,8 +81,10 @@ object InstanceMods {
     /** 扫一个实例的 mods/，顺带看看共享 mods/ 里还剩什么。只读，不建目录。 */
     fun scan(instance: Instance): InstanceModsSnapshot {
         val instanceDir = File(instance.directory.trim().trim('"')).absoluteFile
-        val modsDir = modsDirOf(instanceDir)
-        val scan = ModScanner.scan(instanceDir)
+        // 非隔离实例的 mods/ 就在游戏根目录，扫的就是那一份
+        val gameDir = InstanceLayouts.of(instance).gameDir
+        val modsDir = modsDirOf(instance)
+        val scan = ModScanner.scan(gameDir)
         val legacyDir = legacyModsDir(instance)
         // 非标准布局下 gameRoot 退回实例目录，此时 legacyDir 与 modsDir 是同一个目录，
         // 再扫一遍只会得到同一份清单，还容易让界面提示「有 N 个旧模组要搬」而搬到自己身上。

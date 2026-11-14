@@ -81,6 +81,39 @@ class InstanceLayoutTest {
     }
 
     @Test
+    fun `关掉版本隔离后游戏目录指回游戏根目录`() {
+        val layout = InstanceLayouts.of(File("/mc/versions/1.20.1"), isolated = false)
+        assertEquals(File("/mc/versions/1.20.1").absolutePath, layout.versionDir.path)
+        assertEquals(File("/mc").absolutePath, layout.gameDir.path)
+        // 版本 json 还在版本目录里，不能跟着挪
+        assertEquals(File("/mc").absolutePath, layout.gameRoot.path)
+    }
+
+    @Test
+    fun `默认仍然是隔离的`() {
+        // 不传 isolated 时行为必须与改造前一模一样，否则所有老实例的存档会在没人注意时换地方
+        val layout = InstanceLayouts.of(File("/mc/versions/1.20.1"))
+        assertEquals(layout.versionDir, layout.gameDir)
+    }
+
+    @Test
+    fun `从实例取布局会带上它的隔离开关`() {
+        val shared = instance("/mc/versions/1.20.1").copy(isolated = false)
+        assertEquals(File("/mc").absolutePath, InstanceLayouts.of(shared).gameDir.path)
+        val own = instance("/mc/versions/1.20.1")
+        assertEquals(File("/mc/versions/1.20.1").absolutePath, InstanceLayouts.of(own).gameDir.path)
+    }
+
+    @Test
+    fun `非标准目录不给隔离开关`() {
+        // 父目录不叫 versions 时游戏根目录退回实例目录，开不开都是同一个地方
+        assertTrue(!InstanceLayouts.supportsIsolation(File("/mc/instances/xx")))
+        assertTrue(InstanceLayouts.supportsIsolation(File("/mc/versions/1.20.1")))
+        // 顶层目录没有父目录，不能崩
+        assertTrue(!InstanceLayouts.supportsIsolation(File("/")))
+    }
+
+    @Test
     fun `按实例分开的目录清单包含存档模组配置`() {
         val names = InstanceLayouts.perInstanceDirs(File("/mc/versions/1.20.1")).map { it.name }
         assertTrue(names.contains("mods"))

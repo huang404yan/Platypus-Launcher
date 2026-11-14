@@ -67,7 +67,7 @@ object VanillaInstaller {
         val requested = versionId.trim()
         require(requested.isNotEmpty()) { "版本号不能为空" }
 
-        val jsonText = fetchText(versionJsonUrls(requested, manifest))
+        val jsonText = loadVersionJson(requested, manifest)
         val version = parseVersionJson(jsonText)
         val resolvedId = version.id.ifBlank { requested }
 
@@ -113,6 +113,19 @@ object VanillaInstaller {
         // 这里串行预建目录，规避该竞态。
         items.mapNotNull { File(it.target).parentFile }.distinct().forEach { it.mkdirs() }
         return HttpDownloader(parallelism = parallelism).download(items, onProgress)
+    }
+
+    /**
+     * 拉某个版本的 json 原文（Mojang 主源，BMCLAPI 兜底）。
+     *
+     * 单独开这个口子是给 [ServerInstaller] 用的：服务端只要版本 json 里的
+     * `downloads.server`，不需要客户端那一整套文件清单，用 [plan] 会白写
+     * `versions/<id>/<id>.json` 到游戏目录里 —— 那不是用户装服务端的地方。
+     */
+    fun loadVersionJson(versionId: String, manifest: VersionManifest? = null): String {
+        val requested = versionId.trim()
+        require(requested.isNotEmpty()) { "版本号不能为空" }
+        return fetchText(versionJsonUrls(requested, manifest))
     }
 
     private fun versionJsonUrls(id: String, manifest: VersionManifest?): List<String> {

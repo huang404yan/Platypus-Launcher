@@ -38,16 +38,20 @@ object InstanceEdits {
         text.split('\n').map { it.trim() }.filter { it.isNotEmpty() }
 
     /**
-     * 把三个输入框的原文合并进 [instance]。
+     * 把输入框的原文合并进 [instance]。
      *
-     * 只改这三项，其余字段（id / directory / loader / createdAt…）原样保留——
+     * 只改这几项，其余字段（id / directory / loader / createdAt…）原样保留——
      * 详情页只负责改设置，不负责搬家。
+     *
+     * @param isolated 版本隔离开关的新值；传 null 表示这次不改它（调用方没提供开关时
+     *   必须传 null —— 传 false 会把每一个没渲染开关的端上的隔离悄悄关掉）
      */
     fun fromInput(
         instance: Instance,
         memoryText: String,
         jvmArgsText: String,
         javaPath: String,
+        isolated: Boolean? = null,
     ): InstanceEditResult {
         val parsed = memoryText.trim().toIntOrNull()
             ?: return InstanceEditResult.Invalid(BAD_MEMORY_MESSAGE)
@@ -57,6 +61,7 @@ object InstanceEdits {
                 javaPath = javaPath.trim().ifBlank { null },
                 memoryMb = clamped,
                 extraJvmArgs = jvmArgsOf(jvmArgsText),
+                isolated = isolated ?: instance.isolated,
                 registered = true,
             ),
             // 只比数值，不比文字：填 " 4096 " 与 "4096" 是一回事，不该提示「被改过」

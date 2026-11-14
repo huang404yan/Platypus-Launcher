@@ -36,6 +36,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import io.github.huang404yan.platypus.core.instance.Instance
+import io.github.huang404yan.platypus.core.instance.InstanceLayouts
 import io.github.huang404yan.platypus.core.instance.InstanceScanner
 import io.github.huang404yan.platypus.core.instance.LoaderKind
 import io.github.huang404yan.platypus.core.instance.instanceKey
@@ -259,10 +260,16 @@ fun ModsPage(
         }
     }
 
-    /** 当前选中的实例目录（实例 = 版本目录），没有就返回 null。 */
+    /**
+     * 当前选中实例的**游戏目录**（下游的 `mods/` 一律从这个目录推），没有就返回 null。
+     *
+     * 以前这里直接返回 instance.directory（版本目录）。关掉版本隔离的实例
+     * （[Instance.isolated] = false）游戏读写的是游戏根目录下那份 mods/，再指回版本目录
+     * 就会出现「界面里一个模组都没有，但游戏里确实装着」。
+     */
     fun currentInstanceDir(): File? {
         val target = instances.firstOrNull { instanceKey(it) == selectedKey } ?: return null
-        return File(target.directory.trim().trim('"'))
+        return InstanceLayouts.of(target).gameDir
     }
 
     /**
@@ -400,7 +407,7 @@ fun ModsPage(
         opError = ""
         try {
             val installed = withContext(Dispatchers.IO) {
-                ModInstaller.installFile(target.directory.let { File(it.trim().trim('"')) }, slug, latest)
+                ModInstaller.installFile(dir, slug, latest)
             }
             val modsDir = ModScanner.modsDir(dir)
             val disableNote = withContext(Dispatchers.IO) {
@@ -445,8 +452,7 @@ fun ModsPage(
      */
     suspend fun installDependencies() {
         val plan = depPlan ?: return
-        val target = instances.firstOrNull { instanceKey(it) == selectedKey } ?: return
-        val dir = File(target.directory.trim().trim('"'))
+        val dir = currentInstanceDir() ?: return
         depsInstalling = true
         depStep = ""
         opNotice = ""
@@ -603,7 +609,7 @@ fun ModsPage(
             return
         }
         val kind = loader ?: LoaderKind.FABRIC
-        val instanceDir = File(target.directory.trim().trim('"'))
+        val instanceDir = InstanceLayouts.of(target).gameDir
         installingSlug = project.slug
         progress = null
         notice = ""

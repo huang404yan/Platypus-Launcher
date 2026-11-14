@@ -6,8 +6,10 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
@@ -37,6 +39,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -357,280 +360,240 @@ fun LaunchPage(
     val merged = mergeInstances(registered, scanned?.instances.orEmpty())
     val exactJava = requiredMajor?.let { major -> (javaPhase as? JavaPhase.Done)?.runtimes?.findExactMajor(major) }
 
-    // 整页可滚动：崩溃卡片一出现，内容高度会超过窗口，原来用 weight(1f) 撑的日志区
-    // 会被压成一条线（实测 1330 px 高的窗口里只剩 8 px），工具条上的复制/导出全看不见。
-    Column(
-        Modifier.fillMaxSize().verticalScroll(rememberScrollState()),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        Text("启动", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
-        Text(
-            "选一个实例、调好内存、选一个 Java，点「启动」。离线模式，不登录任何账号。",
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+    // PCL 的启动页是左栏选版本 + 大号启动按钮、右栏放设置与日志（PageLaunchLeft.xaml）。
+    // 照这个分法：左栏回答「现在要启动哪一个」，右栏回答「启动过程中与之后发生了什么」。
+    Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+        LaunchSidePanel(
+            merged = merged,
+            selected = selected,
+            busy = busy,
+            running = phase is LaunchPhase.Running,
+            stageText = stageText,
+            username = username,
+            onUsernameChange = { username = it },
+            memoryText = memoryText,
+            onMemoryChange = { memoryText = it },
+            memoryNotice = memoryNotice,
+            canLaunch = selected != null && selectedJava != null,
+            onSelect = { instance ->
+                selected = instance
+                memoryText = instance.memoryMb.toString()
+                memoryNotice = ""
+            },
+            onSaveMemory = { saveMemory() },
+            onLaunch = { launchGame() },
+            onStop = { stopGame() },
         )
-
-        // ① 实例
-        Row(
-            Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        Column(
+            Modifier.weight(1f).fillMaxHeight().verticalScroll(rememberScrollState()),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            OutlinedTextField(
-                value = rootText,
-                onValueChange = { rootText = it },
-                modifier = Modifier.weight(1f),
-                label = { Text("游戏目录（.minecraft）") },
-                singleLine = true,
-                enabled = !busy,
+            Text("启动", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
+            Text(
+                "左栏选实例、点「启动」；这一栏放目录、Java 与日志。离线模式，不登录任何账号。",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            OutlinedButton(
-                onClick = {
-                    pickDirectory(rootText)?.let {
-                        rootText = it.absolutePath
-                        scope.launch { rescan() }
-                    }
-                },
-                enabled = !busy,
-            ) { Text("选择…") }
-            Button(onClick = { scope.launch { rescan() } }, enabled = !busy) { Text("扫描") }
-        }
 
-        val result = scanned
-        when {
-            result == null && merged.isEmpty() -> SectionHint("还没有扫描。")
-            merged.isEmpty() && result != null && !result.isGameDirectory -> SectionHint("这个目录看起来不是游戏目录。")
-            merged.isEmpty() -> SectionHint("没有识别到版本。去「下载」页装一个。")
-            else -> {
-                LazyColumn(Modifier.fillMaxWidth().heightIn(max = 120.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    items(merged, key = { instanceKey(it) }) { instance ->
-                        InstanceRow(
-                            instance = instance,
-                            selected = instanceKey(instance) == selected?.let { instanceKey(it) },
-                            enabled = !busy,
-                            onClick = {
-                                selected = instance
-                                memoryText = instance.memoryMb.toString()
-                                memoryNotice = ""
-                            },
-                        )
-                    }
-                }
-            }
-        }
-
-        // ② 内存
-        Row(
-            Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
-        ) {
-            OutlinedTextField(
-                value = memoryText,
-                onValueChange = { memoryText = it },
-                modifier = Modifier.weight(1f),
-                label = { Text("最大内存（MB，范围 " + Instance.MIN_MEMORY_MB + "–" + Instance.MAX_MEMORY_MB + "）") },
-                singleLine = true,
-                enabled = !busy && selected != null,
-            )
-            OutlinedButton(onClick = { saveMemory() }, enabled = !busy && selected != null) { Text("保存到实例") }
-        }
-        if (memoryNotice.isNotBlank()) SectionHint(memoryNotice)
-
-        // ③ Java
-        Row(
-            Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
-        ) {
-            Text("Java 运行时", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
-            Spacer(Modifier.weight(1f))
-            if (requiredMajor != null) {
-                Text(
-                    "游戏需要 Java " + requiredMajor,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            val installing = javaPhase as? JavaPhase.Installing
-            if (requiredMajor != null && exactJava == null && javaPhase is JavaPhase.Done && !busy) {
-                Button(onClick = { installJava() }, enabled = installing == null) {
-                    Text(if (installing != null) "补 Java 中…" else "自动补 Java " + requiredMajor)
-                }
-            }
-            OutlinedButton(
-                onClick = { detectJava() },
-                enabled = javaPhase !is JavaPhase.Detecting && installing == null && !busy,
+            // 目录：一处目录决定左栏能选到哪些实例，所以留在内容区顶部而不是左栏。
+            Row(
+                Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
             ) {
-                Text(if (javaPhase is JavaPhase.Detecting) "探测中…" else "重新探测")
-            }
-        }
-
-        when (val current = javaPhase) {
-            is JavaPhase.Idle -> SectionHint("还没有探测。")
-            is JavaPhase.Detecting -> SectionHint("正在探测本机 Java…")
-            is JavaPhase.Installing -> SectionHint(
-                current.detail + "（" + (current.fraction * 100f).toInt() + "%）",
-            )
-            is JavaPhase.Failed -> SectionHint(
-                (if (current.duringInstall) "补 Java 失败：" else "探测 Java 失败：") + current.message,
-                error = true,
-            )
-            is JavaPhase.Done -> {
-                if (current.runtimes.isEmpty()) {
-                    SectionHint("没有找到任何 Java。可以点上面的「自动补 Java」现下一个。", error = true)
-                } else {
-                    if (requiredMajor != null && current.runtimes.findExactMajor(requiredMajor) == null) {
-                        SectionHint(
-                            "本机没有 Java " + requiredMajor + "。点「自动补 Java " + requiredMajor + "」会从 Mojang 下到游戏目录的 runtime/ 下。",
-                            error = true,
-                        )
-                    }
-                    LazyColumn(
-                        Modifier.fillMaxWidth().heightIn(max = 110.dp),
-                        verticalArrangement = Arrangement.spacedBy(6.dp),
-                    ) {
-                        items(current.runtimes) { runtime ->
-                            JavaRow(
-                                runtime = runtime,
-                                selected = runtime.path == selectedJava?.path,
-                                recommended = runtime.majorVersion == requiredMajor,
-                                enabled = !busy,
-                                onClick = { selectedJava = runtime },
-                            )
+                OutlinedTextField(
+                    value = rootText,
+                    onValueChange = { rootText = it },
+                    modifier = Modifier.weight(1f),
+                    label = { Text("游戏目录（.minecraft）") },
+                    singleLine = true,
+                    enabled = !busy,
+                )
+                OutlinedButton(
+                    onClick = {
+                        pickDirectory(rootText)?.let {
+                            rootText = it.absolutePath
+                            scope.launch { rescan() }
                         }
-                    }
-                }
+                    },
+                    enabled = !busy,
+                ) { Text("选择…") }
+                Button(onClick = { scope.launch { rescan() } }, enabled = !busy) { Text("扫描") }
             }
-        }
-
-        // ③.5 直连：联机页点「直接进」会填到这里，也可以手填
-        Row(
-            Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
-        ) {
-            OutlinedTextField(
-                value = quickTarget,
-                onValueChange = { quickTarget = it.trim() },
-                modifier = Modifier.weight(1f),
-                label = { Text("直连服务器（留空 = 停在主菜单）") },
-                singleLine = true,
-                enabled = !busy,
-                isError = quickTarget.isNotBlank() && !quickSupported,
-                supportingText = {
+            // Java 运行时
+            Row(
+                Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Text("Java 运行时", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+                Spacer(Modifier.weight(1f))
+                if (requiredMajor != null) {
                     Text(
-                        if (quickTarget.isBlank()) {
-                            "填 192.168.1.10:54321 这种地址，启动后直接进那个世界。"
-                        } else {
-                            "启动后跳过主菜单，直连这个地址。"
-                        },
-                    )
-                },
-            )
-            if (quickTarget.isNotBlank()) {
-                OutlinedButton(onClick = { quickTarget = "" }, enabled = !busy) { Text("清空") }
-            }
-        }
-        if (quickTarget.isNotBlank() && !quickSupported) {
-            SectionHint(
-                "这个版本的版本文件里没有 --quickPlayMultiplayer（1.20 起才有），点启动会直接报错。换 1.20+ 的实例，或清空上面的地址。",
-                error = true,
-            )
-        }
-
-        // ④ 启动
-        Row(
-            Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
-        ) {
-            OutlinedTextField(
-                value = username,
-                onValueChange = { username = it },
-                modifier = Modifier.weight(1f),
-                label = { Text("离线用户名") },
-                singleLine = true,
-                enabled = !busy,
-                supportingText = { Text("点「启动」会记住这个名字，下次自动填回来。") },
-            )
-            Button(onClick = { launchGame() }, enabled = !busy && selected != null && selectedJava != null) {
-                Text("启动")
-            }
-            OutlinedButton(onClick = { stopGame() }, enabled = phase is LaunchPhase.Running) { Text("停止") }
-        }
-
-        StatusLine(phase = phase, stageText = stageText, menuReached = menuReached)
-
-        // ⑤ 崩溃报告：退出后才有，读不到就不占位置
-        (phase as? LaunchPhase.Exited)?.crash?.let { crash ->
-            CrashCard(
-                crash = crash,
-                instanceDir = selected?.let { File(it.directory) },
-                onNotice = { notice = it },
-            )
-        }
-
-        // ⑥ 日志
-        val listState = rememberLazyListState()
-        LaunchedEffect(logs.size) {
-            if (logs.isNotEmpty()) listState.scrollToItem(logs.size - 1)
-        }
-        Row(
-            Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(4.dp),
-        ) {
-            Text(
-                if (logs.isEmpty()) "日志" else "日志 · " + logs.size + " 行",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Spacer(Modifier.weight(1f))
-            TextButton(
-                onClick = { notice = copyText(logs.joinToString("\n"), "日志") },
-                enabled = logs.isNotEmpty(),
-            ) { Text("复制") }
-            TextButton(
-                onClick = { notice = exportLogs(selected?.let { File(it.directory) }, logs) },
-                enabled = logs.isNotEmpty() && selected != null,
-            ) { Text("导出") }
-            TextButton(
-                onClick = { notice = openCrashDir(selected?.let { File(it.directory) }) },
-                enabled = selected != null,
-            ) { Text("打开崩溃报告目录") }
-        }
-        if (notice.isNotBlank()) {
-            Text(
-                notice,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-
-        // 固定高度而不是 weight(1f)：外层已经是可滚动 Column，weight 在滚动容器里拿不到
-        // 有界高度；日志列表本身用 LazyColumn，也必须有个确定的上界才能滚动。
-        Surface(
-            Modifier.fillMaxWidth().height(240.dp),
-            color = MaterialTheme.colorScheme.surfaceVariant,
-            shape = RoundedCornerShape(8.dp),
-        ) {
-            if (logs.isEmpty()) {
-                Column(Modifier.fillMaxSize().padding(12.dp)) {
-                    Text(
-                        "启动后游戏的 stdout/stderr 会实时出现在这里。",
+                        "游戏需要 Java " + requiredMajor,
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
-            } else {
-                LazyColumn(Modifier.fillMaxSize().padding(10.dp), state = listState) {
-                    items(logs) { line ->
+                val installing = javaPhase as? JavaPhase.Installing
+                if (requiredMajor != null && exactJava == null && javaPhase is JavaPhase.Done && !busy) {
+                    Button(onClick = { installJava() }, enabled = installing == null) {
+                        Text(if (installing != null) "补 Java 中…" else "自动补 Java " + requiredMajor)
+                    }
+                }
+                OutlinedButton(
+                    onClick = { detectJava() },
+                    enabled = javaPhase !is JavaPhase.Detecting && installing == null && !busy,
+                ) {
+                    Text(if (javaPhase is JavaPhase.Detecting) "探测中…" else "重新探测")
+                }
+            }
+
+            when (val current = javaPhase) {
+                is JavaPhase.Idle -> SectionHint("还没有探测。")
+                is JavaPhase.Detecting -> SectionHint("正在探测本机 Java…")
+                is JavaPhase.Installing -> SectionHint(
+                    current.detail + "（" + (current.fraction * 100f).toInt() + "%）",
+                )
+                is JavaPhase.Failed -> SectionHint(
+                    (if (current.duringInstall) "补 Java 失败：" else "探测 Java 失败：") + current.message,
+                    error = true,
+                )
+                is JavaPhase.Done -> {
+                    if (current.runtimes.isEmpty()) {
+                        SectionHint("没有找到任何 Java。可以点上面的「自动补 Java」现下一个。", error = true)
+                    } else {
+                        if (requiredMajor != null && current.runtimes.findExactMajor(requiredMajor) == null) {
+                            SectionHint(
+                                "本机没有 Java " + requiredMajor + "。点「自动补 Java " + requiredMajor + "」会从 Mojang 下到游戏目录的 runtime/ 下。",
+                                error = true,
+                            )
+                        }
+                        LazyColumn(
+                            Modifier.fillMaxWidth().heightIn(max = 110.dp),
+                            verticalArrangement = Arrangement.spacedBy(6.dp),
+                        ) {
+                            items(current.runtimes) { runtime ->
+                                JavaRow(
+                                    runtime = runtime,
+                                    selected = runtime.path == selectedJava?.path,
+                                    recommended = runtime.majorVersion == requiredMajor,
+                                    enabled = !busy,
+                                    onClick = { selectedJava = runtime },
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
+            // 直连：联机页点「直接进」会填到这里，也可以手填
+            Row(
+                Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                OutlinedTextField(
+                    value = quickTarget,
+                    onValueChange = { quickTarget = it.trim() },
+                    modifier = Modifier.weight(1f),
+                    label = { Text("直连服务器（留空 = 停在主菜单）") },
+                    singleLine = true,
+                    enabled = !busy,
+                    isError = quickTarget.isNotBlank() && !quickSupported,
+                    supportingText = {
                         Text(
-                            line,
-                            style = MaterialTheme.typography.bodySmall,
-                            fontFamily = FontFamily.Monospace,
+                            if (quickTarget.isBlank()) {
+                                "填 192.168.1.10:54321 这种地址，启动后直接进那个世界。"
+                            } else {
+                                "启动后跳过主菜单，直连这个地址。"
+                            },
                         )
+                    },
+                )
+                if (quickTarget.isNotBlank()) {
+                    OutlinedButton(onClick = { quickTarget = "" }, enabled = !busy) { Text("清空") }
+                }
+            }
+            if (quickTarget.isNotBlank() && !quickSupported) {
+                SectionHint(
+                    "这个版本的版本文件里没有 --quickPlayMultiplayer（1.20 起才有），点启动会直接报错。换 1.20+ 的实例，或清空上面的地址。",
+                    error = true,
+                )
+            }
+
+            StatusLine(phase = phase, stageText = stageText, menuReached = menuReached)
+
+            // 崩溃报告：退出后才有，读不到就不占位置
+            (phase as? LaunchPhase.Exited)?.crash?.let { crash ->
+                CrashCard(
+                    crash = crash,
+                    instanceDir = selected?.let { File(it.directory) },
+                    onNotice = { notice = it },
+                )
+            }
+
+            // 日志
+            val listState = rememberLazyListState()
+            LaunchedEffect(logs.size) {
+                if (logs.isNotEmpty()) listState.scrollToItem(logs.size - 1)
+            }
+            Row(
+                Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                Text(
+                    if (logs.isEmpty()) "日志" else "日志 · " + logs.size + " 行",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.weight(1f))
+                TextButton(
+                    onClick = { notice = copyText(logs.joinToString("\n"), "日志") },
+                    enabled = logs.isNotEmpty(),
+                ) { Text("复制") }
+                TextButton(
+                    onClick = { notice = exportLogs(selected?.let { File(it.directory) }, logs) },
+                    enabled = logs.isNotEmpty() && selected != null,
+                ) { Text("导出") }
+                TextButton(
+                    onClick = { notice = openCrashDir(selected?.let { File(it.directory) }) },
+                    enabled = selected != null,
+                ) { Text("打开崩溃报告目录") }
+            }
+            if (notice.isNotBlank()) {
+                Text(
+                    notice,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+
+            // 固定高度而不是 weight(1f)：外层已经是可滚动 Column，weight 在滚动容器里拿不到
+            // 有界高度；日志列表本身用 LazyColumn，也必须有个确定的上界才能滚动。
+            Surface(
+                Modifier.fillMaxWidth().height(240.dp),
+                color = MaterialTheme.colorScheme.surfaceVariant,
+                shape = RoundedCornerShape(8.dp),
+            ) {
+                if (logs.isEmpty()) {
+                    Column(Modifier.fillMaxSize().padding(12.dp)) {
+                        Text(
+                            "启动后游戏的 stdout/stderr 会实时出现在这里。",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                } else {
+                    LazyColumn(Modifier.fillMaxSize().padding(10.dp), state = listState) {
+                        items(logs) { line ->
+                            Text(
+                                line,
+                                style = MaterialTheme.typography.bodySmall,
+                                fontFamily = FontFamily.Monospace,
+                            )
+                        }
                     }
                 }
             }
@@ -836,6 +799,123 @@ private fun StatusLine(phase: LaunchPhase, stageText: String, menuReached: Boole
         is LaunchPhase.Failed -> "启动失败：" + phase.message to MaterialTheme.colorScheme.error
     }
     Text(text, style = MaterialTheme.typography.bodyMedium, color = color)
+}
+
+/**
+ * 启动页左栏：实例列表 + 用户名 + 内存 + 大号启动按钮。
+ *
+ * 为什么搬到这里：PCL 的 `PageLaunchLeft.xaml` 就是这样分的 —— 左栏回答「现在要启动哪一个」，
+ * 右栏放设置与日志。我方原来是「一列往下滚的表单」，实例列表、内存、用户名、启动按钮
+ * 依次排在页面中间，点启动要先往下滚一段，日志又被顶到更下面。
+ *
+ * 实例列表用 weight(1f) 吃掉剩余高度：实例多的时候这一栏自己滚，不会把启动按钮挤出屏幕 ——
+ * 按钮必须永远在看得见的地方。
+ */
+@Composable
+private fun LaunchSidePanel(
+    merged: List<Instance>,
+    selected: Instance?,
+    busy: Boolean,
+    running: Boolean,
+    stageText: String,
+    username: String,
+    onUsernameChange: (String) -> Unit,
+    memoryText: String,
+    onMemoryChange: (String) -> Unit,
+    memoryNotice: String,
+    canLaunch: Boolean,
+    onSelect: (Instance) -> Unit,
+    onSaveMemory: () -> Unit,
+    onLaunch: () -> Unit,
+    onStop: () -> Unit,
+) {
+    val compact = LocalWindowInfo.current.containerSize.width < 1100
+    Surface(
+        Modifier.width(if (compact) 248.dp else 300.dp).fillMaxHeight(),
+        color = MaterialTheme.colorScheme.surfaceVariant,
+        shape = RoundedCornerShape(10.dp),
+    ) {
+        Column(
+            Modifier.fillMaxHeight().padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    "实例",
+                    Modifier.weight(1f),
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                Text(
+                    merged.size.toString() + " 个",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            if (merged.isEmpty()) {
+                Text(
+                    "这个目录里还没有可启动的版本。先去「下载」装一个。",
+                    Modifier.weight(1f),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            } else {
+                LazyColumn(
+                    Modifier.fillMaxWidth().weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    items(merged, key = { instanceKey(it) }) { instance ->
+                        InstanceRow(
+                            instance = instance,
+                            selected = instanceKey(instance) == selected?.let { instanceKey(it) },
+                            enabled = !busy,
+                            onClick = { onSelect(instance) },
+                        )
+                    }
+                }
+            }
+            OutlinedTextField(
+                value = username,
+                onValueChange = onUsernameChange,
+                modifier = Modifier.fillMaxWidth(),
+                label = { Text("离线用户名") },
+                singleLine = true,
+                enabled = !busy,
+                supportingText = { Text("点「启动」会记住这个名字。") },
+            )
+            Row(
+                Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                OutlinedTextField(
+                    value = memoryText,
+                    onValueChange = onMemoryChange,
+                    modifier = Modifier.weight(1f),
+                    label = { Text("内存 MB") },
+                    singleLine = true,
+                    enabled = !busy && selected != null,
+                )
+                OutlinedButton(onClick = onSaveMemory, enabled = !busy && selected != null) { Text("存") }
+            }
+            if (memoryNotice.isNotBlank()) SectionHint(memoryNotice)
+            // 大号按钮照 PCL 的 54 高：它是这一页唯一的主要动作，不该和旁边的次要按钮一样大。
+            Button(
+                onClick = onLaunch,
+                modifier = Modifier.fillMaxWidth().height(54.dp),
+                enabled = !busy && canLaunch,
+            ) {
+                Text(if (busy) "启动中…" else "启动", style = MaterialTheme.typography.titleMedium)
+            }
+            if (running || busy) {
+                OutlinedButton(onClick = onStop, modifier = Modifier.fillMaxWidth(), enabled = running) {
+                    Text(if (running) "停止游戏" else "正在启动…")
+                }
+            } else if (stageText.isNotBlank()) {
+                SectionHint(stageText)
+            }
+        }
+    }
 }
 
 @Composable
