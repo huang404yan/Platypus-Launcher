@@ -126,9 +126,34 @@ LaunchedEffect(kind) {
 
 ---
 
+## 六之二、安卓端（2026-11-14）
+
+手机端原来只有「模组」没有「光影资源包」，现在补上了：`androidApp/.../launcher/preview/PacksPage.kt`（695 行），`MainActivity` 的 `Tab` 枚举加 `PACKS("光影资源包")`，排在「模组」与「联机」之间。
+
+**逻辑一行没重写**，直接用 core 的 `PackScanner` / `PackFileOps` / `PackInstaller`。与桌面端只有两处形状差异：
+
+| | 桌面端 | 安卓端 |
+| --- | --- | --- |
+| 光影 / 资源包怎么切 | 侧边栏的两个二级项（`subTab`） | 页面顶部两个 `OutlinedButton`（侧边栏放不下二级） |
+| 布局 | 左右双栏（左已装、右搜索） | 一条竖着滚的 `LazyColumn`：标题 → 切包类型 → 权限卡 → 游戏目录 → 选实例 → 搜索 → 已装清单 → 搜索结果 |
+
+桌面端踩过的两个坑在手机端直接绕开了：标题按 `PackKind` 给全名（不拼「包」）、`booted` 标记 + `LaunchedEffect(kind)` 切页重扫。
+
+手机上侧边栏 8 项已经排到「关于」，加第 9 项后仍是竖排一列，没有折叠。
+
+**这一页现在还加载不了光影**：手机端没有应用内启动游戏的能力（`runtime-android` 模块未开始，见 `docs/03-luxian-yu-youxianji.md` 第 3 节）。所以它的用处是「在手机上把包装好」，等启动能力接上后直接可用。
+
+**未做真机点击验证**：`adb devices` 列表为空，`D:/ruanjian/kaifa/android-sdk/emulator` 目录不存在、`~/.android/avd` 也没有任何 AVD。本轮只做到编译通过与产物复核：
+
+- `:androidApp:assembleDebug -PskipWix` → `EXIT=0 BUILD SUCCESSFUL in 29s`
+- `androidApp/build/outputs/apk/debug/androidApp-debug.apk` **13 444 378 B**、14 个 dex
+- `classes11.dex` 里 `PacksPage` 命中 739 处、`InstalledPackRow` 36 处、`SearchResultRow` 21 处；`classes11/14.dex` 里 `PackScanner` 41 / `PackFileOps` 10 / `PackInstaller` 23
+
+---
+
 ## 七、还没做到
 
-- 只有桌面端（jvmMain）做了这一页，**安卓端没有**。
+- 安卓端这一页**没有真机验证**（无设备、无模拟器），只验证了编译与 apk 内含新类。
 - 不读光影包内部信息（比如作者、版本号），只靠文件名与 Modrinth 返回的 `versionNumber`。
 - 不支持「从本地 zip 导入」——只能从 Modrinth 装。
 - 资源包的 `pack_format` 只显示不比对本机版本，装了不匹配的资源包不会有任何提示。

@@ -91,7 +91,7 @@ Windows 下也可以用 `gradlew.bat`。首次构建会下载约 300 MB 依赖�
 - `docs/26-bengkui-baogao.md`：**崩溃报告读取与归因**（按 mtime 挑最新一份、退出码与时间两道闸、只读头部 256 KB、模组规则必须排在加载器规则之前）
 - `docs/27-rizhi-bianma.md`：**日志中文不乱码**（给 JVM 传 `-Dstdout.encoding` + `-Dfile.encoding`、读侧按字节严格试 UTF-8 再退 GBK、为什么不能靠查替换符判编码、64 KB 单行上限）
 - `docs/28-mods-yilai.md`：**模组依赖求解**（Modrinth 只给 project_id、sha1 反查已装、按层 BFS + 深度/数量封顶、失败不连坐）
-- `docs/29-guangying-ziyuanbao.md`：**光影与资源包**（光影查 `loaders=["iris","optifine"]`、资源包查 `["minecraft"]`、元数据读不出只记 problem 不吞、文件夹形态拒绝停用的原因）
+- `docs/29-guangying-ziyuanbao.md`：**光影与资源包**（光影查 `loaders=["iris","optifine"]`、资源包查 `["minecraft"]`、元数据读不出只记 problem 不吞、文件夹形态拒绝停用的原因、安卓端为什么改成页内切换）
 
 ## 下载
 
@@ -116,7 +116,9 @@ M0（骨架）+ M1（实例扫描）+ M2（下载器）+ M3（**Windows 一键�
 
 **Android 端补齐了三个页面**：侧边栏从「四个真页面 + 两个哑占位」变成「七个真页面 + 启动占位」。新增模组页（本地 `mods/` 列表 + Modrinth 搜索安装）、联机页（组播扫描 + 手动解析地址，多拿一个 `MulticastLock` 才收得到包）、设置页（与桌面读写同一个 `platypus/settings.json`）。为此把 `ModInstaller` 从 `ui` 的 jvmMain 下沉到 `core`，桌面与安卓共用同一份逻辑。启动页仍不存在——「应用内起 JVM + 图形转译」是独立的 `runtime-android` 模块（`docs/09`），占位页现在写清缺什么而不是一句「还没做」（`docs/20`）。
 
-**Android 端仍未在真机跑过**：三个新页面和原有的下载页、诊断页一样，验证止于「编译通过 + APK 的 dex 里有这些类」，没有一份真机截图或日志。
+**Android 端也能管光影和资源包了**：侧边栏在「模组」与「联机」之间多一项「光影资源包」，页内顶部两个按钮切光影 / 资源包（手机侧边栏放不下二级）。逻辑与桌面端共用 core 的 `PackScanner` / `PackFileOps` / `PackInstaller`，一行没重写：从实例的 `shaderpacks/` 或 `resourcepacks/` 扫出已装的、勾选框启停、删除二次确认、从 Modrinth 搜了直接装。手机端目前还没有应用内启动游戏的能力（`runtime-android` 未开始），所以这一页的用处是「在手机上把包装好」（`docs/29`）。
+
+**Android 端仍未在真机跑过**：四个新页面和原有的下载页、诊断页一样，验证止于「编译通过 + APK 的 dex 里有这些类」，没有一份真机截图或日志。
 
 设置已经能存住：离线用户名、默认游戏目录、新实例默认内存，落在 `<游戏目录>/platypus/settings.json`，关掉再打开还在（`docs/13`）。
 
