@@ -42,6 +42,7 @@ import io.github.huang404yan.platypus.core.mods.ModProject
 import io.github.huang404yan.platypus.core.mods.ModrinthMeta
 import io.github.huang404yan.platypus.core.modpack.ModpackBrowser
 import io.github.huang404yan.platypus.core.modpack.ModpackDownloadProgress
+import io.github.huang404yan.platypus.core.search.SearchTerm
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
@@ -250,6 +251,13 @@ internal fun ModpackSection(
                         "挑一个装：会自动下最新的 .mrpack 到系统临时目录，再走下面同一条导入流水线。",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                // 整合包名以英文为主，但「农夫乐事」这类中文叫法也很常被拿来搜：
+                // 与其让用户对着空列表猜，不如直接说明 Modrinth 只认英文并给候选。
+                ChineseSearchHint(
+                    query = query,
+                    kind = SearchTerm.Kind.MODPACK,
+                    onPick = { query = it },
                 )
                 if (searchError.isNotBlank()) {
                     Text(searchError, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)

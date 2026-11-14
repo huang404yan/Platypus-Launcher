@@ -1,16 +1,27 @@
 package io.github.huang404yan.platypus.desktop
 
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.graphics.painter.BitmapPainter
 import androidx.compose.ui.graphics.toComposeImageBitmap
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.application
+import androidx.compose.ui.window.rememberWindowState
 import io.github.huang404yan.platypus.core.Brand
 import io.github.huang404yan.platypus.core.instance.InstanceScanner
 import io.github.huang404yan.platypus.ui.App
 import io.github.huang404yan.platypus.ui.defaultGameRoot
 import org.jetbrains.skia.Image
+import java.awt.Dimension
 import java.io.File
 
+/**
+ * 默认窗口 1280x820：1080p 屏上不用最大化也能放下整页。
+ *
+ * 以前没有默认尺寸，Compose 给的初始窗口比内容窄，右侧按钮会被裁掉，
+ * 用户第一眼看到的就是「必须最大化才好用」。最小尺寸卡在 1024x640，
+ * 再小就没法并排放下侧栏与表单了——各页面自己还有滚动兜底。
+ */
 fun main(args: Array<String>) {
     val root = args.firstOrNull()
         ?: System.getenv("PLATYPUS_GAME_DIR")
@@ -29,11 +40,17 @@ fun main(args: Array<String>) {
     val services = DesktopServices.create(root.takeIf { it.isNotBlank() }?.let(::File))
 
     application {
+        val windowState = rememberWindowState(width = 1280.dp, height = 820.dp)
         Window(
             onCloseRequest = ::exitApplication,
             title = title,
             icon = loadWindowIcon(),
+            state = windowState,
         ) {
+            LaunchedEffect(Unit) {
+                // 拖到比这还小，侧栏与表单会互相挤，不如直接卡住下限。
+                window.minimumSize = Dimension(1024, 640)
+            }
             App(initialGameRoot = root.ifBlank { null }, backend = services)
         }
     }

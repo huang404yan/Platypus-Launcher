@@ -45,6 +45,7 @@ import io.github.huang404yan.platypus.core.packs.PackInstaller
 import io.github.huang404yan.platypus.core.packs.PackKind
 import io.github.huang404yan.platypus.core.packs.PackScanner
 import io.github.huang404yan.platypus.core.packs.PackScanResult
+import io.github.huang404yan.platypus.core.search.SearchTerm
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -315,6 +316,14 @@ fun PacksPage(
                 label = { Text("游戏目录（.minecraft）") },
                 singleLine = true,
             )
+            OutlinedButton(
+                onClick = {
+                    pickDirectory(rootText)?.let {
+                        rootText = it.absolutePath
+                        scope.launch { rescanInstances(); rescanPacks() }
+                    }
+                },
+            ) { Text("选择…") }
             Button(
                 onClick = {
                     scope.launch {
@@ -344,6 +353,7 @@ fun PacksPage(
 
         BrowsePacksTab(
             modifier = Modifier.fillMaxWidth().weight(1f),
+            kind = kind,
             kindLabel = kind.label,
             query = query,
             onQueryChange = { query = it },
@@ -426,6 +436,7 @@ private fun PackInstancePicker(
 @Composable
 private fun BrowsePacksTab(
     modifier: Modifier,
+    kind: PackKind,
     kindLabel: String,
     query: String,
     onQueryChange: (String) -> Unit,
@@ -471,6 +482,13 @@ private fun BrowsePacksTab(
                 Text(if (searching) "搜索中…" else "搜索")
             }
         }
+
+        // 光影/资源包的中文叫法比模组更常用（「互补」「原味素材」），中文关键词一律搜不到。
+        ChineseSearchHint(
+            query = query,
+            kind = if (kind == PackKind.SHADER) SearchTerm.Kind.SHADER else SearchTerm.Kind.RESOURCE_PACK,
+            onPick = onQueryChange,
+        )
 
         if (notice.isNotBlank()) PackHint(notice)
         if (searchError.isNotBlank()) PackHint("Modrinth：" + searchError, error = true)

@@ -526,6 +526,17 @@ fun DownloadsPage(
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
 
+        // 安装状态置顶：原来的进度、速度、失败原因都在整页最下面，一滚就看不见，
+        // 用户点完「一键安装」往往以为没反应（窗口小的时候更明显）。这里只放一行摘要，
+        // 详细的分步列表仍在下方，两处说的是同一份状态。
+        InstallStatusBanner(
+            phase = phase,
+            currentStep = currentStep,
+            progress = progress,
+            speedBytesPerSecond = speedBytesPerSecond,
+            elapsedMs = elapsedMs,
+        )
+
         Row(
             Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
@@ -539,6 +550,10 @@ fun DownloadsPage(
                 singleLine = true,
                 enabled = !busy,
             )
+            OutlinedButton(
+                onClick = { pickDirectory(gameDirText)?.let { gameDirText = it.absolutePath } },
+                enabled = !busy,
+            ) { Text("选择…") }
         }
 
         Row(
@@ -652,6 +667,14 @@ fun DownloadsPage(
         }
 
         manifestError?.let { DownloadHint(it + "（不影响手填版本号：会走 BMCLAPI 的版本接口兜底）", error = true) }
+
+        // 过滤词打错了要立刻说，否则用户会盯着空列表以为版本列表挂了
+        if (visible.isEmpty() && releases.isNotEmpty() && !loadingManifest) {
+            DownloadHint(
+                "没有名字里带「" + filterText.trim() + "」的正式版。清空过滤框能看全部 " +
+                    releases.size + " 个；也可以直接在版本号里手填。",
+            )
+        }
 
         if (visible.isNotEmpty()) {
             Card(
@@ -784,6 +807,58 @@ fun DownloadsPage(
     }
 }
 
+/**
+ * 安装状态的一行摘要，钉在页面顶部。
+ *
+ * 详细的分步列表、进度条、失败原因仍在页面下方（那里有完整信息），
+ * 但那些内容在 1280x800 的窗口里一滚就出屏 —— 用户点完「一键安装」、
+ * 页面没动，很容易以为按钮没反应，然后再点几次。这个条的作用就是
+ * 「点了有反应」当场可见：现在在干什么、下了多少、大概还剩多久。
+ */
+@Composable
+private fun InstallStatusBanner(
+    phase: InstallPhase,
+    currentStep: InstallStep,
+    progress: StepProgress?,
+    speedBytesPerSecond: Long,
+    elapsedMs: Long,
+) {
+    val (text, isError) = when (phase) {
+        is InstallPhase.Running -> {
+            val detail = if (progress != null && progress.total > 0L) {
+                " · " + formatProgressDetail(progress)
+            } else {
+                ""
+            }
+            val speed = if (progress?.step == InstallStep.DOWNLOADING && speedBytesPerSecond > 0L) {
+                " · " + formatSpeed(speedBytesPerSecond) + "/s"
+            } else {
+                ""
+            }
+            ("正在" + currentStep.label + detail + speed + " · 已用 " + formatDuration(elapsedMs)) to false
+        }
+        is InstallPhase.Failed -> ("卡在「" + phase.step.label + "」：" + phase.message) to true
+        is InstallPhase.Finished -> ("安装完成：" + phase.outcome.instance.name + " 已就绪") to false
+        InstallPhase.Idle -> return
+    }
+    Card(
+        Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = if (isError) {
+                MaterialTheme.colorScheme.errorContainer
+            } else {
+                MaterialTheme.colorScheme.surfaceVariant
+            },
+        ),
+    ) {
+        Text(
+            text,
+            Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
+            style = MaterialTheme.typography.bodySmall,
+            color = if (isError) MaterialTheme.colorScheme.onErrorContainer else MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
 /**
  * 「步骤名 —— 状态」的一行；失败时把原因原样显示出来。
  *

@@ -384,6 +384,15 @@ fun LaunchPage(
                 singleLine = true,
                 enabled = !busy,
             )
+            OutlinedButton(
+                onClick = {
+                    pickDirectory(rootText)?.let {
+                        rootText = it.absolutePath
+                        scope.launch { rescan() }
+                    }
+                },
+                enabled = !busy,
+            ) { Text("选择…") }
             Button(onClick = { scope.launch { rescan() } }, enabled = !busy) { Text("扫描") }
         }
 

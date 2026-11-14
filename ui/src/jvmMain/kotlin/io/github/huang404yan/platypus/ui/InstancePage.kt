@@ -11,9 +11,9 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -28,6 +28,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -413,7 +414,13 @@ fun InstancePage(
         return
     }
 
-    Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+    // 整页滚动：默认窗口里卡片一多，下面几张就被切在窗口外，用户得先最大化才看得全。
+    // 这里不用「固定头 + weight(1f) 列表」是因为顶部那几行（目录、新建卡片、提示）
+    // 在窄窗口下自己就会占掉大半屏，权重分完列表只剩几十像素，滚轮落在列表外就没反应。
+    Column(
+        Modifier.fillMaxSize().verticalScroll(rememberScrollState()),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
         Text("实例", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
         Text(
             "扫描目录里已有的版本，或新建一个（下载 → 补 Java → 登记）。扫描只读；登记的实例才能改内存。",
@@ -434,6 +441,15 @@ fun InstancePage(
                 singleLine = true,
                 enabled = !busy,
             )
+            OutlinedButton(
+                onClick = {
+                    pickDirectory(rootText)?.let {
+                        rootText = it.absolutePath
+                        scope.launch { rescan() }
+                    }
+                },
+                enabled = !busy,
+            ) { Text("选择…") }
             Button(onClick = { scope.launch { rescan() } }, enabled = !busy) { Text("扫描") }
             Button(
                 onClick = {
@@ -465,7 +481,7 @@ fun InstancePage(
         if (message.isNotBlank()) Hint(message)
 
         val current = result
-        Box(Modifier.fillMaxWidth().weight(1f)) {
+        Box(Modifier.fillMaxWidth()) {
             when {
                 current == null && merged.isEmpty() -> Hint("还没有扫描。填入目录后点「扫描」。")
 
@@ -483,7 +499,7 @@ fun InstancePage(
                     }
                 }
 
-                else -> Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                else -> Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     val warningCount = current?.warnings.orEmpty().size
                     Text(
                         "找到 " + merged.size + " 个实例（已登记 " + registered.size + " · 仅扫描到 " + scannedOnly + "）" +
@@ -493,8 +509,10 @@ fun InstancePage(
                     )
                     current?.warnings.orEmpty().forEach { WarningLine(it) }
                     if (editNotice.isNotBlank()) Hint(editNotice)
-                    LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        items(merged, key = { instanceKey(it) }) { instance ->
+                    // 实例是个位数到十几的量级：整段铺开、交给外层滚动，
+                    // 比 LazyColumn 再套一层滚动更可预期（滚轮只作用在一个方向上）。
+                    merged.forEach { instance ->
+                        key(instanceKey(instance)) {
                             InstanceCard(
                                 instance = instance,
                                 editing = editingKey == instanceKey(instance),
