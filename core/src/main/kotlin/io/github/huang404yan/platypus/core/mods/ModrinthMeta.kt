@@ -156,10 +156,11 @@ object ModrinthMeta {
     fun latestVersionsUrl(slug: String, gameVersion: String?, loader: LoaderKind): String =
         versionsUrl(slug, gameVersion, loader)
 
-    /** 搜索时按项目类型过滤的取值：模组 / 光影 / 资源包（Modrinth 的 project_type 只有这几种）。 */
+    /** 搜索时按项目类型过滤的取值：模组 / 光影 / 资源包 / 整合包（Modrinth 的 project_type 就这几种）。 */
     const val PROJECT_TYPE_MOD = "mod"
     const val PROJECT_TYPE_SHADER = "shader"
     const val PROJECT_TYPE_RESOURCEPACK = "resourcepack"
+    const val PROJECT_TYPE_MODPACK = "modpack"
 
     private val json = Json { ignoreUnknownKeys = true; isLenient = true }
 
