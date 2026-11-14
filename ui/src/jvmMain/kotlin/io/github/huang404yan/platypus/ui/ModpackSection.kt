@@ -6,7 +6,10 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -14,6 +17,7 @@ import androidx.compose.material3.Checkbox
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -25,12 +29,17 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import io.github.huang404yan.platypus.core.instance.Instance
+import io.github.huang404yan.platypus.core.instance.LoaderKind
 import io.github.huang404yan.platypus.core.install.ModpackImportException
 import io.github.huang404yan.platypus.core.install.ModpackImportOutcome
 import io.github.huang404yan.platypus.core.install.ModpackImporter
 import io.github.huang404yan.platypus.core.install.ModpackPreview
 import io.github.huang404yan.platypus.core.install.ModpackProgress
 import io.github.huang404yan.platypus.core.install.ModpackStep
+import io.github.huang404yan.platypus.core.mods.ModProject
+import io.github.huang404yan.platypus.core.mods.ModrinthMeta
+import io.github.huang404yan.platypus.core.modpack.ModpackBrowser
+import io.github.huang404yan.platypus.core.modpack.ModpackDownloadProgress
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
@@ -45,15 +54,21 @@ private sealed interface ImportPhase {
     data class Failed(val step: ModpackStep, val message: String) : ImportPhase
 }
 
+/** 整合包从哪来：本地已有的压缩包，还是当场从 Modrinth 下一个。 */
+private enum class ModpackSource { LOCAL, REMOTE }
+
 /**
  * 整合包导入区：选一个 .mrpack / MCBBS v2 包，一次装成能启动的实例。
+ *
+ * 两个入口共用后面整条导入流水线：
+ * - **本地文件**：用户自己下好的 .mrpack / .zip，选完先只读预览。
+ * - **从 Modrinth 搜**：搜到整合包 → 挑一个能装的 .mrpack → 下到系统临时目录 → 同样走预览与导入。
+ *   远程这条只多出「把 .mrpack 弄到本地」这一步，装的部分一行都没有复制
+ *   （见 [ModpackBrowser] 的注释：两条路只有一份进度与错误处理）。
  *
  * 为什么放在下载页而不是新开一个一级导航：导入整合包的用户做的事和「装一个版本」
  * 是同一件事（都会下载游戏本体、都要装加载器），只是入口多了一个 .zip 文件。
  * 单独开一页会让下载页与导入页各自维护一套进度与错误显示。
- *
- * 选完文件先 [ModpackImporter.inspect] 做一次只读预览 —— 用户能在真正下载几个 G
- * 之前看到「这是什么包、要装哪个版本、带什么加载器、多大」。
  */
 @Composable
 internal fun ModpackSection(
@@ -62,7 +77,10 @@ internal fun ModpackSection(
     defaultMemoryMb: Int,
     backend: LauncherBackend?,
     onImported: (Instance) -> Unit,
+    initialGameVersion: String = "",
 ) {
+    var source by remember { mutableStateOf(ModpackSource.LOCAL) }
+
     var archivePath by remember { mutableStateOf("") }
     var preview by remember { mutableStateOf<ModpackPreview?>(null) }
     var previewError by remember { mutableStateOf<String?>(null) }
@@ -72,9 +90,25 @@ internal fun ModpackSection(
     var progress by remember { mutableStateOf<ModpackProgress?>(null) }
     var message by remember { mutableStateOf("") }
     var job by remember { mutableStateOf<Job?>(null) }
-    val scope = rememberCoroutineScope()
 
+    // 远程搜索那一段的状态。与导入阶段分开：搜索失败不该把「已装好」的结果清掉。
+    var query by remember { mutableStateOf("") }
+    var remoteVersion by remember { mutableStateOf(initialGameVersion.trim()) }
+    var remoteLoader by remember { mutableStateOf(LoaderKind.FABRIC) }
+    var searching by remember { mutableStateOf(false) }
+    var searchError by remember { mutableStateOf("") }
+    var results by remember { mutableStateOf<List<ModProject>>(emptyList()) }
+    var searched by remember { mutableStateOf(false) }
+    var preparingSlug by remember { mutableStateOf("") }
+    var preparingDetail by remember { mutableStateOf("") }
+    var downloadProgress by remember { mutableStateOf<ModpackDownloadProgress?>(null) }
+    var remoteNotice by remember { mutableStateOf("") }
+    var searchJob by remember { mutableStateOf<Job?>(null) }
+    var prepareJob by remember { mutableStateOf<Job?>(null) }
+
+    val scope = rememberCoroutineScope()
     val running = phase is ImportPhase.Running
+    val busy = running || searching || preparingSlug.isNotBlank()
 
     fun inspectArchive(file: File) {
         archivePath = file.absolutePath
@@ -98,8 +132,7 @@ internal fun ModpackSection(
         }
     }
 
-    fun startImport() {
-        val file = preview?.archive ?: return
+    fun startImport(archive: File) {
         val dirText = gameDir.trim()
         if (dirText.isEmpty()) {
             message = "先在上面填一个目标目录，比如 D:/mc-test。"
@@ -116,7 +149,7 @@ internal fun ModpackSection(
         job = scope.launch {
             try {
                 val outcome = ModpackImporter.import(
-                    archive = file,
+                    archive = archive,
                     gameDir = File(dirText),
                     javaRuntimes = backend.javaRuntimes,
                     instances = backend.instances,
@@ -134,6 +167,84 @@ internal fun ModpackSection(
             } catch (e: Exception) {
                 progress = null
                 phase = ImportPhase.Failed(stepOf(e), describeImportError(e))
+            }
+        }
+    }
+
+    fun runSearch() {
+        searchJob?.cancel()
+        searchError = ""
+        remoteNotice = ""
+        searching = true
+        searchJob = scope.launch {
+            try {
+                val found = ModpackBrowser.search(
+                    query = query,
+                    gameVersion = remoteVersion.trim().ifBlank { null },
+                    loader = remoteLoader,
+                    limit = 12,
+                )
+                results = found
+                searched = true
+                if (found.isEmpty()) searchError = "没搜到整合包。换个关键词，或者把游戏版本清空再试。"
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                searchError = describeImportError(e)
+            } finally {
+                searching = false
+            }
+        }
+    }
+
+    fun installRemote(project: ModProject) {
+        if (backend == null) {
+            remoteNotice = "后端未装配：装整合包需要桌面端注入 Java 与实例存储实现。"
+            return
+        }
+        prepareJob?.cancel()
+        preparingSlug = project.slug
+        preparingDetail = "查版本…"
+        downloadProgress = null
+        remoteNotice = ""
+        prepareJob = scope.launch {
+            try {
+                val versions = ModpackBrowser.versionsOf(
+                    slug = project.slug,
+                    gameVersion = remoteVersion.trim().ifBlank { null },
+                    loader = remoteLoader,
+                )
+                if (versions.isEmpty()) {
+                    remoteNotice = "《" + project.title + "》没有适配" +
+                        (if (remoteVersion.isBlank()) "" else " " + remoteVersion.trim()) +
+                        " / " + loaderNameOf(remoteLoader) + " 的 .mrpack。换个游戏版本或加载器再试。"
+                    return@launch
+                }
+                preparingDetail = "共 " + versions.size + " 个 .mrpack，挑最新的一个…"
+                val picked = ModrinthMeta.pickBest(versions) ?: versions.first()
+                preparingDetail = "下载 " + picked.fileName
+                val local = ModpackBrowser.download(picked, ModpackBrowser.defaultCacheDir()) { p ->
+                    downloadProgress = p
+                    preparingDetail = p.step + " " + p.detail
+                }
+                downloadProgress = null
+                preparingDetail = "读取压缩包…"
+                val parsed = ModpackImporter.inspect(local)
+                archivePath = local.absolutePath
+                preview = parsed
+                previewError = null
+                phase = ImportPhase.Idle
+                message = ""
+                remoteNotice = "已下载《" + parsed.manifest.name + "》" + picked.versionNumber +
+                    "（" + formatSize(local.length()) + "），下面确认后开始导入。"
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                downloadProgress = null
+                remoteNotice = describeImportError(e)
+            } finally {
+                preparingSlug = ""
+                preparingDetail = ""
             }
         }
     }
@@ -162,23 +273,103 @@ internal fun ModpackSection(
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                OutlinedButton(
-                    onClick = {
-                        val picked = pickArchive()
-                        if (picked != null) inspectArchive(picked)
-                    },
-                    enabled = enabled && !running && !loadingPreview,
-                ) { Text("选择文件…") }
+                TextButton(
+                    onClick = { source = ModpackSource.LOCAL },
+                    enabled = !busy,
+                ) {
+                    Text(
+                        "本地文件",
+                        fontWeight = if (source == ModpackSource.LOCAL) FontWeight.SemiBold else FontWeight.Normal,
+                    )
+                }
+                TextButton(
+                    onClick = { source = ModpackSource.REMOTE },
+                    enabled = !busy,
+                ) {
+                    Text(
+                        "从 Modrinth 搜",
+                        fontWeight = if (source == ModpackSource.REMOTE) FontWeight.SemiBold else FontWeight.Normal,
+                    )
+                }
             }
 
-            if (archivePath.isBlank()) {
+            if (source == ModpackSource.LOCAL) {
+                Row(
+                    Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    OutlinedButton(
+                        onClick = {
+                            val picked = pickArchive()
+                            if (picked != null) inspectArchive(picked)
+                        },
+                        enabled = enabled && !busy && !loadingPreview,
+                    ) { Text("选择文件…") }
+                }
+                if (archivePath.isBlank()) {
+                    Text(
+                        "选一个 .mrpack 或 .zip：会先只读解析给你看一眼，再决定装不装。" +
+                            "包里的模组会下到实例的 mods 目录，overrides 按层覆盖。",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            } else {
+                RemoteSearchRow(
+                    query = query,
+                    onQueryChange = { query = it },
+                    gameVersion = remoteVersion,
+                    onGameVersionChange = { remoteVersion = it },
+                    loader = remoteLoader,
+                    onCycleLoader = { remoteLoader = nextRemoteLoader(remoteLoader) },
+                    searching = searching,
+                    onSearch = { runSearch() },
+                    enabled = enabled && !running && preparingSlug.isBlank(),
+                )
                 Text(
-                    "选一个 .mrpack 或 .zip：会先只读解析给你看一眼，再决定装不装。" +
-                        "包里的模组会下到实例的 mods 目录，overrides 按层覆盖。",
+                    "搜到的是整个整合包（含游戏版本、加载器、模组清单）。" +
+                        "挑一个装：会自动下最新的 .mrpack 到系统临时目录，再走下面同一条导入流水线。",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-            } else {
+                if (searchError.isNotBlank()) {
+                    Text(searchError, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+                }
+                if (remoteNotice.isNotBlank()) {
+                    Text(
+                        remoteNotice,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = if (remoteNotice.startsWith("已下载")) {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        } else {
+                            MaterialTheme.colorScheme.error
+                        },
+                    )
+                }
+                if (preparingSlug.isNotBlank()) {
+                    Text(preparingDetail, style = MaterialTheme.typography.bodySmall)
+                    val dp = downloadProgress
+                    if (dp != null) ImportProgressBar(dp.fraction)
+                }
+                if (searched && results.isNotEmpty()) {
+                    Column(
+                        Modifier.fillMaxWidth().heightIn(max = 260.dp).verticalScroll(rememberScrollState()),
+                        verticalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        results.forEach { project ->
+                            RemotePackRow(
+                                project = project,
+                                busySlug = preparingSlug,
+                                enabled = enabled && !running && preparingSlug.isBlank(),
+                                onInstall = { installRemote(project) },
+                            )
+                        }
+                    }
+                }
+            }
+
+            if (archivePath.isNotBlank()) {
                 Text(
                     archivePath,
                     style = MaterialTheme.typography.bodySmall,
@@ -245,8 +436,8 @@ internal fun ModpackSection(
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
             ) {
                 Button(
-                    onClick = { startImport() },
-                    enabled = enabled && !running && preview != null,
+                    onClick = { preview?.let { startImport(it.archive) } },
+                    enabled = enabled && !running && preview != null && preparingSlug.isBlank(),
                 ) { Text("开始导入") }
                 if (running) {
                     OutlinedButton(onClick = { job?.cancel() }) { Text("取消") }
@@ -307,6 +498,88 @@ internal fun ModpackSection(
     }
 }
 
+/** 搜索行：关键词 + 游戏版本 + 加载器 + 搜索按钮。 */
+@Composable
+private fun RemoteSearchRow(
+    query: String,
+    onQueryChange: (String) -> Unit,
+    gameVersion: String,
+    onGameVersionChange: (String) -> Unit,
+    loader: LoaderKind,
+    onCycleLoader: () -> Unit,
+    searching: Boolean,
+    onSearch: () -> Unit,
+    enabled: Boolean,
+) {
+    Row(
+        Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        androidx.compose.material3.OutlinedTextField(
+            value = query,
+            onValueChange = onQueryChange,
+            modifier = Modifier.weight(2f),
+            singleLine = true,
+            label = { Text("搜整合包（如 cobblemon、fabulously optimized；留空看热门）") },
+            enabled = enabled,
+        )
+        androidx.compose.material3.OutlinedTextField(
+            value = gameVersion,
+            onValueChange = onGameVersionChange,
+            modifier = Modifier.weight(0.7f),
+            singleLine = true,
+            label = { Text("游戏版本") },
+            enabled = enabled,
+        )
+        OutlinedButton(onClick = onCycleLoader, enabled = enabled) {
+            Text(if (loader == LoaderKind.VANILLA) "不限加载器" else loaderNameOf(loader))
+        }
+        Button(onClick = onSearch, enabled = enabled && !searching) {
+            Text(if (searching) "搜索中…" else "搜索")
+        }
+    }
+}
+
+/** 一条搜索结果。正在准备的包显示进度文案，其余按钮禁用避免并发下载。 */
+@Composable
+private fun RemotePackRow(
+    project: ModProject,
+    busySlug: String,
+    enabled: Boolean,
+    onInstall: () -> Unit,
+) {
+    Card(Modifier.fillMaxWidth()) {
+        Row(
+            Modifier.fillMaxWidth().padding(10.dp),
+            verticalAlignment = Alignment.Top,
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(project.title, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
+                val author = project.author?.takeIf { it.isNotBlank() }
+                Text(
+                    (if (author == null) "" else author + " · ") + project.downloadsLabel + " 次下载",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                if (project.description.isNotBlank()) {
+                    Text(
+                        project.description,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+            if (busySlug == project.slug) {
+                Text("准备中…", style = MaterialTheme.typography.bodySmall)
+            } else {
+                OutlinedButton(onClick = onInstall, enabled = enabled) { Text("装这个包") }
+            }
+        }
+    }
+}
+
 /** 选文件对话框。Compose 桌面端没有内置文件选择器，直接用 AWT 的原生 FileDialog（Windows 上是系统的那个）。 */
 private fun pickArchive(): File? {
     // owner 给 Compose 主窗口，对话框才会出现在窗口上方而不是屏幕角落里；
@@ -324,6 +597,23 @@ private fun pickArchive(): File? {
     val name = dialog.file ?: return null
     val dir = dialog.directory ?: return null
     return File(dir, name)
+}
+
+/** 整合包只会是原版之上的一层，所以加载器里没有 VANILLA：搜索留空反而更宽。 */
+private fun nextRemoteLoader(current: LoaderKind): LoaderKind = when (current) {
+    LoaderKind.FABRIC -> LoaderKind.FORGE
+    LoaderKind.FORGE -> LoaderKind.NEOFORGE
+    LoaderKind.NEOFORGE -> LoaderKind.QUILT
+    else -> LoaderKind.FABRIC
+}
+
+private fun loaderNameOf(kind: LoaderKind): String = when (kind) {
+    LoaderKind.FABRIC -> "Fabric"
+    LoaderKind.FORGE -> "Forge"
+    LoaderKind.NEOFORGE -> "NeoForge"
+    LoaderKind.QUILT -> "Quilt"
+    LoaderKind.VANILLA -> "原版"
+    else -> "其他"
 }
 
 private fun stepOf(error: Throwable): ModpackStep =

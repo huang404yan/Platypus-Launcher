@@ -821,6 +821,8 @@ fun DownloadsPage(
             defaultMemoryMb = defaultMemoryMb,
             backend = backend,
             onImported = onInstalled,
+            // 远程搜整合包时把上面填的版本号带过去当种子，省得用户再敲一遍
+            initialGameVersion = versionText,
         )
 
         if (message.isNotBlank()) {
