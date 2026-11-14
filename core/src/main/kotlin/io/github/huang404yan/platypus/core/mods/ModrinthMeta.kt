@@ -32,6 +32,14 @@ data class ModVersionFile(
     val releaseType: String = "release",
     /** 依赖的其它 project_id —— 只用于提示「还要装前置」，不自动装。 */
     val requiredDependencies: List<String> = emptyList(),
+    /**
+     * 作者声明「不能和这些一起用」的 project_id。
+     *
+     * Modrinth 的 dependency_type 有四类：required / optional / incompatible / embedded。
+     * incompatible 一直被丢掉，于是「两个渲染优化写同一个类、装完直接崩」这种最常见的
+     * 冲突只能靠用户进游戏撞。现在留一份，装之前与装之后都能拿来对。
+     */
+    val incompatibleDependencies: List<String> = emptyList(),
 )
 
 sealed interface ModrinthParse<out T> {
@@ -189,11 +197,15 @@ object ModrinthMeta {
             val fileName = stringOf(file, "filename") ?: return@mapNotNull null
             val url = stringOf(file, "url") ?: return@mapNotNull null
             val hashes = file["hashes"] as? JsonObject
-            val deps = (obj["dependencies"] as? JsonArray)?.mapNotNull { dep ->
-                val depObj = dep as? JsonObject ?: return@mapNotNull null
-                if (stringOf(depObj, "dependency_type") != "required") return@mapNotNull null
-                stringOf(depObj, "project_id")
-            }.orEmpty()
+            val depObjects = (obj["dependencies"] as? JsonArray)?.mapNotNull { it as? JsonObject }.orEmpty()
+            // 只认 required 当「要装的前置」，但 incompatible 也得留一份 —— 见 incompatibleDependencies
+            val deps = depObjects
+                .filter { stringOf(it, "dependency_type") == "required" }
+                .mapNotNull { stringOf(it, "project_id") }
+            val conflicts = depObjects
+                .filter { stringOf(it, "dependency_type") == "incompatible" }
+                .mapNotNull { stringOf(it, "project_id") }
+                .distinct()
             ModVersionFile(
                 projectSlug = projectSlug,
                 versionNumber = stringOf(obj, "version_number") ?: fileName,
@@ -203,6 +215,7 @@ object ModrinthMeta {
                 size = longOf(file, "size") ?: -1L,
                 releaseType = stringOf(obj, "version_type") ?: "release",
                 requiredDependencies = deps,
+                incompatibleDependencies = conflicts,
             )
         }
         return ModrinthParse.Ok(versions)
@@ -225,6 +238,9 @@ object ModrinthMeta {
             val projectId = stringOf(obj, "project_id") ?: continue
             val files = (obj["files"] as? JsonArray)?.mapNotNull { it as? JsonObject }.orEmpty()
             val file = files.firstOrNull { boolOf(it, "primary") == true } ?: files.firstOrNull()
+            // /version_files 的响应也带 dependencies（2026-11-14 对 34 个真实 jar 实测确认），
+            // 所以「已装的两个模组互相声明不能共存」这种冲突不用再额外发请求。
+            val depObjects = (obj["dependencies"] as? JsonArray)?.mapNotNull { it as? JsonObject }.orEmpty()
             result[hash.lowercase()] = ModVersionLookup(
                 sha1 = hash.lowercase(),
                 projectId = projectId,
@@ -232,6 +248,13 @@ object ModrinthMeta {
                 fileName = file?.let { stringOf(it, "filename") }.orEmpty(),
                 gameVersions = stringListOf(obj, "game_versions"),
                 loaders = stringListOf(obj, "loaders"),
+                incompatibleDependencies = depObjects
+                    .filter { stringOf(it, "dependency_type") == "incompatible" }
+                    .mapNotNull { stringOf(it, "project_id") }
+                    .distinct(),
+                requiredDependencies = depObjects
+                    .filter { stringOf(it, "dependency_type") == "required" }
+                    .mapNotNull { stringOf(it, "project_id") },
             )
         }
         return ModrinthParse.Ok(result)
@@ -327,5 +350,9 @@ data class ModVersionLookup(
     val fileName: String,
     val gameVersions: List<String> = emptyList(),
     val loaders: List<String> = emptyList(),
+    /** 这个版本声明「不能和这些一起用」的 project_id；检查更新时拿来对已装清单。 */
+    val incompatibleDependencies: List<String> = emptyList(),
+    /** 这个版本要的前置 project_id（同样只认 required）。 */
+    val requiredDependencies: List<String> = emptyList(),
 )
 

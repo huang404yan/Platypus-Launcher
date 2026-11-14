@@ -45,6 +45,9 @@ import io.github.huang404yan.platypus.core.mods.DependencyInstallOutcome
 import io.github.huang404yan.platypus.core.mods.DependencyPlan
 import io.github.huang404yan.platypus.core.mods.ModDependencyResolver
 import io.github.huang404yan.platypus.core.mods.ModrinthDependencySource
+import io.github.huang404yan.platypus.core.mods.ModConflict
+import io.github.huang404yan.platypus.core.mods.ModConflictChecker
+import io.github.huang404yan.platypus.core.mods.ModConflictReport
 import io.github.huang404yan.platypus.core.mods.ModEntry
 import io.github.huang404yan.platypus.core.mods.ModInstallProgress
 import io.github.huang404yan.platypus.core.mods.ModFileOps
@@ -139,6 +142,18 @@ fun ModsPage(
     var updatingFile by remember { mutableStateOf("") }
 
     /**
+     * 「作者声明这些模组不能共存」的检查结果。
+     *
+     * 与检查更新分两个按钮：更新是「要不要换新版」，冲突是「现在这套组合会不会崩」，
+     * 关心的问题不一样，混在一个按钮里会让两件事的进度文案互相盖掉。
+     * null 表示还没查过（不显示卡片），查完是空表才显示「没发现冲突」。
+     */
+    var conflictReport by remember { mutableStateOf<ModConflictReport?>(null) }
+    var checkingConflicts by remember { mutableStateOf(false) }
+    var conflictProgress by remember { mutableStateOf("") }
+    var conflictError by remember { mutableStateOf("") }
+
+    /**
      * 装完模组后展开的前置依赖树。
      *
      * 以前这里只存一串 project_id（缺什么），界面上是「还差 N 个前置」加一个按钮，
@@ -203,6 +218,9 @@ fun ModsPage(
         } finally {
             scanning = false
         }
+        // 文件集合变了（装/删/停用），上轮冲突结论就过期了：留着会指着已经删掉的模组说冲突
+        conflictReport = null
+        conflictProgress = ""
         // 实例自己记着 gameVersion，比让用户手打靠谱得多；用户改过的值不覆盖。
         if (gameVersion.isBlank() && target.gameVersion.isNotBlank()) {
             gameVersion = target.gameVersion
@@ -322,6 +340,43 @@ fun ModsPage(
             updateError = e.message ?: e.toString()
         } finally {
             checkingUpdates = false
+        }
+    }
+
+    /**
+     * 查「已装模组之间有没有互相声明不兼容」。
+     *
+     * 只用 Modrinth 的 dependency_type = incompatible 这一条线索，不替作者做判断：
+     * 有些声明是「功能重复」，两个都装着不一定崩；有些是真的抢同一个 mixin 目标，装了就黑屏。
+     * 所以结论一律按「作者声明不兼容」来说，并区分「两个都装着」与「只是被点名」。
+     */
+    suspend fun checkConflicts() {
+        val dir = currentInstanceDir() ?: run {
+            conflictError = "先选一个实例。"
+            return
+        }
+        checkingConflicts = true
+        conflictError = ""
+        conflictProgress = ""
+        try {
+            val report = withContext(Dispatchers.IO) {
+                ModConflictChecker.check(ModScanner.modsDir(dir)) { conflictProgress = it }
+            }
+            conflictReport = report
+            conflictProgress = when {
+                report.scanned == 0 -> "mods/ 里没有启用的 .jar，没什么可查的。"
+                report.presentConflicts.isNotEmpty() ->
+                    "查出 " + report.presentConflicts.size + " 条已经装着的冲突，见下面的卡片。"
+                report.conflicts.isNotEmpty() -> "两个都装着的不兼容没发现；另有作者提到但没装的，列在卡片里。"
+                else -> "查了 " + report.scanned + " 个文件（认得出 " + report.recognized + " 个），没发现冲突。"
+            }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            conflictReport = null
+            conflictError = e.message ?: e.toString()
+        } finally {
+            checkingConflicts = false
         }
     }
 
@@ -669,6 +724,15 @@ fun ModsPage(
                 depsInstalling = depsInstalling,
                 onInstallDeps = { scope.launch { installDependencies() } },
                 onDismissDeps = { depPlan = null },
+                conflictReport = conflictReport,
+                checkingConflicts = checkingConflicts,
+                conflictProgress = conflictProgress,
+                conflictError = conflictError,
+                onCheckConflicts = { scope.launch { checkConflicts() } },
+                onDismissConflicts = {
+                    conflictReport = null
+                    conflictProgress = ""
+                },
             )
         }
     }
@@ -704,7 +768,15 @@ private fun InstalledTab(
     depsInstalling: Boolean,
     onInstallDeps: () -> Unit,
     onDismissDeps: () -> Unit,
+    conflictReport: ModConflictReport?,
+    checkingConflicts: Boolean,
+    conflictProgress: String,
+    conflictError: String,
+    onCheckConflicts: () -> Unit,
+    onDismissConflicts: () -> Unit,
 ) {
+    // 冲突卡片的「展开全部」状态放在这一层：卡片重绘时不该把用户刚展开的又收回去
+    var showAllConflicts by remember { mutableStateOf(false) }
     Column(modifier, verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Row(
             Modifier.fillMaxWidth(),
@@ -727,6 +799,9 @@ private fun InstalledTab(
             OutlinedButton(onClick = onCheckUpdates, enabled = !checkingUpdates && snapshot != null) {
                 Text(if (checkingUpdates) "检查中…" else "检查更新")
             }
+            OutlinedButton(onClick = onCheckConflicts, enabled = !checkingConflicts && snapshot != null) {
+                Text(if (checkingConflicts) "查冲突…" else "查冲突")
+            }
             OutlinedButton(onClick = onRefresh) { Text("重新扫描") }
         }
         snapshot?.let {
@@ -743,6 +818,22 @@ private fun InstalledTab(
         if (opError.isNotBlank()) ModHint(opError, error = true)
         if (updateProgress.isNotBlank() || updateError.isNotBlank()) {
             ModHint(if (updateError.isNotBlank()) "检查更新失败：" + updateError else updateProgress, error = updateError.isNotBlank())
+        }
+        if (conflictError.isNotBlank()) {
+            ModHint("查冲突失败：" + conflictError, error = true)
+        } else if (conflictProgress.isNotBlank()) {
+            ModHint(conflictProgress)
+        }
+        if (conflictReport != null) {
+            ConflictCard(
+                report = conflictReport,
+                expanded = showAllConflicts,
+                onToggleExpanded = { showAllConflicts = !showAllConflicts },
+                onDismiss = {
+                    showAllConflicts = false
+                    onDismissConflicts()
+                },
+            )
         }
         if (depPlan != null) {
             DependencyPlanCard(
@@ -1135,6 +1226,101 @@ private fun DependencyPlanCard(
                 OutlinedButton(onClick = onInstall, enabled = !busy && plan.mods.isNotEmpty()) {
                     Text(if (busy) "安装中…" else "一次装齐")
                 }
+            }
+        }
+    }
+}
+
+/**
+ * 「作者声明这些不能共存」的卡片。
+ *
+ * 分两段写是刻意的：第一段是「现在就装着」的组合 —— 用户点一下就能处理；
+ * 第二段是「作者提到但没装」的 —— 那是「别去装它」的预防性提醒，混在一起会把第一条压没了。
+ *
+ * 措辞一律是「作者声明不兼容」而不是「这两个一定崩」：Modrinth 上的 incompatible 有一半是
+ * 「功能重复」，两个都装着往往只是白占内存。替用户下「你必崩」的结论是越权，也会误导排查。
+ */
+@Composable
+private fun ConflictCard(
+    report: ModConflictReport,
+    expanded: Boolean,
+    onToggleExpanded: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val present = report.presentConflicts
+    val potential = report.potentialConflicts
+    // 默认只列前 5 条：一屏塞十几个选项没人看，展开才给全部
+    val limit = 5
+    fun visible(list: List<ModConflict>): List<ModConflict> =
+        if (expanded) list else list.take(limit)
+
+    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
+        Column(Modifier.fillMaxWidth().padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text(
+                if (present.isEmpty()) "作者声明的模组冲突（没有两个都装着的）" else "模组冲突 · " + present.size + " 条已经装着",
+                style = MaterialTheme.typography.bodySmall,
+                fontWeight = FontWeight.SemiBold,
+                color = if (present.isEmpty()) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.error,
+            )
+            Text(
+                "来源是模组作者在 Modrinth 上写的「不兼容」声明，不是启动器猜的。功能重复的模组也会这么标，两个都装着不一定崩 —— 但作者这么说，出问题先从这里排查。",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+
+            visible(present).forEach { conflict ->
+                Text(
+                    "· " + conflict.sourceTitle + "  ↔  " + conflict.otherLabel +
+                        if (conflict.mutual) "（双方都声明了）" else "",
+                    style = MaterialTheme.typography.labelSmall,
+                )
+                Text(
+                    "　都装在这个实例里：" + conflict.sourceFile +
+                        (conflict.otherFile?.let { " 与 " + it } ?: ""),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+
+            if (potential.isNotEmpty()) {
+                Text(
+                    "作者提到但不兼容的还有 " + potential.size + " 个项目（没装，别去装就行）：",
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                visible(potential).forEach { conflict ->
+                    Text(
+                        "· " + conflict.sourceTitle + "  ✕  " + conflict.otherLabel,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+
+            if (report.failures.isNotEmpty()) {
+                Text(
+                    report.failures.size.toString() + " 个文件读不了，没参与比对：" + report.failures.take(3).joinToString("；"),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.error,
+                )
+            }
+            if (report.recognized < report.scanned) {
+                Text(
+                    "另有 " + (report.scanned - report.recognized) + " 个文件 Modrinth 不认识（自己改过、或不是从 Modrinth 下的），查不到它们的声明。",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (report.conflicts.size > limit) {
+                    TextButton(onClick = onToggleExpanded) {
+                        Text(if (expanded) "只看前 " + limit + " 条" else "展开全部 " + report.conflicts.size + " 条")
+                    }
+                }
+                Text("", modifier = Modifier.weight(1f))
+                TextButton(onClick = onDismiss) { Text("知道了") }
             }
         }
     }
