@@ -364,7 +364,9 @@ fun SettingsPage(
             )
         }
 
-        if (subTab != SETTINGS_TAB_JAVA && subTab != SETTINGS_TAB_ACCOUNT) {
+        // 「界面」只改配色，点一下就已经落盘了，底部那排「保存 / 填回默认值」
+        // 对它没有意义 —— 留着反而让人以为不点保存不生效。
+        if (subTab != SETTINGS_TAB_JAVA && subTab != SETTINGS_TAB_ACCOUNT && subTab != SETTINGS_TAB_UI) {
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 Button(onClick = { save() }, enabled = loaded) { Text("保存") }
                 OutlinedButton(onClick = { resetDefaults() }, enabled = loaded) { Text("填回默认值") }
@@ -484,7 +486,7 @@ private fun InterfaceTab(theme: LauncherTheme, onPick: (LauncherTheme) -> Unit) 
             "配色",
             "两套。「跟随版本」会按你现在装的是正式版还是孵化版自动挑："
                 + "孵化版走亮一点的蓝橙，正式版走护眼的深色。手动选过就记住你的选择，不再看版本号。"
-                + "改完立刻生效，这一项不用点下面的「保存」。",
+                + "改完立刻生效并记下来，这一页没有「保存」按钮。",
         ) {
             Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 LauncherTheme.entries.forEach { option ->
@@ -496,6 +498,15 @@ private fun InterfaceTab(theme: LauncherTheme, onPick: (LauncherTheme) -> Unit) 
                         onClick = { onPick(option) },
                     )
                 }
+                // 标题栏不跟着配色走，这一点必须单独说明：用户切到深色后发现顶部
+                // 还是浅色那条，很容易当成 bug 反复切。用 tertiary 色让它和普通
+                // 说明文字区分开，不至于被当成又一段描述扫过去。
+                Text(
+                    "窗口标题栏的颜色由版本决定（正式版深色、孵化版浅色），"
+                        + "切换上面的配色只改界面，不会改标题栏。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.tertiary,
+                )
             }
         }
         SettingCard("还没做的", "没做的不摆控件。") {

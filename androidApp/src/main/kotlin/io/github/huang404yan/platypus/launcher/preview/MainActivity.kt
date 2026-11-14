@@ -13,18 +13,23 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.displayCutout
+import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
@@ -51,11 +56,16 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import io.github.huang404yan.platypus.core.Brand
 import io.github.huang404yan.platypus.core.Credit
 import io.github.huang404yan.platypus.core.CreditKind
@@ -77,6 +87,13 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        // 启动器该占满整屏：顶上那条时间/信号/电量、底下手势条平时不该一直挂着。
+        // 藏起来但不锁死 —— 从屏幕边缘下滑仍能临时叫出来（BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE），
+        // 否则横屏矮屏上白白少掉一条高度，侧栏那 11 项就更挤了。
+        WindowCompat.getInsetsController(window, window.decorView).apply {
+            hide(WindowInsetsCompat.Type.systemBars())
+            systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+        }
         setContent {
             // 配色从设置里读一次就定了：整棵界面都走 MaterialTheme.colorScheme，
             // 换主题只要换这一层，页面代码一行都不用知道主题存在。
@@ -131,95 +148,125 @@ private enum class Tab(val label: String) {
 @Composable
 private fun AppRoot(theme: LauncherTheme, onThemeChange: (LauncherTheme) -> Unit) {
     var tab by remember { mutableStateOf(Tab.INSTANCE) }
-    Row(
-        modifier = Modifier
-            .fillMaxSize()
-            .windowInsetsPadding(WindowInsets.safeDrawing),
-    ) {
-        SideBar(current = tab, onSelect = { tab = it })
-        Box(
-            Modifier
-                .weight(1f)
-                .fillMaxHeight()
-                .padding(horizontal = 20.dp, vertical = 16.dp),
+    // 尺寸不写死：手机横屏两千多 px、平板更宽，同一套 dp 在两种屏上观感差很多。
+    // 侧栏按屏宽取比例再夹在上下限之间，内容框的留白同理。
+    BoxWithConstraints(Modifier.fillMaxSize()) {
+        val sidebarWidth = (maxWidth * 0.17f).coerceIn(180.dp, 260.dp)
+        // 留白要能躲开屏幕圆角：之前按 0.8% 算，横屏只有 7dp 左右，右边缘被圆角
+        // 切掉一个「小三角」。改成 2%、下限提到 12dp，常见机身圆角（16–24dp）就盖不到框了。
+        val frameGap = (maxWidth * 0.02f).coerceIn(12.dp, 28.dp)
+        // 侧栏的色块一路铺到屏幕最左边，把前置摄像头那块盖住（FCL 就是这么做的）。
+        // 所以左侧不留 inset，只避让右侧与底部：否则内容框的右边缘会被屏幕圆角、
+        // 右侧挖孔或手势条切掉 —— 2026-11-14 用户报的「右边小框被屏幕遮挡」即此。
+        Row(
+            modifier = Modifier
+                .fillMaxSize()
+                .windowInsetsPadding(
+                    WindowInsets.safeDrawing.only(WindowInsetsSides.End + WindowInsetsSides.Bottom),
+                ),
         ) {
-            when (tab) {
-                Tab.INSTANCE -> InstancePage()
-                Tab.DOWNLOAD -> DownloadPage()
-                Tab.MODS -> ModsPage()
-                Tab.PACKS -> PacksPage()
-                Tab.SERVER -> ServerPage()
-                Tab.LINK -> LinkPage()
-                Tab.SETTINGS -> SettingsPage(theme = theme, onThemeChange = onThemeChange)
-                Tab.JAVA -> JavaPage()
-                Tab.DIAGNOSTIC -> DiagnosticPage()
-                Tab.ABOUT -> AboutPage()
-                // 启动是唯一还没做的：它要的应用内 JVM 与图形转译属于 runtime-android，
-                // 现在整个模块还不存在（见 docs/03-luxian-yu-youxianji.md 第 3 节的 S1 spike）。
-                Tab.LAUNCH -> LaunchPlaceholder()
+            SideBar(width = sidebarWidth, current = tab, onSelect = { tab = it })
+            // 内容区自己带一个框（留白 + 圆角 + 描边），侧栏不带 —— 侧栏要铺到最左
+            // 把摄像头盖住，给它留白就又露出挖孔了。中间不放分隔线：框就是边界。
+            Box(
+                Modifier
+                    .weight(1f)
+                    .fillMaxHeight()
+                    .padding(frameGap)
+                    .clip(RoundedCornerShape(12.dp))
+                    .border(1.5.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(12.dp))
+                    .padding(horizontal = 20.dp, vertical = 16.dp),
+            ) {
+                when (tab) {
+                    Tab.INSTANCE -> InstancePage()
+                    Tab.DOWNLOAD -> DownloadPage()
+                    Tab.MODS -> ModsPage()
+                    Tab.PACKS -> PacksPage()
+                    Tab.SERVER -> ServerPage()
+                    Tab.LINK -> LinkPage()
+                    Tab.SETTINGS -> SettingsPage(theme = theme, onThemeChange = onThemeChange)
+                    Tab.JAVA -> JavaPage()
+                    Tab.DIAGNOSTIC -> DiagnosticPage()
+                    Tab.ABOUT -> AboutPage()
+                    // 启动是唯一还没做的：它要的应用内 JVM 与图形转译属于 runtime-android，
+                    // 现在整个模块还不存在（见 docs/03-luxian-yu-youxianji.md 第 3 节的 S1 spike）。
+                    Tab.LAUNCH -> LaunchPlaceholder()
+                }
             }
         }
     }
 }
 
 @Composable
-private fun SideBar(current: Tab, onSelect: (Tab) -> Unit) {
+private fun SideBar(width: Dp, current: Tab, onSelect: (Tab) -> Unit) {
     Column(
         modifier = Modifier
-            .width(180.dp)
+            .width(width)
             .fillMaxHeight()
+            // 底色先铺满，再避让挖孔：inset 加在 background 之前会连色块一起缩进去，
+            // 左侧露出一条底色边，摄像头反而更显眼。加在之后才是「盖住 + 内容不挡」。
             .background(MaterialTheme.colorScheme.surfaceVariant)
-            .padding(horizontal = 12.dp, vertical = 20.dp),
-        verticalArrangement = Arrangement.spacedBy(4.dp),
+            .windowInsetsPadding(WindowInsets.displayCutout),
     ) {
-        Text(
-            text = if (Brand.isPreview) Brand.PREVIEW_NAME_ZH else Brand.NAME_ZH,
-            style = MaterialTheme.typography.titleLarge,
-            fontWeight = FontWeight.Bold,
-            modifier = Modifier.padding(start = 8.dp),
-        )
-        Text(
-            text = if (Brand.isPreview) Brand.PREVIEW_NAME_EN else Brand.NAME_EN,
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(start = 8.dp),
-        )
-        Spacer(modifier = Modifier.height(12.dp))
+        // 品牌名固定在顶部，不跟着菜单滚。
+        Column(Modifier.padding(start = 20.dp, end = 12.dp, top = 20.dp, bottom = 12.dp)) {
+            Text(
+                text = if (Brand.isPreview) Brand.PREVIEW_NAME_ZH else Brand.NAME_ZH,
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Bold,
+            )
+            Text(
+                text = if (Brand.isPreview) Brand.PREVIEW_NAME_EN else Brand.NAME_EN,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
 
-        Tab.entries.forEach { item ->
-            val selected = item == current
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .background(
-                        if (selected) MaterialTheme.colorScheme.primary.copy(alpha = 0.14f) else Color.Transparent,
-                        MaterialTheme.shapes.small,
+        // 只有菜单项在滚：weight(1f) 把剩余高度吃满，滚动范围就锁在这一段，
+        // 顶部的名字与底部的版本号都不动（2026-11-14 用户要求）。
+        Column(
+            modifier = Modifier
+                .weight(1f)
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            Tab.entries.forEach { item ->
+                val selected = item == current
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(
+                            if (selected) MaterialTheme.colorScheme.primary.copy(alpha = 0.14f) else Color.Transparent,
+                            MaterialTheme.shapes.small,
+                        )
+                        .clickable { onSelect(item) }
+                        .padding(horizontal = 10.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = item.label,
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+                        color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
                     )
-                    .clickable { onSelect(item) }
-                    .padding(horizontal = 10.dp, vertical = 10.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(
-                    text = item.label,
-                    style = MaterialTheme.typography.titleSmall,
-                    fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
-                    color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+                }
             }
         }
-        Spacer(Modifier.weight(1f))
-        Text(
-            text = "v" + Brand.version,
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(start = 8.dp),
-        )
-        Text(
-            text = Brand.DISCLAIMER_SHORT,
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(start = 8.dp),
-        )
+
+        // 版本号与免责声明固定在底部。
+        Column(Modifier.padding(start = 20.dp, end = 12.dp, top = 12.dp, bottom = 20.dp)) {
+            Text(
+                text = "v" + Brand.version,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Text(
+                text = Brand.DISCLAIMER_SHORT,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
     }
 }
 

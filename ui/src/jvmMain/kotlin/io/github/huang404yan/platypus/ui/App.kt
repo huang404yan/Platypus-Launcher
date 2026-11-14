@@ -162,6 +162,9 @@ fun App(
                         subTab = subTabOf(Page.SETTINGS),
                         refreshTick = tick,
                         theme = theme,
+                        // 只改这一层的皮。标题栏由 LaunchedEffect(theme) 回调出去，
+                        // 那边会等内容帧提交之后再重画（见 Main.kt 的两个 withFrameNanos），
+                        // 所以这里不能提前同步调用，否则标题栏又会抢在内容前面变。
                         onThemeChange = { theme = it },
                     )
                     Page.ABOUT -> AboutPage()

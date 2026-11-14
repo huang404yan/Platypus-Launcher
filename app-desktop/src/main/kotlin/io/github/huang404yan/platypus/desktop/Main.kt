@@ -59,24 +59,30 @@ fun main(args: Array<String>) {
             // 标题栏由系统画，深色主题下那条浅灰白接缝很扎眼，所以这里跟着配色改。
             // 存成一个状态而不是直接在回调里调：窗口刚组合时 peer 可能还没建好，
             // LaunchedEffect 会等一帧再重试一次（见下面那段 delay）。
-            var wantDarkTitleBar by remember { mutableStateOf<Boolean?>(null) }
-            LaunchedEffect(wantDarkTitleBar) {
-                val dark = wantDarkTitleBar ?: return@LaunchedEffect
-                // 窗口刚组合时 peer 未必已经建好，失败就隔一帧再试一次；
-                // 两次都不行说明这台机器上没有 DWM（或不是 Windows），安静放弃。
+            // 标题栏固定深色，不跟随配色。
+            //
+            // 原因见 WindowTheme 顶部的注释：Win10 上这个属性常常只能单向生效
+            // （能设成深色、设不回浅色），跟随的结果是「界面变浅了、标题栏还是黑的」。
+            // 固定一个两套配色都能接受的颜色更稳：深潭青与「自然原色」完全一致，
+            // 配「特工蓝橙」也是常见的「浅色界面 + 深色标题栏」观感。
+            LaunchedEffect(Unit) {
+                // 标题栏按版本定，不跟随用户选的配色：
+                // 正式版默认「自然原色」（深色界面）配深色标题栏，孵化版默认
+                // 「特工蓝橙」（浅色界面）配浅色标题栏 —— 各与本版本的默认配色对齐。
+                // 同一版本内不再变化，也就没有「切回浅色切不动」的问题。
+                val dark = !Brand.isPreview
                 var applied = WindowTheme.applyDarkTitleBar(window, dark)
                 if (!applied) {
                     kotlinx.coroutines.delay(250)
                     applied = WindowTheme.applyDarkTitleBar(window, dark)
                 }
-                println("[ui] dark title bar=$applied")
+                println("[ui] title bar dark=$dark applied=$applied")
             }
             App(
                 initialGameRoot = root.ifBlank { null },
                 backend = services,
-                onThemeChanged = { picked ->
-                    wantDarkTitleBar = picked.resolve(Brand.isPreview).isDark
-                },
+                // 配色不再影响标题栏，接口保留只是为了不牵动 ui 模块的签名。
+                onThemeChanged = { },
             )
         }
     }
