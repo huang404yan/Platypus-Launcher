@@ -23,6 +23,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -92,9 +93,10 @@ internal fun PacksPage() {
     var searching by remember { mutableStateOf(false) }
     var searched by remember { mutableStateOf(false) }
     var searchError by remember { mutableStateOf("") }
-    var installingSlug by remember { mutableStateOf("") }
-    var progress by remember { mutableStateOf<PackInstallProgress?>(null) }
     var notice by remember { mutableStateOf("") }
+
+    // 安装跑在进程级的 PackInstallRunner 里：切页、切光影/资源包都不会打断。
+    val installState = PackInstallRunner.state.collectAsState().value
 
     /** 当前选中实例的版本目录；没有就 null。 */
     fun currentInstanceDir(): File? {
@@ -233,27 +235,16 @@ internal fun PacksPage() {
             notice = "先选一个实例：包要装进实例自己的 " + kind.dirName + "/，没有实例就没有目标目录。"
             return
         }
-        installingSlug = project.slug
-        progress = null
         notice = ""
-        try {
-            val result = withContext(Dispatchers.IO) {
-                PackInstaller.install(dir, project.slug, gameVersion.trim().ifBlank { null }, kind) { p ->
-                    progress = p
-                }
-            }
-            notice = "已装进 " + (instances.firstOrNull { instanceKey(it) == selectedKey }?.name ?: "实例") +
-                "：" + result.entry.fileName + "（" + result.version + "，" +
-                fmtBytes(result.downloadedBytes) + "）"
-            rescanPacks()
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: Exception) {
-            notice = "装 " + project.title + " 失败：" + (e.message ?: e.toString())
-        } finally {
-            installingSlug = ""
-            progress = null
-        }
+        // 跑在进程级作用域里：切页不会打断，回来还能看到进度和结果。
+        PackInstallRunner.start(
+            instanceDir = dir,
+            instanceName = instances.firstOrNull { instanceKey(it) == selectedKey }?.name ?: "实例",
+            slug = project.slug,
+            title = project.title,
+            gameVersion = gameVersion.trim().ifBlank { null },
+            kind = kind,
+        )
     }
 
     /** 首屏扫完了没有。用来区分「首屏」和「切光影 / 资源包」两种重扫。 */
@@ -263,6 +254,11 @@ internal fun PacksPage() {
         granted = hasFileAccess(context)
         if (granted) rescan()
         booted = true
+    }
+
+    // 装完重扫一次：runner 只发布 doneAt 时间戳，页面回来看到变了就自己刷（理由同模组页）。
+    LaunchedEffect(installState.doneAt) {
+        if (installState.doneAt > 0L) rescanPacks()
     }
 
     /*
@@ -452,12 +448,30 @@ internal fun PacksPage() {
                 )
             }
         }
-        if (installingSlug.isNotBlank()) {
+        if (installState.busy) {
+            item {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        "正在装 " + installState.title.ifBlank { installState.busySlug } + "…" +
+                            packProgressDetail(installState.progress),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.weight(1f),
+                    )
+                    TextButton(onClick = { PackInstallRunner.cancel() }) { Text("取消") }
+                }
+            }
+        }
+        if (!installState.busy && installState.message.isNotBlank()) {
             item {
                 Text(
-                    "正在装 " + installingSlug + "…" + packProgressDetail(progress),
+                    installState.message,
                     style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = if (installState.failed) {
+                        MaterialTheme.colorScheme.error
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    },
                 )
             }
         }
@@ -554,7 +568,7 @@ internal fun PacksPage() {
                 SearchResultRow(
                     project = project,
                     kind = kind,
-                    busy = installingSlug.isNotBlank(),
+                    busy = installState.busy,
                     onInstall = { scope.launch { install(project) } },
                 )
             }

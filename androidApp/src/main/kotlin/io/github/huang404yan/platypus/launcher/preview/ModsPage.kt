@@ -23,6 +23,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -92,8 +93,9 @@ internal fun ModsPage() {
     var searched by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf("") }
     var notice by remember { mutableStateOf("") }
-    var progress by remember { mutableStateOf<ModInstallProgress?>(null) }
-    var installingSlug by remember { mutableStateOf("") }
+
+    // 安装跑在进程级的 ModInstallRunner 里：切页、切 tab 都不会打断。
+    val installState = ModInstallRunner.state.collectAsState().value
 
     // P2 的四件事，与桌面端一一对应：检查更新、更新单条、启用停用、删除
     var updates by remember { mutableStateOf<List<ModUpdateResult>>(emptyList()) }
@@ -233,35 +235,16 @@ internal fun ModsPage() {
             notice = "先填游戏版本，否则装进来的模组跟你的游戏对不上。"
             return
         }
-        val instanceDir = File(target.directory.trim().trim('"'))
-        installingSlug = project.slug
-        progress = null
         notice = ""
-        try {
-            val result = withContext(Dispatchers.IO) {
-                ModInstaller.install(
-                    gameDir = instanceDir,
-                    slug = project.slug,
-                    gameVersion = gameVersion.trim(),
-                    loader = loader ?: LoaderKind.FABRIC,
-                ) { p: ModInstallProgress -> progress = p }
-            }
-            notice = "已装进 " + target.name + "：" + result.entry.title + " " + result.version +
-                "（" + fmtBytes(result.downloadedBytes) + "）" +
-                if (result.requiredDependencies.isEmpty()) {
-                    "。"
-                } else {
-                    "。还差 " + result.requiredDependencies.size + " 个前置模组，需要自己再装。"
-                }
-            rescanMods()
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: Exception) {
-            notice = "装 " + project.title + " 失败：" + (e.message ?: e.toString())
-        } finally {
-            installingSlug = ""
-            progress = null
-        }
+        // 跑在进程级作用域里：切页不会打断，回来还能看到进度和结果。
+        ModInstallRunner.start(
+            instanceDir = File(target.directory.trim().trim('"')),
+            instanceName = target.name,
+            slug = project.slug,
+            title = project.title,
+            gameVersion = gameVersion.trim(),
+            loader = loader ?: LoaderKind.FABRIC,
+        )
     }
 
     /** 启用 / 停用：只改文件名，.jar ↔ .jar.disabled。改错了再点一次。 */
@@ -427,6 +410,17 @@ internal fun ModsPage() {
     LaunchedEffect(Unit) {
         granted = hasFileAccess(context)
         if (granted) rescan()
+    }
+
+    /*
+     * 装完之后重扫一次 mods/。
+     *
+     * runner 不知道自己装机时页面在不在，所以只发布一个 doneAt 时间戳，页面回来看到变了就自己重扫；
+     * 直接在页面里等安装结果的话，切页回来那次已经拿不到了。
+     * 首屏那次 doneAt 还是 0，不会白扫一遍。
+     */
+    LaunchedEffect(installState.doneAt) {
+        if (installState.doneAt > 0L) rescanMods()
     }
 
     LazyColumn(
@@ -603,12 +597,30 @@ internal fun ModsPage() {
         if (notice.isNotBlank()) {
             item { Text(notice, style = MaterialTheme.typography.bodySmall) }
         }
-        if (installingSlug.isNotBlank()) {
+        if (installState.busy) {
+            item {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        "正在装 " + installState.title.ifBlank { installState.busySlug } + "…" +
+                            progressDetail(installState.progress),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.weight(1f),
+                    )
+                    TextButton(onClick = { ModInstallRunner.cancel() }) { Text("取消") }
+                }
+            }
+        }
+        if (!installState.busy && installState.message.isNotBlank()) {
             item {
                 Text(
-                    "正在装 " + installingSlug + "…" + progressDetail(progress),
+                    installState.message,
                     style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = if (installState.failed) {
+                        MaterialTheme.colorScheme.error
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    },
                 )
             }
         }
@@ -705,7 +717,7 @@ internal fun ModsPage() {
             items(results, key = { it.projectId }) { project ->
                 SearchResultRow(
                     project = project,
-                    busy = installingSlug.isNotBlank(),
+                    busy = installState.busy,
                     onInstall = { scope.launch { install(project) } },
                 )
             }
