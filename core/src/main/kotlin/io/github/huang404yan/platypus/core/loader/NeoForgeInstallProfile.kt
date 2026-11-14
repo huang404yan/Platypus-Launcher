@@ -56,6 +56,17 @@ object NeoForgeInstallProfile {
     private const val BMCLAPI_DIRECT_MIRROR = "https://mirror.nyist.edu.cn/bmclapi/"
 
     /**
+     * 另一个完整的 NeoForge maven 镜像（CreeperHost 的公开代理）。
+     *
+     * 加它是因为 BMCLAPI 会缺件：实测 2026-11-14 装 1.20.4 + NeoForge 20.4.253 时，
+     * 65 个 neoforged 库里 `net/neoforged/JarJarFileSystems/0.4.0/JarJarFileSystems-0.4.0.jar`
+     * 在 bmclapi 与 nyist 落地镜像上都是 404（0.4.1 却 200），官方域名又连不上，
+     * 结果预铺硬失败、整条 20.4.x 线装不了。换成这条前缀后实测同一个 installer 的
+     * 64 个 neoforged 库全部 200。
+     */
+    private const val CREEPERHOST_MIRROR = "https://maven.creeperhost.net/"
+
+    /**
      * 解析 install_profile.json 里的 libraries[]。
      *
      * 解析不出来（不是 JSON、没有 libraries 字段）返回空列表——调用方要当成「无法预铺」处理，
@@ -148,7 +159,11 @@ object NeoForgeInstallProfile {
     /**
      * 主地址失败后的兜底地址。
      *
-     * neoforged 的库兜底回官方地址（本机不通，但换台机器就可能通，不能写死成「只有镜像」）；
+     * neoforged 的库兜底顺序：落地镜像直连 → CreeperHost → 官方地址。
+     * - 落地镜像最快（国内、绕开一次 302），但它会缺件（1.20.4 的 JarJarFileSystems-0.4.0 就是 404）；
+     * - CreeperHost 实测对同一批库 64/64 全有，补上落地镜像的缺口；
+     * - 官方地址放最后：本机不通，但换台机器就可能通，不能写死成「只有镜像」。
+     *
      * Mojang 的库兜底到 BMCLAPI 的 /libraries/ 前缀（实测 302 后可用）。
      */
     fun mirrorUrls(library: InstallerLibrary): List<String> {
@@ -156,8 +171,8 @@ object NeoForgeInstallProfile {
         return when {
             official.startsWith(NeoForgeMeta.OFFICIAL_MAVEN) -> {
                 val tail = official.removePrefix(NeoForgeMeta.OFFICIAL_MAVEN)
-                // 先试落地镜像的直连（快，且绕开一次 302），最后才是本机基本不通的官方地址
-                listOf(BMCLAPI_DIRECT_MIRROR + tail, official)
+                // 先试落地镜像的直连（快，且绕开一次 302），再试 CreeperHost 补缺件，最后才是本机基本不通的官方地址
+                listOf(BMCLAPI_DIRECT_MIRROR + tail, CREEPERHOST_MIRROR + tail, official)
             }
             official.startsWith(NeoForgeMeta.MOJANG_LIBRARIES) ->
                 listOf(MOJANG_MIRROR_PREFIX + official.removePrefix(NeoForgeMeta.MOJANG_LIBRARIES))

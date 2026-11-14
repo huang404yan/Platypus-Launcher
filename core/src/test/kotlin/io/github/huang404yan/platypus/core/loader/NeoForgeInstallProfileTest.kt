@@ -147,7 +147,7 @@ class NeoForgeInstallProfileTest {
     }
 
     @Test
-    fun `neoforged 库先兜底到落地镜像再回官方`() {
+    fun `neoforged 库兜底顺序是落地镜像 CreeperHost 官方`() {
         val lib = InstallerLibrary(
             coord = "a:b:1.0",
             path = "a/b/1.0/b-1.0.jar",
@@ -155,9 +155,12 @@ class NeoForgeInstallProfileTest {
             sha1 = null,
             size = -1L,
         )
+        // 顺序有意义：落地镜像最快，CreeperHost 补它缺的件（1.20.4 实测 JarJarFileSystems-0.4.0
+        // 在落地镜像上 404、在 CreeperHost 上 200），官方放最后只作换台机器的保底。
         assertEquals(
             listOf(
                 "https://mirror.nyist.edu.cn/bmclapi/a/b/1.0/b-1.0.jar",
+                "https://maven.creeperhost.net/a/b/1.0/b-1.0.jar",
                 "https://maven.neoforged.net/releases/a/b/1.0/b-1.0.jar",
             ),
             NeoForgeInstallProfile.mirrorUrls(lib),
