@@ -161,4 +161,4 @@ Modrinth 的 `dependencies[]` 里 `dependency_type == "required"` 只给一个 `
 - 模组的启用/停用按钮（现在只有扫描时的识别）
 - 更新检查（需要本地清单记录来源）
 - CurseForge（条款不允许）
-- 模组冲突提示（同类优化模组互斥，如 sodium 与 optifine）
+- ~~模组冲突提示~~：已做，见 `docs/30`（读 Modrinth 的 `dependency_type = "incompatible"`）。同类优化模组互斥**只有作者声明过才报**，作者没写的互斥（比如靠 mixin 目标撞车的）仍然发现不了

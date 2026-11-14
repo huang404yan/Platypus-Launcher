@@ -160,6 +160,6 @@ skipped=0  warnings=0
 
 - **不解决版本冲突**：A 要 B 的 1.x、C 要 B 的 2.x 时，按先来的装，后一个记「查版本失败」或装成同一份——没有真正的约束求解。
 - **不处理 `optional` 依赖**：Modrinth 的 `dependency_type` 有 `required` / `optional` / `incompatible` / `embedded`，这里**只认 `required`**。
-- **不认 `incompatible`**：两个模组互斥时不会提前拦，得等进游戏崩了才有 `CrashReports` 归因（`docs/26`）。
+- **依赖求解不处理 `incompatible`**：这一层只管「缺什么要补」；互斥声明后来由模组页的「查冲突」单独检查（`docs/30`），两条线各管一头，不在求解阶段拦。
 - **已装的不升级**：命中 `installedProjectIds` 直接跳过，哪怕装的是旧版。
 - **没有「取消安装」按钮**：页面切走才会因协程取消停下。
