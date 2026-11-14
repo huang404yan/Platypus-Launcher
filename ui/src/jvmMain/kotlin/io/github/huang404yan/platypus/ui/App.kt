@@ -25,6 +25,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import io.github.huang404yan.platypus.core.Brand
@@ -76,8 +77,11 @@ fun App(initialGameRoot: String? = null, backend: LauncherBackend? = null) {
                 onSelect = { page = it },
                 onSelectSub = { sub -> subSelection[page.name] = sub },
             )
+            // 留白与小窗口有关：1280 宽时 24dp 只是呼吸感，1024 宽时它和侧栏一起
+            // 把表单挤得只剩一半。窄窗口收到 16dp，给内容让出位置。
+            val compact = LocalWindowInfo.current.containerSize.width < 1100
             Box(
-                Modifier.weight(1f).fillMaxHeight().padding(24.dp),
+                Modifier.weight(1f).fillMaxHeight().padding(if (compact) 16.dp else 24.dp),
             ) {
                 when (page) {
                     Page.LAUNCH -> LaunchPage(backend, initialGameRoot, focusKey, quickPlay)
@@ -114,11 +118,14 @@ private fun SideBar(
     onSelect: (Page) -> Unit,
     onSelectSub: (String) -> Unit,
 ) {
+    // 窄窗口把侧栏收到 180dp：1024 宽下 220dp 侧栏 + 24dp 边距会吃掉四分之一屏，
+    // 剩下的宽度放不下一行「目录输入框 + 选择 + 扫描 + 新建」四个控件。
+    val compact = LocalWindowInfo.current.containerSize.width < 1100
     Surface(
-        modifier = Modifier.width(220.dp).fillMaxHeight(),
+        modifier = Modifier.width(if (compact) 180.dp else 220.dp).fillMaxHeight(),
         color = MaterialTheme.colorScheme.surfaceVariant,
     ) {
-        Column(Modifier.fillMaxHeight().padding(16.dp)) {
+        Column(Modifier.fillMaxHeight().padding(if (compact) 12.dp else 16.dp)) {
             Text(
                 if (Brand.isPreview) Brand.PREVIEW_NAME_ZH else Brand.NAME_ZH,
                 style = MaterialTheme.typography.titleLarge,

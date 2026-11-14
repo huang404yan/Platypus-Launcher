@@ -22,6 +22,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -253,15 +254,25 @@ private fun LaunchTab(
             "默认游戏目录",
             "启动页与实例页会用它做初值；下载页也默认往这里装。留空表示每次按系统默认位置猜。",
         ) {
-            OutlinedTextField(
-                value = gameRoot,
-                onValueChange = onGameRootChange,
-                modifier = Modifier.fillMaxWidth(),
-                label = { Text("游戏目录（.minecraft）") },
-                singleLine = true,
-                enabled = loaded,
-                placeholder = { Text("例如 C:\\Users\\你\\.minecraft") },
-            )
+            Row(
+                Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                OutlinedTextField(
+                    value = gameRoot,
+                    onValueChange = onGameRootChange,
+                    modifier = Modifier.weight(1f),
+                    label = { Text("游戏目录（.minecraft）") },
+                    singleLine = true,
+                    enabled = loaded,
+                    placeholder = { Text("例如 C:\\Users\\你\\.minecraft") },
+                )
+                OutlinedButton(
+                    onClick = { pickDirectory(gameRoot)?.let { onGameRootChange(it.absolutePath) } },
+                    enabled = loaded,
+                ) { Text("选择…") }
+            }
         }
 
         SettingCard(

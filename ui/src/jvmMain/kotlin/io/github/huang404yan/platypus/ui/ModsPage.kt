@@ -57,6 +57,7 @@ import io.github.huang404yan.platypus.core.mods.ModScanner
 import io.github.huang404yan.platypus.core.mods.ModUpdateChecker
 import io.github.huang404yan.platypus.core.mods.ModUpdateResult
 import io.github.huang404yan.platypus.core.mods.ModUpdateStatus
+import io.github.huang404yan.platypus.core.search.SearchTerm
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -676,6 +677,14 @@ fun ModsPage(
                 label = { Text("游戏目录（.minecraft）") },
                 singleLine = true,
             )
+            OutlinedButton(
+                onClick = {
+                    pickDirectory(rootText)?.let {
+                        rootText = it.absolutePath
+                        scope.launch { rescanInstances(); rescanMods() }
+                    }
+                },
+            ) { Text("选择…") }
             Button(
                 onClick = {
                     scope.launch {
@@ -956,6 +965,10 @@ private fun BrowseTab(
                 Text(if (searching) "搜索中…" else "搜索")
             }
         }
+
+        // 中文查询时先解释「为什么搜不到」，再给可点的英文候选：
+        // 直接回一句「没搜到」会让人以为启动器坏了。
+        ChineseSearchHint(query = query, kind = SearchTerm.Kind.MOD, onPick = onQueryChange)
 
         if (notice.isNotBlank()) ModHint(notice)
         if (searchError.isNotBlank()) ModHint("Modrinth：" + searchError, error = true)
