@@ -66,14 +66,35 @@ if (f.exists() && sha1 != null && Objects.equals(sha1, DownloadUtils.getSha1(f))
 | --- | --- | --- |
 | `https://maven.neoforged.net/releases/` | `https://bmclapi2.bangbang93.com/maven/<tail>` | 主用，302 到高校镜像 |
 | 同上，作为兜底 | `https://mirror.nyist.edu.cn/bmclapi/<tail>` | **直连，少一跳 302** |
+| 同上，第二道兜底 | `https://maven.creeperhost.net/<tail>` | **2026-11-14 新增**，补 BMCLAPI 的缺件，见 3.5 |
 | `https://libraries.minecraft.net/` | `https://bmclapi2.bangbang93.com/libraries/<tail>` | Mojang 库本机可直连，但镜像也通 |
 | 其它 | 原样 | — |
+
+三者的顺序是「落地镜像直连 → CreeperHost → 官方」：落地镜像最快（0.19 s，国内直连），CreeperHost 只在前者缺件时才被用到，官方地址永远排最后（本机连不上，但换台机器就可能通，不能写死成「只有镜像」）。
 
 **为什么要加落地镜像兜底**：首跑 54/58 成功、4 个反复超时。单独用 `curl -L` 拉这 4 个全部 200 且字节数对；直连 `mirror.nyist.edu.cn` 是 0.19 s，走 `bmclapi2` 是 0.50 s。说明不是超时配置（read 60 s / connect 15 s）不够，而是**302 跳转链在某些并发连接上卡死**。加上 `mirror.nyist.edu.cn` 直连后一次过。
 
 顺带记录两个不能用的地址：`https://bmclapi2.hurtmc.com/maven/...` 与 `https://bmclapi.zhuqiy.top/maven/...` 都是 **404**，别当备选。
 
-### 3.5 缺库必须硬失败，不能放过
+### 3.5 落地镜像也会缺件：1.20.4 的 JarJarFileSystems-0.4.0
+
+2026-11-14 拿 `1.20.4 + NeoForge 20.4.253` 做端到端，预铺卡在 74/75 后硬失败：
+
+```
+INSTALL FAILED at step LOADER_INSTALL: NeoForge 预铺 NeoForge 依赖库失败：
+NeoForge 依赖库有 1 个没下下来，安装器会因此装不全。
+失败的库：JarJarFileSystems-0.4.0.jar：下载失败：Connect timed out
+```
+
+逐项探测的结果：该 installer 的 83 个库（去重后 path）里 64 个来自 `maven.neoforged.net`，其中**只有 `net/neoforged/JarJarFileSystems/0.4.0/JarJarFileSystems-0.4.0.jar` 在 `bmclapi2` 与 `mirror.nyist.edu.cn` 上都是 404** —— 同一个 group 的 `JarJarSelector/0.4.0`、`JarJarMetadata/0.4.0` 都是 200，连 `JarJarFileSystems/0.4.1` 都是 200，是单文件级别缺件。而本机官方域名 TLS 被重置，于是三个地址全废。
+
+试过并排除的公共 maven（全部 404 或不可用）：`repo1.maven.org`、`maven.aliyun.com`（三个 repo 都试）、`repo.huaweicloud.com`、`mirrors.huaweicloud.com`、`mirrors.tuna.tsinghua.edu.cn`、`mirrors.ustc.edu.cn`、`mirrors.bfsu.edu.cn`、`mirror.sjtu.edu.cn`、`mirrors.cloud.tencent.com`、`maven.minecraftforge.net`、`maven.blamejared.com`、`jitpack.io`、`repo.spring.io/plugins-release`（401）、`mirror.nyist.edu.cn/maven`。
+
+唯一命中全部 64 个的是 **`https://maven.creeperhost.net/<原 releases 后路径>`**（探测脚本 `dist/_probe_ch.py` 输出 `creeperhost ok 64 bad 0`）。它因此成了 `mirrorUrls()` 的第二道兜底，见 3.4 的表。
+
+教训：**「BMCLAPI 有」不等于「每个文件都有」**，镜像缺件只会在大版本线里偶发一两个文件，单测用假数据永远发现不了——这种缺陷只能靠换版本真跑 e2e 撞出来。
+
+### 3.6 缺库必须硬失败，不能放过
 
 installer 对缺库的行为是「下不来就跳过继续」，最后照样打印 `Successfully installed client into launcher.`——留下一个看着装好、一启动就崩的目录。所以 `prepareLibraries` 下完自己校验，有任何一个失败就抛 `IOException`，文案把前三个失败库名与原因列出来。
 
@@ -149,6 +170,47 @@ Reloading ResourceManager: vanilla, mod_resources, mod/neoforge
 
 装完 `dist/_test-mc/_nf1211/libraries` 下共 **131 个 jar**（70 个 Neoforge/Mojang 依赖 + 原版 1.21.1 自己的库 + processor 中间产物 `client-*.jar`）。
 
+### 6.1 同一轮补测：1.21.1 + 21.1.266（2026-11-14）
+
+```
+gradle :app-desktop:neoForgeE2e -PnfDir=dist/_neoforge-e2e -Pgv=1.21.1 -PneoforgeVersion=21.1.266 -PskipWix
+```
+
+| 阶段 | 数字 |
+| --- | --- |
+| 原版 1.21.1 下载 | 3962 个文件 / 0 失败 |
+| Java | 自动下载 `java-runtime-delta` 21（Microsoft，`managed=true`） |
+| 预铺依赖库 | 58 条，全部一次过 |
+| installer 自身耗时 | 59 007 ms，`Successfully installed client into launcher.` |
+| 整段 LOADER_INSTALL | 620 208 ms → `INSTALL OK`（含首次下 assets） |
+| 进主菜单 | `launchMs = 10 742`，`menuReached = true` |
+| 总耗时 | `TOTAL ms = 636 469` |
+
+产物 `versions/neoforge-21.1.266/`：json 21 253 B（`inheritsFrom = 1.21.1`、`mainClass = cpw.mods.bootstraplauncher.BootstrapLauncher`）、`neoforge-21.1.266.jar` 26 836 906 B、`libraries/` 131 个 jar，整目录 1.1 GB（assets 798 MB / libraries 152 MB / runtime 96 MB / versions 56 MB）。
+
+### 6.2 跨版本补测：1.20.4 + 20.4.253（2026-11-14，就是 3.5 那个缺件）
+
+```
+gradle :app-desktop:neoForgeE2e -PnfDir=dist/_neoforge-e2e-1204 -Pgv=1.20.4 -PneoforgeVersion=20.4.253 -PskipWix
+```
+
+第一次跑挂在预铺（`JarJarFileSystems-0.4.0`，见 3.5）。加上 CreeperHost 兜底后重跑一次通过：
+
+```
+LOADER_INSTALL 复核目标游戏版本：已确认 20.4.253 对应 Minecraft 1.20.4
+LOADER_INSTALL 预铺 NeoForge 依赖库：预铺依赖库 1 个（82 个已存在） 0%
+LOADER_INSTALL 预铺依赖库 1/1 100%                      ← 只补那一个缺件，3.3 秒
+安装器：File …\JarJarFileSystems-0.4.0.jar exists. Checksum valid.   ← installer 直接跳过
+INSTALL OK in 46471 ms; javaInstalled=false
+vanilla downloaded=3856 failures=0
+neoforge installer=neoforge-20.4.253-installer.jar exit=0 ms=40988
+RESULT menuReached=true launchMs=13552
+```
+
+补下来的 `JarJarFileSystems-0.4.0.jar` = 31 835 B、sha1 `ef7e5716525bbe50c784a362f9393457a33e6daf`，与 installer 的 `version.json` 里声明的 sha1/size **完全一致**——说明 CreeperHost 给的是原版文件，不是被替换过的。游戏日志里 `NeoForge mod loading, version 20.4.253, for MC 1.20.4 with MCP 20240627.114801` 出现即证明加载器真的起来了。
+
+**这两条线同时说明**：1.20.4 与 1.21.1 生成的 instance json 形状一致（都是 `mainClass = cpw.mods.bootstraplauncher.BootstrapLauncher`、四个 `--fml.*` 参数：`neoForgeVersion` / `fmlVersion` / `mcVersion` / `neoFormVersion`），所以安装器代码一条路走两个大版本，不需要按版本分支。真正的差异只在库清单内容上——20.4.253 的 188 条 profile 库 / 83 个去重 path 比 21.1.266 更大一些。
+
 ## 七、界面
 
 下载页在「顺带装 Forge」下面多一行「顺带装 NeoForge」：
@@ -165,6 +227,7 @@ Reloading ResourceManager: vanilla, mod_resources, mod/neoforge
 | 取舍 | 理由 / 代价 |
 | --- | --- |
 | 元数据走 BMCLAPI 镜像 | 官方 `maven.neoforged.net` 在本机被重置，直连必挂；代价是镜像的可用性不受我们控制 |
+| 依赖库三道兜底 | 落地镜像（快）→ CreeperHost（全）→ 官方（换环境保底）；代价是每个库最多试三次，缺件时最后那次官方地址要等一个 connect timeout（实测约 29 秒才落到第三道） |
 | 依赖官方 installer 子进程 | 不重写 processor 流水线（同 Forge 的取舍）；代价：要本机有 Java 21，且 installer 自己会去拉 Mojang 清单 |
 | 预铺依赖库 | 多一次下载循环，换来 installer 完全不联网下库；代价：`<游戏目录>/libraries` 会更早被填满 |
 | 缺库硬失败 | 宁可拦住也不留「看着装好其实崩」的目录 |
@@ -176,4 +239,5 @@ Reloading ResourceManager: vanilla, mod_resources, mod/neoforge
 - ~~**`GameJavaRules.requiredMajor` 对 26.x 这类无 `1.` 前缀的版本会落到 else → Java 8**~~ —— **2026-11-14 已修**：新增年份式分支（`YearVersionRegex = ^(\d{2})\.\d`），26.1 起返回 25。同日把周号快照也从「一律 21」改成分段（`13w16a–21w18a`→8、`21w19a–22w02a`→16、`22w03a–24w13a`→17、`24w14a–25w46a`→21、`26w14a` 起→25），边界取自官方 744 个快照的 `javaVersion.majorVersion` 实测跃迁点，复算只差 `1.18-pre1` 一个。依据见 docs/05 的 `GameJavaRules` 条目。
 - 安装器升级判断：按 `versionId` 命中就跳过，不比对 installer 自身版本
 - NeoForge 的 `--offline` / `--skip-hash-check` 没用上（预铺已覆盖需求）
-- 老版本（`20.2.x` 之前）没测过
+- ~~老版本（`20.2.x` 之前）没测过~~ —— **2026-11-14 已补测 `1.20.4 + 20.4.253`**（见 6.2），20.2.x 及更早的线仍未测
+- 镜像缺件只能撞出来，没有自动「逐个文件核对镜像清单」的预检；目前是失败后人工查（`dist/_probe_mirror.py` / `dist/_probe_ch.py`），没进产品代码
