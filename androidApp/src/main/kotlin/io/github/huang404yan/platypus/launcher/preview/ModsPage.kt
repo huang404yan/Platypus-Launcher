@@ -35,6 +35,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import io.github.huang404yan.platypus.core.instance.Instance
+import io.github.huang404yan.platypus.core.instance.InstanceLayouts
 import io.github.huang404yan.platypus.core.instance.InstanceScanner
 import io.github.huang404yan.platypus.core.instance.LoaderKind
 import io.github.huang404yan.platypus.core.instance.instanceKey
@@ -238,7 +239,7 @@ internal fun ModsPage() {
         notice = ""
         // 跑在进程级作用域里：切页不会打断，回来还能看到进度和结果。
         ModInstallRunner.start(
-            instanceDir = File(target.directory.trim().trim('"')),
+            instanceDir = InstanceLayouts.of(target).gameDir,
             instanceName = target.name,
             slug = project.slug,
             title = project.title,
@@ -257,7 +258,7 @@ internal fun ModsPage() {
         opError = ""
         try {
             val renamed = withContext(Dispatchers.IO) {
-                ModFileOps.setEnabled(ModScanner.modsDir(File(target.directory.trim().trim('"'))), entry.fileName, enabled)
+                ModFileOps.setEnabled(ModScanner.modsDir(InstanceLayouts.of(target).gameDir), entry.fileName, enabled)
             }
             opNotice = (if (enabled) "已启用 " else "已停用 ") + renamed.name
             // 改名之后旧的选择与更新记录都对不上，重扫最省事
@@ -279,7 +280,7 @@ internal fun ModsPage() {
         opError = ""
         try {
             val removed = withContext(Dispatchers.IO) {
-                ModFileOps.delete(ModScanner.modsDir(File(target.directory.trim().trim('"'))), entry.fileName)
+                ModFileOps.delete(ModScanner.modsDir(InstanceLayouts.of(target).gameDir), entry.fileName)
             }
             opNotice = if (removed) "已删除 " + entry.fileName else "文件本来就不在了：" + entry.fileName
             updates = updates.filterNot { it.fileName == entry.fileName }
@@ -307,7 +308,7 @@ internal fun ModsPage() {
         try {
             val found = withContext(Dispatchers.IO) {
                 ModUpdateChecker.check(
-                    modsDir = ModScanner.modsDir(File(target.directory.trim().trim('"'))),
+                    modsDir = ModScanner.modsDir(InstanceLayouts.of(target).gameDir),
                     gameVersion = gameVersion.trim().ifBlank { null },
                     loader = loader ?: LoaderKind.FABRIC,
                 ) { opNotice = it }
@@ -344,7 +345,7 @@ internal fun ModsPage() {
         conflictProgress = ""
         try {
             val report = withContext(Dispatchers.IO) {
-                ModConflictChecker.check(ModScanner.modsDir(File(target.directory.trim().trim('"')))) { conflictProgress = it }
+                ModConflictChecker.check(ModScanner.modsDir(InstanceLayouts.of(target).gameDir)) { conflictProgress = it }
             }
             conflictReport = report
             conflictProgress = when {
@@ -375,9 +376,9 @@ internal fun ModsPage() {
         opError = ""
         try {
             val installed = withContext(Dispatchers.IO) {
-                ModInstaller.installFile(File(target.directory.trim().trim('"')), slug, latest)
+                ModInstaller.installFile(InstanceLayouts.of(target).gameDir, slug, latest)
             }
-            val modsDir = ModScanner.modsDir(File(target.directory.trim().trim('"')))
+            val modsDir = ModScanner.modsDir(InstanceLayouts.of(target).gameDir)
             val disableNote = withContext(Dispatchers.IO) {
                 runCatching {
                     // 新文件名与旧文件同名说明是同一个包，不需要停用

@@ -99,6 +99,7 @@ Windows 下也可以用 `gradlew.bat`。首次构建会下载约 300 MB 依赖�
 - `docs/32-daoru-hedui.md`：**导入后核对磁盘**（为什么要「再看一眼」而不是信下载器、先比大小必要时才算 sha1、失败不抛而是收集成清单、取消要显示 `Canceled` 而不是停在 `Running`）
 - `docs/35-jiemian-ke-yongxing.md`：**界面可用性**（窗口默认尺寸与最小尺寸、实例页为什么整页滚动而不是「固定头 + 权重列表」、用 Swing `JFileChooser` 而不是 AWT `FileDialog`、下载页状态条、中文搜索与不引外部词库的理由）
 - `docs/36-xinxi-jiagou-yu-zhixie.md`：**信息架构重排与开源致谢**（左栏收成六项、下载下五个二级项、刷新按钮挂导航项、整合包独立成页、致谢四分类与「使用了代码」为空的意义）
+- `docs/37-zuolan-shujubao-geli-yu-duanxucan.md`：**启动页左栏化、数据包与服务端、版本隔离开关、安装器中断续跑**（54 高大按钮与目录为什么留右栏、`loaders=["datapack"]` 的实测理由、插件为什么不做、`isolated` 推翻 `docs/22` 的来龙去脉、`InstallerProcess` 的杀进程时机与两个易错点）
 
 ## 下载
 
@@ -135,13 +136,13 @@ M0（骨架）+ M1（实例扫描）+ M2（下载器）+ M3（**Windows 一键�
 
 **下载断点续传**：先写 `<文件>.part`，校验通过才转正；`.part` 有内容就发 `Range` 接着下，断网不清半成品，下次自动接上。进度条会额外显示「其中 N 个接着上次下（省了 M MB）」（`docs/14`）。
 
-单测 **491 例全过**（43 个测试类，`./gradlew :core:test`）。另有十二个无头冒烟任务（`e2eInstall` / `settingsSmoke` / `instanceFlowSmoke` / `resumeSmoke` / `deleteSmoke` / `fabricE2e` / `modpackE2e` / `forgeE2e` / `neoForgeE2e` / `modsE2e` / `modUpdateE2e` / `isolationSmoke`），走的是界面按钮同一批函数；`resumeSmoke` / `fabricE2e` / `modpackE2e` / `forgeE2e` / `neoForgeE2e` / `modsE2e` 需要联网，分别在空目录真装 Fabric、真跑 Forge 与 NeoForge 官方安装器、真从 Modrinth 下模组、真把一个 `.mrpack` 从解析装到进主菜单；`deleteSmoke` 在 `dist/_delete-smoke` 里全程造假数据，不碰真实 `.minecraft`。
+单测 **512 例全过**（45 个测试类，`./gradlew :core:test`）。另有十二个无头冒烟任务（`e2eInstall` / `settingsSmoke` / `instanceFlowSmoke` / `resumeSmoke` / `deleteSmoke` / `fabricE2e` / `modpackE2e` / `forgeE2e` / `neoForgeE2e` / `modsE2e` / `modUpdateE2e` / `isolationSmoke`），走的是界面按钮同一批函数；`resumeSmoke` / `fabricE2e` / `modpackE2e` / `forgeE2e` / `neoForgeE2e` / `modsE2e` 需要联网，分别在空目录真装 Fabric、真跑 Forge 与 NeoForge 官方安装器、真从 Modrinth 下模组、真把一个 `.mrpack` 从解析装到进主菜单；`deleteSmoke` 在 `dist/_delete-smoke` 里全程造假数据，不碰真实 `.minecraft`。
 
 **能装 Fabric 了**：下载页勾「顺带装 Fabric」→ 拉 meta.fabricmc.net 的 loader 列表（默认落在最新 stable）→ 装 profile json（只改 `id`，保留 `inheritsFrom`）→ 按 maven 坐标补全 8 个库的地址并下载 → 登记成 `1.20.1-fabric-0.20.1` 这样的实例。实测空目录全流程 4 分 29 秒进主菜单，日志首行 `Loading Minecraft 1.20.1 with Fabric Loader 0.20.1`（`docs/15`）。
 
 **能装 Forge 了**：下载页勾「顺带装 Forge」→ 拉 `promotions_slim.json`（默认 recommended）→ 下载官方 installer（8.8 MB，装过一次就复用）→ 备好 `launcher_profiles.json` → 跑 `--installClient` 逐行透传日志 → 校验 version json → **把原版 client jar 复制成 `<forgeId>.jar`**（不 copy 会撞模块，报 `ResolutionException: Module minecraft contains package net.minecraft.server`）→ 登记成 `1.20.1-forge-47.4.28`。实测空目录全流程 7 分 55 秒（含下载 3641 个原版文件与自动补 Java 17）、已装目录 7 秒，进主菜单 11.0 秒（`docs/17`）。
 
-**实例终于真隔离了**：以前所有实例共用一份 `mods/` 与 `saves/`（`--gameDir` 被反推成游戏根目录），装两个整合包会互相打架。现在 `--gameDir` 指向 `<游戏目录>/versions/<id>`，`libraries/` 与 `assets/` 仍共享；`isolationSmoke` 用五条磁盘判据反向证明（实例目录里的 `logs/latest.log` 有内容 9291 B、共享 `latest.log` 的 mtime 与共享 `saves/` 件数一字未变），实测进主菜单 9.6 秒。模组页跟着改成「先选实例」，隔离前装在共享 `mods/` 里的模组可以一键**复制**进某个实例（不移动、不覆盖同名）。实例卡片新增「详情」：本机 Java 列表里挑运行时、改内存与 JVM 参数、看版本 json 摘要（mainClass / 继承自 / 库条目数 / 需要的 Java）、看八个子目录各占多少、一键打开目录（`docs/22`）。
+**实例终于真隔离了**：以前所有实例共用一份 `mods/` 与 `saves/`（`--gameDir` 被反推成游戏根目录），装两个整合包会互相打架。现在 `--gameDir` 指向 `<游戏目录>/versions/<id>`，`libraries/` 与 `assets/` 仍共享（详情页有「版本隔离」开关，默认开着；整合包把 `mods/` 平铺在根目录时关掉它才看得见那些模组，见 `docs/37`）；`isolationSmoke` 用五条磁盘判据反向证明（实例目录里的 `logs/latest.log` 有内容 9291 B、共享 `latest.log` 的 mtime 与共享 `saves/` 件数一字未变），实测进主菜单 9.6 秒。模组页跟着改成「先选实例」，隔离前装在共享 `mods/` 里的模组可以一键**复制**进某个实例（不移动、不覆盖同名）。实例卡片新增「详情」：本机 Java 列表里挑运行时、改内存与 JVM 参数、看版本 json 摘要（mainClass / 继承自 / 库条目数 / 需要的 Java）、看八个子目录各占多少、一键打开目录（`docs/22`）。
 
 **有模组页了**：左侧列出 `mods/` 里已装的（读 `fabric.mod.json` / `mods.toml` / `neoforge.mods.toml` 拿 id、名字、版本、加载器，坏 jar 标出来但不崩），右侧从 Modrinth 搜、选一个装进去，下载沿用 `.part` 续传 + sha1 强校验。实测装 Sodium 971 552 字节、33 秒（`docs/18`）。
 
@@ -182,6 +183,17 @@ M0（骨架）+ M1（实例扫描）+ M2（下载器）+ M3（**Windows 一键�
 **刷新按钮挂在菜单项上**：以前每个页面内容区各有一个「刷新」按钮，位置各不相同。现在跟 PCL 一样做成导航项的属性：鼠标碰到「下载」下的某一项，右侧出现一个小 ↻，点它重扫这一页的清单。内容区里不再放第二个入口——同一个动作两个按钮，用户永远在猜哪个才是对的。整合包页故意不挂：它没有可刷新的缓存清单，放一个点了没反应的按钮比不放更糟。
 
 **关于页有开源致谢了**：分四组写清「使用了代码 / 设计参考（未使用代码）/ 格式与协议 / 运行时依赖」。PCL2 是专有许可、HMCL 与 Prism 是 GPL-3.0，本项目一行没抄，所以「使用了代码」这一组是空的——空着是有意的，不是漏写，单测里就有一条断言盯着它：一旦有人真的搬了实现，这条会变红，提醒同时改仓库根 `NOTICE`。致谢数据在 `core/Credits.kt`，关于页与 `NOTICE` 同源，不会出现「界面说没抄、NOTICE 里写着抄了」。
+
 **中文搜索**：Modrinth 只认英文名与 slug，直接搜「钠」什么也搜不到。PCL 能做到是因为它内置了一份 3 万余行的中文名数据库（`PCLCS/Resource/WikiEntries.txt`），而 `pcl-src` 没有 LICENSE 文件、许可状态不明，不能直接拷进本项目。这里改成手写 140 余条常用中英对照（`core/search/SearchKeywords.kt`，每条 slug 都用 Modrinth 的 `/search` 实测过「搜出来非空」）：输入中文时界面直接说明「搜不到是因为 Modrinth 不认中文」，并给一组可点的英文候选 chip，点一下替换关键词；输入框为空时给这一类热门词（`docs/35`）。
 
-尚未实现：正版/微软登录（`core/auth` 只有接口）、NAT 穿透与公网中转（「直接进」+ 本机地址枚举已能把局域网与公网 IPv6 的场景走通）、中文搜索的完整词库（只有常用对照表，冷门模组仍需用户给英文名）。模组依赖的 `required` / `optional` / `incompatible` 三类声明都已解析：`required` 自动装齐，`optional` 在依赖树卡片里单独列出「作者建议一起装」但**不替你装**，`incompatible` 由模组页的「查冲突」提示。
+**整合包之外还能装数据包与服务端了**：下载栏按 PCL 的分法补了两项。数据包和资源包共用同一套扫描/安装代码（`datapacks/` + `loaders=["datapack"]`），中文词典跟着加了 11 条。服务端下的是 Mojang 原版 `server.jar`，顺手写好 `eula.txt` 与双击就能开的 `start.bat`（Windows，CRLF + `chcp 65001` + `pause`）/ `start.sh`（LF），目录里已有能用的 jar 时不重复下载并明说「没重复下载」。**只有原版**，Forge / NeoForge / Fabric / Paper 的服务端不做，页面上写明了原因（`docs/37`）。
+
+**插件这一项不做，理由是实测的**：Modrinth 的 `project_type:plugin` facet 会把全站模组都搜出来（返回项的 `project_type` 全是 `mod`），插件实际靠 `loaders=["bukkit","paper","spigot"]` 这类值区分；而且插件要落进服务端的 `plugins/`，这一版还没有「服务端实例」这个概念，硬塞入口只会让人装进客户端 `mods/`。
+
+**启动页也变成左栏了**：照 PCL 的 `PageLaunchLeft.xaml`，左栏放实例列表（吃掉剩余高度、自己滚）+ 离线用户名 + 内存 + **54 高的大号启动按钮**，右栏放游戏目录、Java、直连、崩溃报告与日志。目录行留在右栏是因为「一处目录决定左栏能选到哪些实例」，它属于范围而不是动作（`docs/37`）。
+
+**版本隔离能关了**：`Instance` 新增 `isolated: Boolean = true`（默认值就是旧行为，旧 `instances.json` 不用迁移），实例详情页多一张「版本隔离」卡。关掉之后 `--gameDir` 指回游戏根目录，所有版本共用一份 `mods/`、`saves/`、`options.txt` —— 整合包把模组平铺在根目录时才有得选。不是 `versions/<id>` 形状的目录不给这个开关（关不关都落在同一处），详情页会直说。界面层的游戏目录推导同时统一走 `InstanceLayouts.of(...).gameDir`，模组页、光影页、详情统计跟着一起变（`docs/37`）。
+
+**取消安装不再留一个后台 java**：Forge / NeoForge 的官方安装器以前是「起进程 + 循环读日志」，点「取消」只是取消协程，那个 java 还在往 `libraries/` 里写；超时检查也因为装在读循环里而对不出声的进程永不生效。现在抽成 `core/install/InstallerProcess.kt`：协程一结束就 `destroyForcibly`（连派生的子进程一起杀）、日志由独立协程读而主循环用 `waitFor(100ms)` 盯超时与取消、取消以 `CancellationException` 的形式冒出去而不是被包成「安装失败」。下次再点安装，installer 自己会跳过 `libraries/` 里已经存在的库（`docs/37`）。
+
+尚未实现：正版/微软登录（`core/auth` 只有接口）、服务端只有原版（Forge / NeoForge / Fabric / Paper 的服务端没做）、Modrinth 上的插件（`project_type:plugin` facet 实测不可用，见上）、NAT 穿透与公网中转（「直接进」+ 本机地址枚举已能把局域网与公网 IPv6 的场景走通）、中文搜索的完整词库（只有常用对照表，冷门模组仍需用户给英文名）。模组依赖的 `required` / `optional` / `incompatible` 三类声明都已解析：`required` 自动装齐，`optional` 在依赖树卡片里单独列出「作者建议一起装」但**不替你装**，`incompatible` 由模组页的「查冲突」提示。

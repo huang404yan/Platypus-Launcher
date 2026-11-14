@@ -11,6 +11,11 @@ enum class LoaderKind { VANILLA, FORGE, NEOFORGE, FABRIC, QUILT, OPTIFINE, OTHER
  * @param directory 版本目录（<gameRoot>/versions/<id>）。DesktopGameRuntime 由它反推 gameDir。
  * @param registered 是否由本启动器登记（登记过的才能改内存、才会出现在「实例」页的托管分组里）。
  *   目录扫描出来的外部实例恒为 false，但仍然可以用，只是改动会顺带把它登记进来。
+ * @param isolated 这个实例的存档 / 模组 / 配置是「自己一份」还是「和同目录下别的版本共用」。
+ *   默认 true（等于旧行为：--gameDir 指 <gameRoot>/versions/<id>）。设成 false 时
+ *   --gameDir 指回 <gameRoot>，所有版本共用 <gameRoot>/mods、saves、options.txt ——
+ *   只有一种情况该这么用：一个整合包把 mods/ 平铺在游戏根目录下，版本目录里干干净净。
+ *   参照 PCL 的「版本隔离」开关（ModMinecraft.vb 的 PathIndie）。
  */
 @Serializable
 data class Instance(
@@ -25,6 +30,7 @@ data class Instance(
     val extraJvmArgs: List<String> = emptyList(),
     val createdAt: Long = 0L,
     val registered: Boolean = false,
+    val isolated: Boolean = true,
 ) {
     companion object {
         const val DEFAULT_MEMORY_MB = 2048

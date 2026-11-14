@@ -99,6 +99,23 @@ class InstanceEditsTest {
     }
 
     @Test
+    fun `不传隔离开关时不改它`() {
+        // 安卓详情页与老调用点都不传这一项，必须保持原值 —— 传 false 会把隔离悄悄关掉
+        val original = instance().copy(isolated = false)
+        val updated = ok(InstanceEdits.fromInput(original, "2048", "", "")).instance
+        assertTrue(!updated.isolated)
+        assertTrue(ok(InstanceEdits.fromInput(instance(), "2048", "", "")).instance.isolated)
+    }
+
+    @Test
+    fun `传了隔离开关就按传的存`() {
+        val off = ok(InstanceEdits.fromInput(instance(), "2048", "", "", isolated = false)).instance
+        assertTrue(!off.isolated)
+        val on = ok(InstanceEdits.fromInput(instance().copy(isolated = false), "2048", "", "", isolated = true)).instance
+        assertTrue(on.isolated)
+    }
+
+    @Test
     fun `保存提示会把参数个数说清楚`() {
         assertEquals("已保存：2048 MB", InstanceEdits.savedMessage(ok(InstanceEdits.fromInput(instance(), "2048", "", ""))))
         assertEquals(

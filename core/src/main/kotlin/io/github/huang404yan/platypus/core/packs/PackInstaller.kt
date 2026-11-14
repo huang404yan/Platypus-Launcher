@@ -16,13 +16,13 @@ import java.io.File
 import java.io.IOException
 
 /**
- * 从 Modrinth 找光影包 / 资源包并装进实例对应的目录。
+ * 从 Modrinth 找光影包 / 资源包 / 数据包并装进实例对应的目录。
  *
  * 和 [ModInstaller] 的差别只有三处，读代码时别被相似的流程骗了：
- * 1. `project_type` facet 不同（`shader` / `resourcepack`），否则搜出来全是模组；
+ * 1. `project_type` facet 不同（`shader` / `resourcepack` / `datapack`），否则搜出来全是模组；
  * 2. 版本查询的 `loaders` 不同 —— 光影标的是 `iris` / `optifine`，资源包标的是 `minecraft`，
- *    照模组的 `fabric` 去查会一条都查不到（这是实测算出来的，不是猜的）；
- * 3. 落盘目录是 `shaderpacks/` / `resourcepacks/`，文件名允许 `.zip`。
+ *    数据包标的是 `datapack`，照模组的 `fabric` 去查会一条都查不到（这是实测算出来的，不是猜的）；
+ * 3. 落盘目录是 `shaderpacks/` / `resourcepacks/` / `datapacks/`，文件名允许 `.zip`。
  */
 object PackInstaller {
 
@@ -35,6 +35,9 @@ object PackInstaller {
     private fun loadersOf(kind: PackKind): List<String> = when (kind) {
         PackKind.SHADER -> listOf("iris", "optifine")
         PackKind.RESOURCE_PACK -> listOf("minecraft")
+        // 数据包在 Modrinth 上标的是 datapack：实测 Terralith 同时发了 datapack 的 zip
+        // 和 fabric/forge 的 jar，用 minecraft 去筛会把 zip 那条漏掉
+        PackKind.DATAPACK -> listOf("datapack")
     }
 
     /** 搜索：按关键词 + 游戏版本过滤，不按加载器过滤（包类没有 fabric/forge 之分）。 */

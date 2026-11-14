@@ -17,6 +17,7 @@ data class SearchTerm(
         MOD("模组"),
         SHADER("光影"),
         RESOURCE_PACK("资源包"),
+        DATAPACK("数据包"),
         MODPACK("整合包"),
         ANY("通用"),
     }
@@ -206,6 +207,21 @@ object SearchKeywords {
         SearchTerm("极简材质", "bare-bones", SearchTerm.Kind.RESOURCE_PACK),
         SearchTerm("十六倍材质", "modern-mizunos", SearchTerm.Kind.RESOURCE_PACK),
         SearchTerm("水野材质", "modern-mizunos", SearchTerm.Kind.RESOURCE_PACK),
+
+        // —— 数据包 ——
+        // 数据包的中文叫法比资源包更集中：说「泰拉」基本就指 Terralith。
+        // 这几条的 slug 都用 /search?facets=project_type:datapack 实测过能出结果。
+        SearchTerm("泰拉瑞斯", "terralith", SearchTerm.Kind.DATAPACK),
+        SearchTerm("地形重做", "terralith", SearchTerm.Kind.DATAPACK),
+        SearchTerm("地下城酒馆", "dungeons-and-taverns", SearchTerm.Kind.DATAPACK),
+        SearchTerm("地牢酒馆", "dungeons-and-taverns", SearchTerm.Kind.DATAPACK),
+        SearchTerm("连锁挖矿", "veinminer", SearchTerm.Kind.DATAPACK),
+        SearchTerm("连锁采集", "veinminer", SearchTerm.Kind.DATAPACK),
+        SearchTerm("地壳", "tectonic", SearchTerm.Kind.DATAPACK),
+        SearchTerm("放大世界", "amplified-nether", SearchTerm.Kind.DATAPACK),
+        SearchTerm("下界放大", "amplified-nether", SearchTerm.Kind.DATAPACK),
+        SearchTerm("虚无之地", "nullscape", SearchTerm.Kind.DATAPACK),
+        SearchTerm("数据包", "datapack", SearchTerm.Kind.DATAPACK),
 
         // —— 整合包 ——
         SearchTerm("空岛", "skyblock", SearchTerm.Kind.MODPACK),

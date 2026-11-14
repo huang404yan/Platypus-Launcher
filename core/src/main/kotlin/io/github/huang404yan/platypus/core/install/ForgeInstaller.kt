@@ -12,6 +12,7 @@ import io.github.huang404yan.platypus.core.loader.parseForgePromotions
 import io.github.huang404yan.platypus.core.version.DownloadPlanner
 import io.github.huang404yan.platypus.core.version.VersionJson
 import io.github.huang404yan.platypus.core.version.parseVersionJson
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -208,6 +209,9 @@ object ForgeInstaller {
                 elapsedMs = Duration.between(started, Instant.now()).toMillis(),
                 clientJarFile = clientJar,
             )
+        } catch (e: CancellationException) {
+            // 用户点了「取消」：这不是失败，别包成 ForgeInstallException 让界面报红。
+            throw e
         } catch (e: Exception) {
             if (e is ForgeInstallException) throw e
             throw ForgeInstallException(step, e.message ?: e::class.simpleName ?: "未知错误", e)
@@ -310,9 +314,10 @@ object ForgeInstaller {
     /**
      * 起 installer 子进程，边读日志边回调；超时强杀。
      *
+     * 执行本身交给 [InstallerProcess]：那里负责「取消时真的杀进程」与「把取消当取消而不是当失败」。
      * 输出用 UTF-8 读：installer 全是英文，但版本 json 里会带中文模组名，宁可多解一次。
      */
-    private fun runInstaller(
+    private suspend fun runInstaller(
         java: String,
         installer: File,
         gameRoot: File,
@@ -328,36 +333,13 @@ object ForgeInstaller {
             "--installClient",
             gameRoot.absolutePath,
         )
-        val builder = ProcessBuilder(command)
-            .directory(gameRoot)
-            .redirectErrorStream(true)
-        val process = builder.start()
-        logFile.parentFile?.mkdirs()
-        val deadline = System.currentTimeMillis() + TimeUnit.MINUTES.toMillis(INSTALL_TIMEOUT_MINUTES)
-
-        logFile.bufferedWriter(Charsets.UTF_8).use { writer ->
-            writer.write("# " + command.joinToString(" "), 0, ("# " + command.joinToString(" ")).length)
-            writer.newLine()
-            process.inputStream.bufferedReader(Charsets.UTF_8).use { reader ->
-                while (true) {
-                    val line = reader.readLine() ?: break
-                    writer.write(line)
-                    writer.newLine()
-                    // 刷盘：进程被强杀时日志也得留下来给用户看
-                    writer.flush()
-                    val trimmed = line.trim()
-                    if (trimmed.isNotEmpty()) onLine(trimmed)
-                    if (System.currentTimeMillis() > deadline) {
-                        process.destroyForcibly()
-                        throw IOException(
-                            "Forge 安装器超过 " + INSTALL_TIMEOUT_MINUTES + " 分钟没跑完，已强制结束；日志在 " +
-                                logFile.absolutePath,
-                        )
-                    }
-                }
-            }
-        }
-        return process.waitFor()
+        return InstallerProcess.run(
+            command = command,
+            workingDir = gameRoot,
+            logFile = logFile,
+            timeoutMillis = TimeUnit.MINUTES.toMillis(INSTALL_TIMEOUT_MINUTES),
+            onLine = onLine,
+        )
     }
 }
 

@@ -212,6 +212,22 @@ class InstanceModsTest {
     }
 
     @Test
+    fun `关掉隔离后 mods 目录回到游戏根目录`() {
+        val root = tempRoot("platypus-imods-shared")
+        try {
+            val inst = instance(root, "1.20.1").copy(isolated = false)
+            assertEquals(ModScanner.modsDir(root).absolutePath, InstanceMods.modsDirOf(inst).absolutePath)
+            // 游戏根目录下那份模组就是它自己的，按需扫描要能看见
+            jar(File(root, "mods"), "flat.jar")
+            val snapshot = InstanceMods.scan(inst)
+            assertEquals(listOf("flat.jar"), snapshot.scan.mods.map { it.fileName })
+            assertNull(snapshot.legacyScan, "自己就是那份共享目录时不该再提示「有旧模组要搬」")
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
+    @Test
     fun `共享目录里没有 mods 时搬会报错`() {
         val root = tempRoot("platypus-imods-nothing")
         try {

@@ -8,11 +8,14 @@ import java.io.File
 import java.util.zip.ZipFile
 
 /**
- * 光影包还是资源包。
+ * 光影包、资源包还是数据包。
  *
- * 两者在磁盘上只差一个目录名，读元数据的方式也不同：资源包一定有 `pack.mcmeta`（里面写着
- * 显示名与 pack_format），光影包没有统一清单，认它的办法是看 zip 里有没有 `shaders/`。
- * 这层差异藏在 [PackScanner] 里，界面上两个标签页走同一套代码。
+ * 三者在磁盘上只差一个目录名，读元数据的方式却不完全一样：资源包与数据包都有 `pack.mcmeta`
+ * （里面写着显示名与 pack_format），光影包没有统一清单，认它的办法是看 zip 里有没有
+ * `shaders/`。这层差异藏在 [PackScanner] 里，界面上几个标签页走同一套代码。
+ *
+ * 数据包为什么能跟资源包共用扫描器：原版把数据包放进存档的 `datapacks/`，装进游戏目录的
+ * `datapacks/` 也能被所有存档看到（1.16 起），两者的 zip 结构与 `pack.mcmeta` 完全一致。
  *
  * [dirName] 是游戏自己认的目录名，写死成常量，不让调用点各写各的。
  */
@@ -22,6 +25,9 @@ enum class PackKind(val dirName: String, val label: String, val projectType: Str
 
     /** 原版资源包，落在 `resourcepacks/`。 */
     RESOURCE_PACK("resourcepacks", "资源包", "resourcepack"),
+
+    /** 数据包：改合成表、世界生成、战利品表那类，落在 `datapacks/`。 */
+    DATAPACK("datapacks", "数据包", "datapack"),
 }
 
 /**
@@ -65,10 +71,10 @@ data class PackScanResult(
 }
 
 /**
- * 扫描 `<实例目录>/shaderpacks` 或 `<实例目录>/resourcepacks`。
+ * 扫描 `<实例目录>/shaderpacks`、`resourcepacks` 或 `datapacks`。
  *
  * 目录位置和 mods/ 一样：隔离之后游戏是被 `--gameDir <实例目录>` 起来的，
- * 所以光影与资源包也要放在实例目录下，每个实例一份，互不影响。
+ * 所以光影、资源包与数据包也要放在实例目录下，每个实例一份，互不影响。
  *
  * 只读、不写盘、不联网。为什么要打开 zip 而不是只看文件名：光影包的文件名
  * 常常是 `ComplementaryReimagined_r5.9.3.zip` 这种，用户分不清哪个是哪个；
@@ -139,7 +145,7 @@ object PackScanner {
      * 但对外只暴露一个 [Meta]。
      */
     private fun readMeta(kind: PackKind, file: File): Meta? = when (kind) {
-        PackKind.RESOURCE_PACK -> readPackMcmeta(file)
+        PackKind.RESOURCE_PACK, PackKind.DATAPACK -> readPackMcmeta(file)
         PackKind.SHADER -> if (hasShadersDir(file)) Meta(null, null) else null
     }
 
@@ -175,6 +181,7 @@ object PackScanner {
     private fun problemFor(kind: PackKind, file: File): String = when (kind) {
         PackKind.SHADER -> "zip 里没有 shaders/ 目录（游戏的「光影」页面多半不认它）"
         PackKind.RESOURCE_PACK -> "zip 里没有 pack.mcmeta（游戏不认这个资源包）"
+        PackKind.DATAPACK -> "zip 里没有 pack.mcmeta（游戏不认这个数据包）"
     }
 
     /**

@@ -45,6 +45,17 @@ data class InstanceDetails(
     val versionDir: File get() = layout.versionDir
     val gameRoot: File get() = layout.gameRoot
 
+    /** 存档 / 模组 / 配置真正落盘的那一层：隔离时是版本目录，不隔离时是游戏根目录。 */
+    val gameDir: File get() = layout.gameDir
+
+    /**
+     * 这个实例有没有自己的 mods/、saves/。
+     *
+     * 只看目录而不是只看 [Instance.isolated]：非标准布局（父目录不叫 versions）下
+     * 关不关隔离都是同一个目录，那种情况按「没隔离」显示才不误导人。
+     */
+    val isolated: Boolean get() = layout.gameDir != layout.gameRoot
+
     /** 实例自己的目录总共占了多少。 */
     val totalBytes: Long get() = dirs.sumOf { it.bytes }
 }
@@ -72,7 +83,9 @@ object InstanceDetailsLoader {
 
     fun load(instance: Instance): InstanceDetails {
         val versionDir = File(instance.directory.trim().trim('"'))
-        val layout = InstanceLayouts.of(versionDir)
+        // 走 of(instance) 而不是 of(versionDir)：关掉隔离的实例要把 --gameDir 的
+        // 那份 mods/、saves/ 统计进来，指到版本目录会显示成一片空。
+        val layout = InstanceLayouts.of(instance)
         val warnings = mutableListOf<String>()
 
         val jsonFile = VersionResolver.jsonFile(layout.gameRoot, layout.versionDir.name)

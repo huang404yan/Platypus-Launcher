@@ -35,6 +35,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import io.github.huang404yan.platypus.core.instance.Instance
+import io.github.huang404yan.platypus.core.instance.InstanceLayouts
 import io.github.huang404yan.platypus.core.instance.InstanceScanner
 import io.github.huang404yan.platypus.core.instance.JsonInstanceRepository
 import io.github.huang404yan.platypus.core.instance.LoaderKind
@@ -98,10 +99,10 @@ internal fun PacksPage() {
     // 安装跑在进程级的 PackInstallRunner 里：切页、切光影/资源包都不会打断。
     val installState = PackInstallRunner.state.collectAsState().value
 
-    /** 当前选中实例的版本目录；没有就 null。 */
+    /** 当前选中实例的游戏目录（关掉隔离时是游戏根目录）；没有就 null。 */
     fun currentInstanceDir(): File? {
         val target = instances.firstOrNull { instanceKey(it) == selectedKey } ?: return null
-        return File(target.directory.trim().trim('"'))
+        return InstanceLayouts.of(target).gameDir
     }
 
     /** 扫游戏目录里的实例，尽量保住当前选择。 */
