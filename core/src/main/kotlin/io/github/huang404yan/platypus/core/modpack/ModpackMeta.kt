@@ -216,11 +216,6 @@ object ModpackMeta {
                 }
             }
         }
-        if (loader == LoaderKind.QUILT) {
-            // 与 PCL 一致：Quilt 的安装链没做，先明确拒绝而不是装出个跑不起来的实例。
-            return ModpackParse.Failure("暂不支持 Quilt 整合包（包里的 quilt-loader " + (loaderVersion ?: "") + "）")
-        }
-
         val files = mutableListOf<ModpackFile>()
         var skippedByEnv = 0
         var skippedByPath = 0
@@ -334,20 +329,14 @@ object ModpackMeta {
                 "该整合包未提供游戏版本信息（addons 里缺 game，CurseForge 的 manifest.json 里也没有 minecraft.version），无法安装",
             )
         }
-        if (addons.containsKey("quilt")) {
-            return ModpackParse.Failure("暂不支持 Quilt 整合包（包里声明了 quilt " + addons["quilt"] + "）")
-        }
-
         var loader = LoaderKind.VANILLA
         var loaderVersion: String? = null
         addons["forge"]?.takeIf { it.isNotBlank() }?.let { loader = LoaderKind.FORGE; loaderVersion = it }
         addons["neoforge"]?.takeIf { it.isNotBlank() }?.let { loader = LoaderKind.NEOFORGE; loaderVersion = it }
         addons["fabric"]?.takeIf { it.isNotBlank() }?.let { loader = LoaderKind.FABRIC; loaderVersion = it }
+        addons["quilt"]?.takeIf { it.isNotBlank() }?.let { loader = LoaderKind.QUILT; loaderVersion = it }
         if (fromCurseManifest) {
             val fromManifest = loaderFromCurse(meta)
-            if (fromManifest.first == LoaderKind.QUILT) {
-                return ModpackParse.Failure("暂不支持 Quilt 整合包（manifest.json 里写的是 quilt " + (fromManifest.second ?: "") + "）")
-            }
             loader = fromManifest.first
             loaderVersion = fromManifest.second
         }

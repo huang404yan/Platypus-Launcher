@@ -42,12 +42,15 @@ import io.github.huang404yan.platypus.core.instance.Instance
 import io.github.huang404yan.platypus.core.loader.FabricLoaderVersion
 import io.github.huang404yan.platypus.core.loader.ForgeVersion
 import io.github.huang404yan.platypus.core.loader.NeoForgeVersion
+import io.github.huang404yan.platypus.core.loader.QuiltLoaderVersion
+import io.github.huang404yan.platypus.core.loader.QuiltMeta
 import io.github.huang404yan.platypus.core.version.VersionManifest
 import io.github.huang404yan.platypus.core.install.FabricInstaller
 import io.github.huang404yan.platypus.core.install.ForgeInstaller
 import io.github.huang404yan.platypus.core.install.InstallStep
 import io.github.huang404yan.platypus.core.install.LoaderChoice
 import io.github.huang404yan.platypus.core.install.NeoForgeInstaller
+import io.github.huang404yan.platypus.core.install.QuiltInstaller
 import io.github.huang404yan.platypus.core.install.StepProgress
 import io.github.huang404yan.platypus.core.install.VanillaInstaller
 import kotlinx.coroutines.CancellationException
@@ -270,6 +273,47 @@ private fun NeoForgeRow(
 }
 
 /**
+ * Quilt 那一行。
+ *
+ * 与 Fabric 长得一样（同样是「原版之上叠一层」），但选项来源不同：
+ * Quilt 的清单按构建时间排、且没有 stable 字段，所以默认值要靠自己按版本号挑，
+ * 不能像 Fabric 那样拿第一个标了 stable 的。
+ */
+@Composable
+private fun QuiltRow(
+    enabled: Boolean,
+    installQuilt: Boolean,
+    onInstallQuiltChange: (Boolean) -> Unit,
+    gameVersion: String,
+    versions: List<QuiltLoaderVersion>,
+    selected: String,
+    onSelectedChange: (String) -> Unit,
+    loading: Boolean,
+    error: String?,
+) {
+    LoaderPickerRow(
+        enabled = enabled,
+        checked = installQuilt,
+        onCheckedChange = onInstallQuiltChange,
+        title = "顺带装 Quilt",
+        status = when {
+            gameVersion.isBlank() -> "先选一个原版版本"
+            loading -> "正在查 Quilt 版本…"
+            error != null -> "Quilt 版本拉取失败"
+            versions.isEmpty() -> "这个版本没有 Quilt"
+            selected.isBlank() -> "选一个 Quilt 版本"
+            else -> selected + "（" + versions.size + " 个可选）"
+        },
+        options = versions.map {
+            LoaderOption(version = it.version, tag = it.label, selected = it.version == selected)
+        },
+        onPick = onSelectedChange,
+        errorPrefix = "Quilt",
+        error = error,
+    )
+}
+
+/**
  * 下载页：选一个原版版本，一次完成「下载 → 补 Java → 建实例」。
  *
  * 解析、下载、解压都在 Dispatchers.IO 上跑，界面只读状态，不阻塞 UI 线程。
@@ -309,6 +353,13 @@ fun DownloadsPage(
     var neoforgeVersion by remember { mutableStateOf("") }
     var neoforgeError by remember { mutableStateOf<String?>(null) }
     var loadingNeoForge by remember { mutableStateOf(false) }
+
+    // Quilt：同样是「原版之上叠一层」，与上面三个两两互斥。
+    var installQuilt by remember { mutableStateOf(false) }
+    var quiltVersions by remember { mutableStateOf<List<QuiltLoaderVersion>>(emptyList()) }
+    var quiltVersion by remember { mutableStateOf("") }
+    var quiltError by remember { mutableStateOf<String?>(null) }
+    var loadingQuilt by remember { mutableStateOf(false) }
 
     var manifest by remember { mutableStateOf<VersionManifest?>(null) }
     var manifestError by remember { mutableStateOf<String?>(null) }
@@ -365,11 +416,16 @@ fun DownloadsPage(
             OneClickRunner.hint("还没选 NeoForge 版本：等下面的版本列表拉出来，或者取消「装 NeoForge」。")
             return
         }
+        if (installQuilt && quiltVersion.isBlank()) {
+            OneClickRunner.hint("还没选 Quilt 版本：等下面的版本列表拉出来，或者取消「装 Quilt」。")
+            return
+        }
         val dir = File(dirText)
         val choice = when {
             installFabric -> LoaderChoice.Fabric(loaderVersion)
             installForge -> LoaderChoice.Forge(forgeVersion)
             installNeoForge -> LoaderChoice.NeoForge(neoforgeVersion)
+            installQuilt -> LoaderChoice.Quilt(quiltVersion)
             else -> LoaderChoice.Vanilla
         }
         // 跑在 OneClickRunner 的进程级作用域里：切页不会打断，回来还能看到进度。
@@ -410,6 +466,34 @@ fun DownloadsPage(
         } finally {
             // 取消时也要把 loading 收掉，否则界面会一直停在「正在查 loader 列表…」
             loadingLoaders = false
+        }
+    }
+
+
+    /** 拉某个原版版本的 Quilt loader 列表；失败只记原因，不弹错。 */
+    suspend fun refreshQuiltLoaders(gameVersion: String) {
+        if (gameVersion.isBlank()) {
+            quiltVersions = emptyList()
+            quiltVersion = ""
+            return
+        }
+        loadingQuilt = true
+        quiltError = null
+        try {
+            withContext(Dispatchers.IO) {
+                val versions = QuiltInstaller.listLoaders(gameVersion)
+                quiltVersions = versions
+                // 清单按构建时间排，不能取第一个；latestGrown 按版本号挑最高的正式版。
+                quiltVersion = QuiltMeta.latestGrown(versions)?.version.orEmpty()
+            }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            quiltVersions = emptyList()
+            quiltVersion = ""
+            quiltError = e.message ?: (e::class.simpleName ?: "拉取 Quilt 版本失败")
+        } finally {
+            loadingQuilt = false
         }
     }
 
@@ -485,6 +569,8 @@ fun DownloadsPage(
         refreshForgeVersions(versionText.trim())
         // NeoForge 的 maven-metadata.xml 有 68 KB（1856 个版本），拉一次也只要几百毫秒。
         refreshNeoForgeVersions(versionText.trim())
+        // Quilt 的 loader 清单与 Fabric 一样只几 KB，顺手一起拉。
+        refreshQuiltLoaders(versionText.trim())
     }
 
     LaunchedEffect(Unit) {
@@ -580,6 +666,7 @@ fun DownloadsPage(
                         installFabric -> "安装 Fabric"
                         installForge -> "安装 Forge"
                         installNeoForge -> "安装 NeoForge"
+                        installQuilt -> "安装 Quilt"
                         else -> "一键安装"
                     },
                 )
@@ -597,6 +684,7 @@ fun DownloadsPage(
                 if (it) {
                     installForge = false
                     installNeoForge = false
+                    installQuilt = false
                 }
             },
             gameVersion = versionText.trim(),
@@ -615,6 +703,7 @@ fun DownloadsPage(
                 if (it) {
                     installFabric = false
                     installNeoForge = false
+                    installQuilt = false
                 }
             },
             gameVersion = versionText.trim(),
@@ -633,6 +722,7 @@ fun DownloadsPage(
                 if (it) {
                     installFabric = false
                     installForge = false
+                    installQuilt = false
                 }
             },
             gameVersion = versionText.trim(),
@@ -641,6 +731,25 @@ fun DownloadsPage(
             onSelectedChange = { neoforgeVersion = it },
             loading = loadingNeoForge,
             error = neoforgeError,
+        )
+
+        QuiltRow(
+            enabled = !busy,
+            installQuilt = installQuilt,
+            onInstallQuiltChange = {
+                installQuilt = it
+                if (it) {
+                    installFabric = false
+                    installForge = false
+                    installNeoForge = false
+                }
+            },
+            gameVersion = versionText.trim(),
+            versions = quiltVersions,
+            selected = quiltVersion,
+            onSelectedChange = { quiltVersion = it },
+            loading = loadingQuilt,
+            error = quiltError,
         )
 
         Row(

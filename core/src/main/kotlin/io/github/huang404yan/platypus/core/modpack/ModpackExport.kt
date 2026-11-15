@@ -317,7 +317,7 @@ object ModpackExport {
 
         val loader = instance.loader
         val loaderVersion = instance.loaderVersion
-        if (loader == LoaderKind.QUILT || loader == LoaderKind.OPTIFINE || loader == LoaderKind.OTHER) {
+        if (loader == LoaderKind.OPTIFINE || loader == LoaderKind.OTHER) {
             warnings += "这个实例的加载器是 " + loader.name + "，两种整合包格式都没有它的标准写法：" +
                 "导入方只会装原版，模组大概率跑不起来"
         }
@@ -594,6 +594,9 @@ object ModpackExport {
             LoaderKind.FORGE -> Addon("forge", "forge", "forge", clean)
             LoaderKind.NEOFORGE -> Addon("neoforge", "neoforge", "neoforge", clean)
             LoaderKind.FABRIC -> Addon("fabric", "fabric", "fabric-loader", clean)
+            // Quilt 三种写法都跟前三家一样是短名：MCBBS 的 addons id 与 CurseForge 的
+            // modLoaders id 前缀都是 quilt，Modrinth 的 dependencies 键是 quilt-loader。
+            LoaderKind.QUILT -> Addon("quilt", "quilt", "quilt-loader", clean)
             else -> null
         }
     }

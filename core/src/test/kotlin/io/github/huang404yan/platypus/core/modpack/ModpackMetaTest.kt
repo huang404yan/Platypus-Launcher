@@ -136,13 +136,14 @@ class ModpackMetaTest {
     }
 
     @Test
-    fun `mrpack 的 quilt 包明确拒绝`() {
-        val reason = failure(
+    fun `mrpack 的 quilt 包认得出加载器与版本`() {
+        val manifest = ok(
             ModpackMeta.parseMrpack(
                 """{"formatVersion":1,"game":"minecraft","dependencies":{"minecraft":"1.20.1","quilt-loader":"0.23.1"}}""",
             ),
         )
-        assertTrue(reason.contains("Quilt"), reason)
+        assertEquals(LoaderKind.QUILT, manifest.loader)
+        assertEquals("0.23.1", manifest.loaderVersion)
     }
 
     @Test
@@ -207,13 +208,14 @@ class ModpackMetaTest {
     }
 
     @Test
-    fun `MCBBS 包带 quilt 时明确拒绝`() {
-        val reason = failure(
+    fun `MCBBS 包带 quilt 时认得出加载器与版本`() {
+        val manifest = ok(
             ModpackMeta.parseMcbbs(
                 """{"name":"x","addons":[{"id":"game","version":"1.20.1"},{"id":"quilt","version":"0.23"}]}""",
             ),
         )
-        assertTrue(reason.contains("Quilt"), reason)
+        assertEquals(LoaderKind.QUILT, manifest.loader)
+        assertEquals("0.23", manifest.loaderVersion)
     }
 
     @Test
@@ -303,14 +305,15 @@ class ModpackMetaTest {
     }
 
     @Test
-    fun `CurseForge 包只声明 quilt 时明确拒绝`() {
-        val reason = failure(
+    fun `CurseForge 包只声明 quilt 时认得出加载器与版本`() {
+        val manifest = ok(
             ModpackMeta.parseMcbbs(
                 packmetaText = null,
                 manifestText = """{"name":"x","minecraft":{"version":"1.20.1","modLoaders":[{"id":"quilt-0.23.1","primary":true}]}}""",
             ),
         )
-        assertTrue(reason.contains("Quilt"), reason)
+        assertEquals(LoaderKind.QUILT, manifest.loader)
+        assertEquals("0.23.1", manifest.loaderVersion)
     }
 
     @Test

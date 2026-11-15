@@ -292,6 +292,39 @@ class ModpackExportTest {
     }
 
     @Test
+    fun `Quilt 实例三种格式都写出加载器，不再当成不认识的加载器`() = runBlocking {
+        write("mods/qsl.jar")
+        val quilt = instance(LoaderKind.QUILT, "0.24.0")
+
+        val mcbbs = File(root, "quilt.zip")
+        ModpackExport.export(quilt, mcbbs, ModpackExportOptions())
+        val packmeta = textOf(mcbbs, ModpackExport.PACKMETA_NAME).orEmpty()
+        assertTrue(packmeta.contains("\"id\": \"quilt\""), packmeta)
+        assertTrue(packmeta.contains("\"version\": \"0.24.0\""), packmeta)
+        val manifest = textOf(mcbbs, ModpackExport.MANIFEST_NAME).orEmpty()
+        assertTrue(manifest.contains("quilt-0.24.0"), manifest)
+
+        val mrpack = File(root, "quilt.mrpack")
+        ModpackExport.export(quilt, mrpack, ModpackExportOptions(format = ModpackExportFormat.MRPACK))
+        val index = textOf(mrpack, ModpackExport.INDEX_NAME).orEmpty()
+        assertTrue(index.contains("\"quilt-loader\": \"0.24.0\""), index)
+
+        val curse = File(root, "quilt-cf.zip")
+        val result = ModpackExport.export(
+            quilt,
+            curse,
+            ModpackExportOptions(format = ModpackExportFormat.CURSE),
+        )
+        val curseManifest = textOf(curse, ModpackExport.MANIFEST_NAME).orEmpty()
+        assertTrue(curseManifest.contains("\"id\": \"quilt-0.24.0\""), curseManifest)
+        // 以前这一条是「两格式都没有 Quilt 的标准写法」，现在不该再出现
+        assertTrue(
+            result.warnings.none { it.contains("没有它的标准写法") },
+            result.warnings.joinToString(" / "),
+        )
+    }
+
+    @Test
     fun `认出来的文件只留下载地址不打进包里`() = runBlocking {
         val jar = write("mods/sodium.jar", "sodium-bytes")
         val sha1 = ModUpdateChecker.sha1Of(jar)

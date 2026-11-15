@@ -316,6 +316,44 @@ tasks.register<JavaExec>("neoForgeE2e") {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// 开发期 Quilt 验收（需要联网，元数据来自 meta.quiltmc.org）
+//
+// 与 fabricE2e 同形，只是把 LoaderChoice.Fabric 换成 LoaderChoice.Quilt：
+// 原版 → Quilt profile json → Quilt 库 → 补 Java → 登记实例 → 启动进主菜单。
+// 它要证明的是 Quilt 的 profile 真能起得来 —— 单测只证明解析对，证明不了库一个不缺。
+//
+//   gradle :app-desktop:quiltE2e -PquiltDir=dist/_quilt-e2e [-Pgv=1.20.1]
+//          [-PquiltLoader=0.24.0] [-PskipOrig=true]
+//
+// skipOrig=true 时假定该目录里原版已经装好，只走 QuiltInstaller 那一段。
+// 日志落在 dist/_e2e-logs/quilt-e2e-*.log。
+// ─────────────────────────────────────────────────────────────────────────────
+tasks.register<JavaExec>("quiltE2e") {
+    group = "verification"
+    description = "无头验收：干净目录装 1.20.1 + Quilt 并启动进主菜单（开发期用，需联网）"
+    dependsOn(tasks.named("testClasses"))
+    mainClass.set("io.github.huang404yan.platypus.desktop.QuiltE2eKt")
+    classpath = sourceSets["test"].runtimeClasspath
+    workingDir = rootProject.projectDir
+    jvmArgs("-Dfile.encoding=UTF-8")
+
+    argumentProviders.add(
+        CommandLineArgumentProvider {
+            val dir = providers.gradleProperty("quiltDir").orNull
+                ?: error("缺少 -PquiltDir=<游戏目录>（建议 dist/_quilt-e2e）")
+            listOf(
+                rootProject.file(dir).absolutePath,
+                providers.gradleProperty("gv").orElse("1.20.1").get(),
+                providers.gradleProperty("quiltLoader").orElse("").get(),
+                providers.gradleProperty("e2eUser").orElse("Dev").get(),
+                providers.gradleProperty("e2eTimeoutMs").orElse("300000").get(),
+                providers.gradleProperty("skipOrig").orElse("false").get(),
+            )
+        },
+    )
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // 开发期 模组 验收（需要联网，走 Modrinth 公共 API）
 //
 //   gradle :app-desktop:modsE2e -PmodsDir=dist/_mods-e2e [-PmodQuery=sodium]

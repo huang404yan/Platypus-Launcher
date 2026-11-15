@@ -95,7 +95,12 @@ object InstanceScanner {
         val lower = versionId.lowercase()
         return when {
             lower.contains("neoforge") -> LoaderKind.NEOFORGE to matchVersion(versionId, "neoforge[-_]([0-9][0-9A-Za-z.\\-]*)")
-            lower.contains("quilt") -> LoaderKind.QUILT to matchVersion(versionId, "quilt[-_]loader[-_]([0-9][0-9.]*)")
+            // quilt-loader-0.23.1-1.20.1（Quilt 官方 profile 的 id）与
+            // 1.20.1-quilt-0.24.0（本启动器自己起的名字）两种都认，原因同 Fabric。
+            lower.contains("quilt") -> LoaderKind.QUILT to (
+                matchVersion(versionId, "quilt[-_]loader[-_]([0-9][0-9.]*)")
+                    ?: matchVersion(versionId, "quilt[-_]([0-9][0-9.]*)$")
+                )
             // fabric-loader-0.16.14-1.20.1（Fabric 官方 profile 的 id）与
             // 1.20.1-fabric-0.16.14（本启动器自己起的名字）两种都认。
             lower.contains("fabric") -> LoaderKind.FABRIC to (

@@ -7,6 +7,7 @@ import io.github.huang404yan.platypus.core.instance.LoaderKind
 import io.github.huang404yan.platypus.core.loader.FabricMeta
 import io.github.huang404yan.platypus.core.loader.ForgeMeta
 import io.github.huang404yan.platypus.core.loader.NeoForgeMeta
+import io.github.huang404yan.platypus.core.loader.QuiltMeta
 import io.github.huang404yan.platypus.core.runtime.JavaRuntime
 import io.github.huang404yan.platypus.core.runtime.JavaRuntimeService
 import io.github.huang404yan.platypus.core.runtime.findExactMajor
@@ -68,6 +69,8 @@ data class InstallOutcome(
     val forge: ForgeInstallResult? = null,
     /** 装了加载器时的 NeoForge 安装结果；原版安装为 null。 */
     val neoforge: NeoForgeInstallResult? = null,
+    /** 装了加载器时的 Quilt 安装结果；原版安装为 null。 */
+    val quilt: QuiltInstallResult? = null,
 )
 
 /**
@@ -95,6 +98,15 @@ sealed interface LoaderChoice {
      * 细节见 [NeoForgeInstaller] 的类注释。
      */
     data class NeoForge(val neoforgeVersion: String? = null) : LoaderChoice
+
+    /**
+     * Quilt；loaderVersion 留空表示装最新稳定版（清单里没有 stable 标记，按版本号自己挑）。
+     *
+     * Quilt 走的是 meta.quiltmc.org 的 profile json，和 Fabric 一样是「原版之上叠一层」，
+     * 不需要跑 java 安装器 —— 它的库清单里连 sha1 都没给，只给了 name + url，
+     * 所以下载完必须自己补校验和，见 [QuiltInstaller]。
+     */
+    data class Quilt(val loaderVersion: String? = null) : LoaderChoice
 }
 
 /**
@@ -340,13 +352,55 @@ object OneClickInstaller {
             effectiveVersionId = neoforge.versionId
         }
 
+        var quilt: QuiltInstallResult? = null
+        if (loader is LoaderChoice.Quilt) {
+            val wanted = loader.loaderVersion?.trim().orEmpty()
+            onProgress(
+                StepProgress(
+                    InstallStep.LOADER_INSTALL,
+                    if (wanted.isEmpty()) "查询 Quilt 最新稳定版" else "安装 Quilt " + wanted,
+                ),
+            )
+            try {
+                // Quilt 与 Fabric 同理，不跑安装器进程：拉 profile json 写完就是叠好了。
+                quilt = QuiltInstaller.install(
+                    gameRoot = gameDir,
+                    vanillaVersion = plan.versionId,
+                    loaderVersion = wanted.takeIf { it.isNotEmpty() },
+                ) { p ->
+                    onProgress(
+                        StepProgress(
+                            InstallStep.LOADER_INSTALL,
+                            p.step.label + if (p.detail.isBlank()) "" else "：" + p.detail,
+                            done = p.done,
+                            total = p.total,
+                        ),
+                    )
+                }
+            } catch (e: QuiltInstallException) {
+                throw InstallStepException(
+                    InstallStep.LOADER_INSTALL,
+                    "Quilt " + e.step.label + "失败：" + describe(e),
+                    e,
+                )
+            } catch (e: Exception) {
+                throw InstallStepException(
+                    InstallStep.LOADER_INSTALL,
+                    "装 Quilt 失败：" + describe(e),
+                    e,
+                )
+            }
+            effectiveVersionId = quilt.versionId
+        }
+
         // ⑤ 登记实例
         onProgress(StepProgress(InstallStep.REGISTERING, "写入实例登记"))
-        val loaderVersion = fabric?.loaderVersion ?: forge?.forgeVersion ?: neoforge?.neoforgeVersion
+        val loaderVersion = fabric?.loaderVersion ?: forge?.forgeVersion ?: neoforge?.neoforgeVersion ?: quilt?.loaderVersion
         val loaderKind = when {
             fabric != null -> LoaderKind.FABRIC
             forge != null -> LoaderKind.FORGE
             neoforge != null -> LoaderKind.NEOFORGE
+            quilt != null -> LoaderKind.QUILT
             else -> LoaderKind.VANILLA
         }
         val displayName = instanceName?.trim()?.takeIf { it.isNotEmpty() }
@@ -355,6 +409,7 @@ object OneClickInstaller {
                 forge != null -> ForgeMeta.displayName(plan.gameVersion, forge.forgeVersion)
                 // NeoForge 的版本号自身就带着 MC 版本语义，不再重复原版号
                 neoforge != null -> NeoForgeMeta.displayName(neoforge.neoforgeVersion)
+                quilt != null -> QuiltMeta.displayName(plan.gameVersion, quilt.loaderVersion)
                 else -> plan.versionId
             }
         val instance = Instance(
@@ -385,6 +440,7 @@ object OneClickInstaller {
             fabric = fabric,
             forge = forge,
             neoforge = neoforge,
+            quilt = quilt,
         )
     }
 

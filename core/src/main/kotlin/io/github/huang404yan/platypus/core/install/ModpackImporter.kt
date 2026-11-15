@@ -176,7 +176,8 @@ object ModpackImporter {
             LoaderKind.FABRIC -> LoaderChoice.Fabric(manifest.loaderVersion)
             LoaderKind.FORGE -> LoaderChoice.Forge(manifest.loaderVersion)
             LoaderKind.NEOFORGE -> LoaderChoice.NeoForge(manifest.loaderVersion)
-            // QUILT 在解析阶段就被拒了；OTHER / OPTIFINE 只能装原版，包里的模组大概率跑不起来，
+            LoaderKind.QUILT -> LoaderChoice.Quilt(manifest.loaderVersion)
+            // OTHER / OPTIFINE 只能装原版，包里的模组大概率跑不起来，
             // 这种情况在解析的 warnings 里已经写过一句。
             else -> LoaderChoice.Vanilla
         }
