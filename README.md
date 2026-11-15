@@ -142,7 +142,7 @@ releases/preview/{android,windows,linux}/   Platypus Preview 孵化版
 
 ## 状态
 
-M0（骨架）+ M1（实例扫描）+ M2（下载器）+ M3（**Windows 一键装闭环**）+ M4（**整合包导入**）已完成，当前版本 **0.8.0-preview.13**（孵化线）。
+M0（骨架）+ M1（实例扫描）+ M2（下载器）+ M3（**Windows 一键装闭环**）+ M4（**整合包导入**）已完成，当前版本 **0.8.0-preview.14**（孵化线）。
 
 **Windows 端已经能双击玩起来**：选版本 → 下载（客户端 jar / libraries / assets）→ 缺 Java 自动从 Mojang 官方运行时清单补 → 登记成实例 → 启动进主菜单，全程不需要人替启动器干活。实例内存可在启动页改（512–32768 MB）。
 
@@ -166,7 +166,7 @@ M0（骨架）+ M1（实例扫描）+ M2（下载器）+ M3（**Windows 一键�
 
 **下载断点续传**：先写 `<文件>.part`，校验通过才转正；`.part` 有内容就发 `Range` 接着下，断网不清半成品，下次自动接上。进度条会额外显示「其中 N 个接着上次下（省了 M MB）」（`docs/14`）。
 
-单测 **934 例全过**（76 个测试类，`./gradlew :core:test :ui:jvmTest`；`ui` 从这一版起有 `jvmTest` 源集，格式化函数与导航常量也进单测了）。另有十二个无头冒烟任务（`e2eInstall` / `settingsSmoke` / `instanceFlowSmoke` / `resumeSmoke` / `deleteSmoke` / `fabricE2e` / `modpackE2e` / `forgeE2e` / `neoForgeE2e` / `modsE2e` / `modUpdateE2e` / `isolationSmoke`），走的是界面按钮同一批函数；`resumeSmoke` / `fabricE2e` / `modpackE2e` / `forgeE2e` / `neoForgeE2e` / `modsE2e` 需要联网，分别在空目录真装 Fabric、真跑 Forge 与 NeoForge 官方安装器、真从 Modrinth 下模组、真把一个 `.mrpack` 从解析装到进主菜单；`deleteSmoke` 在 `dist/_delete-smoke` 里全程造假数据，不碰真实 `.minecraft`。
+单测 **937 例全过**（76 个测试类，`./gradlew :core:test :ui:jvmTest`；`ui` 从这一版起有 `jvmTest` 源集，格式化函数与导航常量也进单测了）。另有十二个无头冒烟任务（`e2eInstall` / `settingsSmoke` / `instanceFlowSmoke` / `resumeSmoke` / `deleteSmoke` / `fabricE2e` / `modpackE2e` / `forgeE2e` / `neoForgeE2e` / `modsE2e` / `modUpdateE2e` / `isolationSmoke`），走的是界面按钮同一批函数；`resumeSmoke` / `fabricE2e` / `modpackE2e` / `forgeE2e` / `neoForgeE2e` / `modsE2e` 需要联网，分别在空目录真装 Fabric、真跑 Forge 与 NeoForge 官方安装器、真从 Modrinth 下模组、真把一个 `.mrpack` 从解析装到进主菜单；`deleteSmoke` 在 `dist/_delete-smoke` 里全程造假数据，不碰真实 `.minecraft`。
 
 **能装 Fabric 了**：下载页勾「顺带装 Fabric」→ 拉 meta.fabricmc.net 的 loader 列表（默认落在最新 stable）→ 装 profile json（只改 `id`，保留 `inheritsFrom`）→ 按 maven 坐标补全 8 个库的地址并下载 → 登记成 `1.20.1-fabric-0.20.1` 这样的实例。实测空目录全流程 4 分 29 秒进主菜单，日志首行 `Loading Minecraft 1.20.1 with Fabric Loader 0.20.1`（`docs/15`）。
 
