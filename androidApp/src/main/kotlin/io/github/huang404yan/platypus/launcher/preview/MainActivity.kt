@@ -50,6 +50,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -117,42 +118,37 @@ class MainActivity : ComponentActivity() {
 }
 
 /**
- * 侧边栏的顺序与桌面端对齐：实例 / 下载 / 模组 / 光影资源包 / 联机 / 启动 / 设置 / 诊断 / 关于。
+ * 侧边栏一共七项，与桌面端同一套骨架：启动 / 实例 / 下载 / 联机 / 帮助 / 设置 / 关于。
  *
- * 「诊断」是安卓独有的（桌面没有 EGL、也没有「所有文件访问权限」这类要查的东西）；
- * 「更多」这个名字原来挂着一个永远「还没做」的占位，现在被模组、联机、设置三个真页面取代。
+ * 2026-11-16 按用户要求重排过一次，原来十二项里有五个是「某个页面下面的一小块」，
+ * 平铺在侧栏上会让人以为它们是并列的功能：
  *
- * 「光影资源包」在桌面上是侧边栏的一个页面、里面再分光影 / 资源包 / 数据包三个二级项；
- * 手机侧边栏放不下二级，所以这里只留一个 Tab，三种包由页面顶部的按钮切换。
+ * - 模组 / 光影资源包 / 服务端 收进「下载」。它们本来就是「从网上找一个东西装进游戏目录」，
+ *   和装原版是同一条流水线，只是产物落在不同目录；下载页顶部一个分类栏就能装下。
+ * - Java / 诊断 / 账号 收进「设置」。前两个是「这台设备上有什么」的检查，第三个是身份，
+ *   都属于「用之前配一次就不常来」的东西。
+ * - 启动 / 实例 / 联机 / 帮助 / 关于 留在顶层 —— 每次开启动器都要经过其中至少两个。
  *
- * 「服务端」也是一个 Tab。手机上只能装原版 / Paper / Fabric 三种（Forge 与 NeoForge
- * 要起 java 子进程跑安装器，这一版不做），装完没有应用内开服，只留目录和脚本。
- *
- * 「Java」紧跟设置：它跟桌面一样是「往盘上装一份运行时」，不是改设置，但也不需要单独
- * 占一个顶层位置放前面 —— 装一次就不常来了。
- *
- * 「账号」紧挨「启动」而不是并进设置：桌面上它挂在设置的二级里，因为桌面侧栏横向放得下；
- * 手机上登录是「用之前先做一次」的动作，藏在设置二级里找不到，而它又直接决定启动时
- * 用的是正版号、外置号还是离线号 —— 放在启动页旁边，用错身份一眼就能看见。
+ * 「启动」默认落在这一页：它是「今天要玩哪个版本、用谁的身份」这一件事的入口，
+ * 桌面上也是这个理由（见 ui/App.kt 的注释）。
  */
 private enum class Tab(val label: String) {
+    LAUNCH("启动"),
     INSTANCE("实例"),
     DOWNLOAD("下载"),
-    MODS("模组"),
-    PACKS("光影资源包"),
-    SERVER("服务端"),
     LINK("联机"),
-    ACCOUNT("账号"),
-    LAUNCH("启动"),
+    HELP("帮助"),
     SETTINGS("设置"),
-    JAVA("Java"),
-    DIAGNOSTIC("诊断"),
     ABOUT("关于"),
 }
 
 @Composable
 private fun AppRoot(theme: LauncherTheme, onThemeChange: (LauncherTheme) -> Unit) {
-    var tab by remember { mutableStateOf(Tab.INSTANCE) }
+    var tab by remember { mutableStateOf(Tab.LAUNCH) }
+    // 二级项记在 map 里而不是每个 Tab 一个变量：切走再切回来时还停在上次那一项，
+    // 而 "下载 → 模组" 与 "设置 → Java" 互不干扰（桌面 App.kt 用的是同一套写法）。
+    val subSelection = remember { mutableStateMapOf<String, String>() }
+    val sub = subSelection[tab.name].orEmpty()
     // 尺寸不写死：手机横屏两千多 px、平板更宽，同一套 dp 在两种屏上观感差很多。
     // 侧栏按屏宽取比例再夹在上下限之间，内容框的留白同理。
     BoxWithConstraints(Modifier.fillMaxSize()) {
@@ -170,7 +166,13 @@ private fun AppRoot(theme: LauncherTheme, onThemeChange: (LauncherTheme) -> Unit
                     WindowInsets.safeDrawing.only(WindowInsetsSides.End + WindowInsetsSides.Bottom),
                 ),
         ) {
-            SideBar(width = sidebarWidth, current = tab, onSelect = { tab = it })
+            SideBar(
+                width = sidebarWidth,
+                current = tab,
+                currentSub = sub,
+                onSelect = { tab = it },
+                onSelectSub = { subSelection[tab.name] = it },
+            )
             // 内容区自己带一个框（留白 + 圆角 + 描边），侧栏不带 —— 侧栏要铺到最左
             // 把摄像头盖住，给它留白就又露出挖孔了。中间不放分隔线：框就是边界。
             Box(
@@ -183,28 +185,73 @@ private fun AppRoot(theme: LauncherTheme, onThemeChange: (LauncherTheme) -> Unit
                     .padding(horizontal = 20.dp, vertical = 16.dp),
             ) {
                 when (tab) {
-                    Tab.INSTANCE -> InstancePage()
-                    Tab.DOWNLOAD -> DownloadPage()
-                    Tab.MODS -> ModsPage()
-                    Tab.PACKS -> PacksPage()
-                    Tab.SERVER -> ServerPage()
-                    Tab.LINK -> LinkPage()
-                    Tab.ACCOUNT -> AccountPage()
-                    Tab.SETTINGS -> SettingsPage(theme = theme, onThemeChange = onThemeChange)
-                    Tab.JAVA -> JavaPage()
-                    Tab.DIAGNOSTIC -> DiagnosticPage()
-                    Tab.ABOUT -> AboutPage()
-                    // 启动页做到「进游戏之前的全部准备」：挑运行时与后端、六条自检、
-                    // 拼出应用内 JVM 要的完整参数表。最后那一步是 JNI 起 JVM，还没在真机上跑通。
+                    // 启动页做到「进游戏之前的全部准备」：挑实例与身份、挑运行时与后端、
+                    // 六条自检、拼出应用内 JVM 要的完整参数表。最后那一步是 JNI 起 JVM。
                     Tab.LAUNCH -> LaunchPage()
+                    Tab.INSTANCE -> InstancePage()
+                    Tab.LINK -> LinkPage()
+                    Tab.HELP -> HelpPage()
+                    Tab.ABOUT -> AboutPage()
+                    // 「下载」与「设置」各有四项二级。分类栏长在侧栏里（选中时向下展开），
+                    // 不再往页面顶部塞一排按钮：手机上横屏本来就矮，页面顶部那一行会跟
+                    // 标题抢位置，而且切页时「我在哪一层」会看不清。
+                    Tab.DOWNLOAD -> when (sub) {
+                        DOWNLOAD_SUB_MODS -> ModsPage()
+                        DOWNLOAD_SUB_PACKS -> PacksPage()
+                        DOWNLOAD_SUB_SERVER -> ServerPage()
+                        else -> DownloadPage()
+                    }
+                    Tab.SETTINGS -> when (sub) {
+                        SETTINGS_SUB_ACCOUNT -> AccountPage()
+                        SETTINGS_SUB_JAVA -> JavaPage()
+                        SETTINGS_SUB_DIAGNOSTIC -> DiagnosticPage()
+                        else -> SettingsPage(theme = theme, onThemeChange = onThemeChange)
+                    }
                 }
             }
         }
     }
 }
 
+/**
+ * 「下载」与「设置」下面各有四项。放在这里而不是各页面里，是因为侧栏要画它们、
+ * 分发表也要按它们选页面 —— 一处定义、两处消费，免得加一项的时候漏掉一边。
+ */
+private const val DOWNLOAD_SUB_VANILLA = "vanilla"
+private const val DOWNLOAD_SUB_MODS = "mods"
+private const val DOWNLOAD_SUB_PACKS = "packs"
+private const val DOWNLOAD_SUB_SERVER = "server"
+private const val SETTINGS_SUB_GENERAL = "general"
+private const val SETTINGS_SUB_ACCOUNT = "account"
+private const val SETTINGS_SUB_JAVA = "java"
+private const val SETTINGS_SUB_DIAGNOSTIC = "diagnostic"
+
+/** 这个 Tab 展开之后要画哪几行；空表示它本身就是一个页面，不再分词。 */
+private val Tab.subItems: List<Pair<String, String>>
+    get() = when (this) {
+        Tab.DOWNLOAD -> listOf(
+            DOWNLOAD_SUB_VANILLA to "原版与加载器",
+            DOWNLOAD_SUB_MODS to "模组",
+            DOWNLOAD_SUB_PACKS to "光影资源包",
+            DOWNLOAD_SUB_SERVER to "服务端",
+        )
+        Tab.SETTINGS -> listOf(
+            SETTINGS_SUB_GENERAL to "常规",
+            SETTINGS_SUB_ACCOUNT to "账号",
+            SETTINGS_SUB_JAVA to "Java",
+            SETTINGS_SUB_DIAGNOSTIC to "诊断",
+        )
+        else -> emptyList()
+    }
+
 @Composable
-private fun SideBar(width: Dp, current: Tab, onSelect: (Tab) -> Unit) {
+private fun SideBar(
+    width: Dp,
+    current: Tab,
+    currentSub: String,
+    onSelect: (Tab) -> Unit,
+    onSelectSub: (String) -> Unit,
+) {
     Column(
         modifier = Modifier
             .width(width)
@@ -246,6 +293,9 @@ private fun SideBar(width: Dp, current: Tab, onSelect: (Tab) -> Unit) {
                             if (selected) MaterialTheme.colorScheme.primary.copy(alpha = 0.14f) else Color.Transparent,
                             MaterialTheme.shapes.small,
                         )
+                        // 只切一级，不动二级：subSelection 按 Tab 名分开存，
+                        // 「下载 → 服务端」与「设置 → Java」互不影响；从没选过的 Tab
+                        // 取不到值，分发时那个 else 分支就已经落到第一项了。
                         .clickable { onSelect(item) }
                         .padding(horizontal = 10.dp, vertical = 10.dp),
                     verticalAlignment = Alignment.CenterVertically,
@@ -256,6 +306,39 @@ private fun SideBar(width: Dp, current: Tab, onSelect: (Tab) -> Unit) {
                         fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
                         color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
                     )
+                }
+                // 二级只在选中时展开：七项里只有两项有子项，全展开会让侧栏长出一倍，
+                // 手机横屏那点高度不够；收起时侧栏还是七行，跟用户要的一样清爽。
+                if (selected) {
+                    item.subItems.forEach { (key, label) ->
+                        val childSelected = key == currentSub
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .background(
+                                    if (childSelected) {
+                                        MaterialTheme.colorScheme.primary.copy(alpha = 0.10f)
+                                    } else {
+                                        Color.Transparent
+                                    },
+                                    MaterialTheme.shapes.small,
+                                )
+                                .clickable { onSelectSub(key) }
+                                .padding(start = 25.dp, end = 10.dp, top = 7.dp, bottom = 7.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                text = label,
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = if (childSelected) FontWeight.SemiBold else FontWeight.Normal,
+                                color = if (childSelected) {
+                                    MaterialTheme.colorScheme.primary
+                                } else {
+                                    MaterialTheme.colorScheme.onSurfaceVariant
+                                },
+                            )
+                        }
+                    }
                 }
             }
         }

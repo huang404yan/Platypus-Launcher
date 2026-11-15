@@ -29,6 +29,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
@@ -36,6 +37,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import io.github.huang404yan.platypus.core.auth.AccountBootstrap
 import io.github.huang404yan.platypus.core.auth.AccountSession
+import io.github.huang404yan.platypus.core.auth.StoredAccount
 import io.github.huang404yan.platypus.core.instance.Instance
 import io.github.huang404yan.platypus.core.instance.InstanceScanner
 import io.github.huang404yan.platypus.core.instance.JsonInstanceRepository
@@ -120,12 +122,47 @@ internal fun LaunchPage() {
     // 最近一次自检换出来的登录身份。界面上要如实显示这一局用的是谁 —— 用着离线号却以为
     // 自己登录着，是进服务器被踢之后才发现的，那时候已经说不清了。
     var sessionInfo by remember { mutableStateOf<AccountSession?>(null) }
+    // 身份在启动页就能换：activeUuid 存的是账号的 key（没有横线的小写 UUID），
+    // 空串表示离线。换完必须重新自检 —— 令牌与 jvmArgs 都是自检那一刻的产物。
+    var activeUuid by remember { mutableStateOf("") }
+    var accounts by remember { mutableStateOf<List<StoredAccount>>(emptyList()) }
 
     /** 这个实例的 natives 目录：一个实例一份，免得两个版本互相盖掉。 */
     fun nativeDirOf(instance: Instance?): File {
         val raw = instance?.directory.orEmpty().trim().trim('"')
         val name = raw.replace('\\', '/').trimEnd('/').substringAfterLast('/')
         return if (name.isBlank()) File(nativeRoot, "default") else File(nativeRoot, name)
+    }
+
+    /** 启动页只读身份，不建身份：读的是账号文件里已有的名单和当前选中的那一个。 */
+    fun loadIdentities() {
+        scope.launch {
+            val dir = File(root.trim().ifBlank { defaultGameRoot() })
+            val pair = withContext(Dispatchers.IO) {
+                runCatching {
+                    val stored = AccountBootstrap.settings(dir)
+                    (stored?.activeAccountUuid.orEmpty()) to AccountBootstrap.list(dir)
+                }.getOrDefault(" " to emptyList())
+            }
+            activeUuid = pair.first
+            accounts = pair.second
+        }
+    }
+
+    /**
+     * 换身份只写一个字段（activeAccountUuid），不碰账号文件本身。
+     * 换完把上一次自检的产物清掉：那份 prep 里的令牌与 jvmArgs 属于上一个人，
+     * 留着不清会让「自检通过」和屏幕上的身份对不上。
+     */
+    fun pickIdentity(key: String) {
+        activeUuid = key
+        sessionInfo = null
+        prep = null
+        exported = " "
+        scope.launch {
+            val dir = File(root.trim().ifBlank { defaultGameRoot() })
+            withContext(Dispatchers.IO) { runCatching { AccountBootstrap.markActive(dir, key) } }
+        }
     }
 
     fun scan() {
@@ -316,6 +353,7 @@ internal fun LaunchPage() {
         val store = JsonSettingsRepository(JsonSettingsRepository.defaultFile(File(root.trim())))
         username = runCatching { store.load() }.getOrNull()?.offlineUsername
             ?: LauncherSettings.DEFAULT_OFFLINE_USERNAME
+        loadIdentities()
         scan()
         reloadJava(null)
     }
@@ -477,22 +515,53 @@ internal fun LaunchPage() {
         }
 
         LaunchCard("登录身份") {
+            // 身份在启动页选，不放账号页：启动页回答的是「今天用谁、玩哪个版本」，
+            // 换身份之后唯一要做的事就是重做自检 —— 两件事在同一屏，少跳一次就少一次用错号。
+            // 账号页仍然负责「添一个新身份」（登录、外置服、填应用 ID）。
+            val offlineActive = activeUuid.isBlank()
+            IdentityRow(
+                title = "离线",
+                detail = "不用联网，用户名可以随时改",
+                selected = offlineActive,
+                enabled = !busy,
+                onClick = { pickIdentity("") },
+            )
+            accounts.forEach { account ->
+                IdentityRow(
+                    title = account.name,
+                    detail = if (account.isYggdrasil) "外置登录" else "微软账号",
+                    selected = AccountBootstrap.matches(account, activeUuid),
+                    enabled = !busy,
+                    onClick = { pickIdentity(AccountBootstrap.settingValueOf(account)) },
+                )
+            }
+            if (offlineActive) {
+                OutlinedTextField(
+                    value = username,
+                    onValueChange = { username = it },
+                    label = { Text("离线用户名") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+            if (accounts.isEmpty()) {
+                LaunchHint("还没有登录过任何账号。去「设置 → 账号」加一个，回来这里就能选。")
+            }
             val who = sessionInfo
             Text(
                 if (who == null) {
-                    "还没做自检。设置里填的离线用户名是 " + username + "；「账号」页里选定过正版或外置账号的话，" +
-                        "自检会拿它去换一枚新令牌。"
+                    "还没做自检，下面那句是上次自检时用的身份。"
                 } else {
-                    who.label
+                    "这一局用的是 " + who.label
                 },
-                style = MaterialTheme.typography.bodyMedium,
+                style = MaterialTheme.typography.bodySmall,
                 color = if (who != null && !who.isOffline) {
                     MaterialTheme.colorScheme.primary
                 } else {
                     MaterialTheme.colorScheme.onSurfaceVariant
                 },
             )
-            LaunchHint("身份在「账号」那一页切换；这一页只如实显示自检时用的是谁。")
+            LaunchHint("换身份之后要重新做一次自检，令牌是自检那一刻换的，不是启动那一刻。")
         }
 
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -600,6 +669,47 @@ internal fun LaunchPage() {
                 "dlsym 拿到 JNI_CreateJavaVM、带着上面那张参数表造一个 JVM、再调游戏主类。" +
                 "这条路被 Android 10 的「不许从可写目录加载原生库」挡着，起不来是常态；" +
                 "图形转译（GL4ES / Zink）也还没接到这一层，即使 JVM 起来了窗口也挂不上去。",
+        )
+    }
+}
+
+/** 一行可选的身份：左边标题 + 一句说明，右边一个圆点表示选没选中。 */
+@Composable
+private fun IdentityRow(
+    title: String,
+    detail: String,
+    selected: Boolean,
+    enabled: Boolean,
+    onClick: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(enabled = enabled, onClick = onClick)
+            .padding(vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+                color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+            )
+            if (detail.isNotEmpty()) {
+                Text(
+                    text = detail,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+        // 用文字而不是 RadioButton：这一行本身可点，RadioButton 会再画一个圆
+        // 外加它自己的点击区域，两种选中态容易打架。
+        Text(
+            text = if (selected) "已选" else "选这个",
+            style = MaterialTheme.typography.labelSmall,
+            color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
         )
     }
 }

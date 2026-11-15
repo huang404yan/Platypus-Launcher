@@ -135,8 +135,11 @@ fun LaunchPage(
     var username by remember { mutableStateOf("Dev") }
     // 上次从设置文件里读到的名字；启动时只有在用户改过名的情况下才回写，避免每次启动都写盘
     var savedUsername by remember { mutableStateOf("") }
-    // 设置里选中的正版账号；null = 离线模式。令牌不在这里，只有 UUID 与名字。
+    // 设置里选中的账号；null = 离线模式。令牌不在这里，只有 UUID 与名字。
     var activeAccount by remember { mutableStateOf<StoredAccount?>(null) }
+    // 账号文件里的全部身份。启动页要能换身份，就得人手一份名单 ——
+    // 只有一个 activeAccount 的话，用户还得跑去「设置 → 账号」才知道自己有几个号。
+    var accountList by remember { mutableStateOf<List<StoredAccount>>(emptyList()) }
     var phase by remember { mutableStateOf<LaunchPhase>(LaunchPhase.Idle) }
     var stageText by remember { mutableStateOf("") }
     // 启动阶段的假进度（准备版本文件 0.05 → 解压原生库 0.15 → 起进程 0.2）。
@@ -234,6 +237,26 @@ fun LaunchPage(
             } catch (t: Throwable) {
                 // 下载失败的原文（清单里哪几个文件、什么原因）必须留在界面上
                 javaPhase = JavaPhase.Failed(t.message ?: t.javaClass.simpleName, duringInstall = true)
+            }
+        }
+    }
+
+    /**
+     * 在启动页直接换身份。写盘只动 activeAccountUuid 一个字段 ——
+     * 用 copy 而不是 new，免得把别处刚改过的离线用户名、内存、配色冲掉。
+     * 空串 = 离线。换完不用清别的东西：令牌与 jvmArgs 都是 launchGame 里现换现拼的。
+     */
+    fun pickIdentity(account: StoredAccount?) {
+        activeAccount = account
+        val value = account?.let { AccountBootstrap.settingValueOf(it) }.orEmpty()
+        val repository = backend.settings
+        if (repository == null) return
+        scope.launch {
+            runCatching {
+                val stored = withContext(Dispatchers.IO) { repository.load() }
+                withContext(Dispatchers.IO) {
+                    repository.save(stored.copy(activeAccountUuid = value))
+                }
             }
         }
     }
@@ -476,12 +499,16 @@ fun LaunchPage(
                 }
                 if (selected == null) memoryText = stored.defaultMemoryMb.toString()
                 val wanted = stored.activeAccountUuid
-                if (wanted.isNotBlank()) {
-                    val accounts = backend.accounts
-                    if (accounts != null) {
-                        activeAccount = withContext(Dispatchers.IO) {
-                            runCatching { accounts.list() }.getOrNull().orEmpty()
-                        }.firstOrNull { AccountBootstrap.matches(it, wanted) }
+                val repositoryOfAccounts = backend.accounts
+                if (repositoryOfAccounts != null) {
+                    val all = withContext(Dispatchers.IO) {
+                        runCatching { repositoryOfAccounts.list() }.getOrNull().orEmpty()
+                    }
+                    accountList = all
+                    activeAccount = if (wanted.isBlank()) {
+                        null
+                    } else {
+                        all.firstOrNull { AccountBootstrap.matches(it, wanted) }
                     }
                 }
             }
@@ -517,7 +544,9 @@ fun LaunchPage(
             stageText = stageText,
             username = username,
             onUsernameChange = { username = it },
-            accountName = activeAccount?.name.orEmpty(),
+            accountList = accountList,
+            activeAccount = activeAccount,
+            onPickIdentity = { pickIdentity(it) },
             memoryText = memoryText,
             onMemoryChange = { memoryText = it },
             memoryNotice = memoryNotice,
@@ -1077,8 +1106,12 @@ private fun LaunchSidePanel(
     stageText: String,
     username: String,
     onUsernameChange: (String) -> Unit,
-    /** 正版账号名；空串 = 离线模式。正版进游戏时用户名由会话决定，输入框就没意义了。 */
-    accountName: String,
+    /** 账号文件里的全部身份；空表示一个都没登录过，只剩离线。 */
+    accountList: List<StoredAccount>,
+    /** 当前选中的那个；null = 离线模式。正版进游戏时用户名由会话决定，输入框就没意义了。 */
+    activeAccount: StoredAccount?,
+    /** 换身份：传 null 表示改回离线。写盘在调用方那边做，这里只负责画。 */
+    onPickIdentity: (StoredAccount?) -> Unit,
     memoryText: String,
     onMemoryChange: (String) -> Unit,
     memoryNotice: String,
@@ -1135,7 +1168,15 @@ private fun LaunchSidePanel(
                     }
                 }
             }
-            if (accountName.isBlank()) {
+            // 身份就在启动栏里选，不让人跑去设置页翻二级。名单位于账号文件，
+            // 这里只是把「今天用谁」摆到启动按钮旁边 —— 用错号进服务器是要等被踢才发现的。
+            IdentityPicker(
+                accountList = accountList,
+                active = activeAccount,
+                enabled = !busy,
+                onPick = onPickIdentity,
+            )
+            if (activeAccount == null) {
                 OutlinedTextField(
                     value = username,
                     onValueChange = onUsernameChange,
@@ -1145,9 +1186,6 @@ private fun LaunchSidePanel(
                     enabled = !busy,
                     supportingText = { Text("点「启动」会记住这个名字。") },
                 )
-            } else {
-                // 正版模式下列这一行而不是输入框：名字来自微软账号，改不动也不该改。
-                SectionHint("正版账号：" + accountName + "（要换去「设置 → 账号」）")
             }
             Row(
                 Modifier.fillMaxWidth(),
@@ -1184,6 +1222,85 @@ private fun LaunchSidePanel(
                 SectionHint(stageText)
             }
         }
+    }
+}
+
+/**
+ * 启动栏里的身份选择：离线一行，之后每个账号一行。
+ *
+ * 用 Card 竖排而不是下拉菜单：账号一般只有一两个，全部摆出来比再点一次更省事；
+ * 而且「我现在用的是谁」必须一眼能看见 —— 收进下拉之后，用错号要等进服务器被踢才发现。
+ */
+@Composable
+private fun IdentityPicker(
+    accountList: List<StoredAccount>,
+    active: StoredAccount?,
+    enabled: Boolean,
+    onPick: (StoredAccount?) -> Unit,
+) {
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Text(
+            "登录身份",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        IdentityRow(
+            title = "离线",
+            detail = "不用联网",
+            selected = active == null,
+            enabled = enabled,
+            onClick = { onPick(null) },
+        )
+        accountList.forEach { account ->
+            IdentityRow(
+                title = account.name,
+                detail = if (account.isYggdrasil) "外置登录" else "微软账号",
+                selected = active != null && active.key == account.key,
+                enabled = enabled,
+                onClick = { onPick(account) },
+            )
+        }
+        if (accountList.isEmpty()) {
+            SectionHint("还没登录过账号。去「设置 → 账号」加一个，回来这里就能选。")
+        }
+    }
+}
+
+@Composable
+private fun IdentityRow(
+    title: String,
+    detail: String,
+    selected: Boolean,
+    enabled: Boolean,
+    onClick: () -> Unit,
+) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clickable(enabled = enabled, onClick = onClick)
+            .padding(vertical = 3.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(
+                title,
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+                color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+            )
+            if (detail.isNotBlank()) {
+                Text(
+                    detail,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+        Text(
+            if (selected) "已选" else "选这个",
+            style = MaterialTheme.typography.labelSmall,
+            color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+        )
     }
 }
 

@@ -53,9 +53,10 @@ enum class Page(val label: String) {
     INSTANCE("实例"),
     DOWNLOAD("下载"),
     LINK("联机"),
-    SETTINGS("设置"),
-    // 帮助放在「关于」之前：遇到问题的人找的是它，不是版本号与致谢。
+    // 帮助放在设置之前：它不是一个「配置」动作，而是遇到问题时的第一站；
+    // 摆得离关于近一点也符合直觉（版本号、致谢、求助，通常在同一段视线里）。
     HELP("帮助"),
+    SETTINGS("设置"),
     ABOUT("关于"),
 }
 
@@ -92,7 +93,9 @@ fun App(
     LaunchedEffect(theme) { onThemeChanged(theme) }
 
     PlatypusTheme(theme) {
-        var page by remember { mutableStateOf(Page.INSTANCE) }
+        // 默认落在「启动」：开启动器的第一件事是「今天玩哪个版本、用谁的身份」，
+        // 实例页是管理用的（改内存、删实例、导出整合包），不该是每天第一眼看到的东西。
+        var page by remember { mutableStateOf(Page.LAUNCH) }
 
         // 实例页点「去启动」时带上这个实例：只交一个 key，不把整个对象塞给启动页当长期状态。
         var focusKey by remember { mutableStateOf<String?>(null) }
