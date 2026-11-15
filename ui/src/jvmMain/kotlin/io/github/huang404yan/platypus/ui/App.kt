@@ -158,7 +158,7 @@ fun App(
                         DOWNLOAD_TAB_SERVER -> ServerPage(initialGameRoot, backend)
                         else -> DownloadsPage(initialGameRoot, backend, tick) { page = Page.LAUNCH }
                     }
-                    Page.LINK -> LinkPage { address ->
+                    Page.LINK -> LinkPage(initialGameRoot = initialGameRoot) { address ->
                         quickPlay = address
                         page = Page.LAUNCH
                     }

@@ -122,6 +122,14 @@ fun LaunchPage(
 
     var memoryText by remember { mutableStateOf(Instance.DEFAULT_MEMORY_MB.toString()) }
     var memoryNotice by remember { mutableStateOf("") }
+    // 输入框里的数与实例上存着的数不一致 → 还没写盘。与实例详情页同一口径：
+    // 详情页在「保存」按钮旁边说「有改动没保存」，启动页这里则说明「点启动会一起保存」。
+    // 之前这一页只有输入框和一个「存」字按钮，改了不点存就点启动其实也会存（launchGame 第一行就是
+    // saveMemory()），但界面上没有任何字说明这件事 —— 用户会以为没生效，或者反过来以为没点存就丢了。
+    val memoryDirty = selected?.let { node ->
+        val typed = memoryText.trim().toIntOrNull()
+        typed == null || Instance.clampMemoryMb(typed) != node.memoryMb
+    } == true
 
     var username by remember { mutableStateOf("Dev") }
     // 上次从设置文件里读到的名字；启动时只有在用户改过名的情况下才回写，避免每次启动都写盘
@@ -512,6 +520,7 @@ fun LaunchPage(
             memoryText = memoryText,
             onMemoryChange = { memoryText = it },
             memoryNotice = memoryNotice,
+            memoryDirty = memoryDirty,
             canLaunch = selected != null && selectedJava != null,
             onSelect = { instance ->
                 selected = instance
@@ -1072,6 +1081,8 @@ private fun LaunchSidePanel(
     memoryText: String,
     onMemoryChange: (String) -> Unit,
     memoryNotice: String,
+    /** 输入框里的数还没写进实例。为空说明「填的数与实例上存着的一样」。 */
+    memoryDirty: Boolean,
     canLaunch: Boolean,
     onSelect: (Instance) -> Unit,
     onSaveMemory: () -> Unit,
@@ -1152,7 +1163,10 @@ private fun LaunchSidePanel(
                 )
                 OutlinedButton(onClick = onSaveMemory, enabled = !busy && selected != null) { Text("存") }
             }
-            if (memoryNotice.isNotBlank()) SectionHint(memoryNotice)
+            when {
+                memoryNotice.isNotBlank() -> SectionHint(memoryNotice)
+                memoryDirty -> SectionHint("这个数还没写进实例：点「启动」会一起保存，或者点旁边的「存」。")
+            }
             // 大号按钮照 PCL 的 54 高：它是这一页唯一的主要动作，不该和旁边的次要按钮一样大。
             Button(
                 onClick = onLaunch,

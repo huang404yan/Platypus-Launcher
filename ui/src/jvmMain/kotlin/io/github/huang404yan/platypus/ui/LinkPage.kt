@@ -47,13 +47,14 @@ import kotlinx.coroutines.withContext
  * 连接本身仍然交给游戏 —— 1.20+ 走 `--quickPlayMultiplayer`，1.19 及更早走 `--server` + `--port`，
  * 都是官方参数。不自己实现协议栈：绕过游戏连进去会丢皮肤、丢会话、和大部分模组不兼容。
  *
- * 不做 NAT 穿透、不做房间服务器：那是另一套东西（陶瓦、e4mc 那类），
+ * 跨网络那一段交给陶瓦（页面最下面那张卡）：那是另一套东西，
  * 跟「局域网里几台机器互相看得见」不是一个问题，混在一起会把可用性拖垮。
  *
+ * @param initialGameRoot 游戏根目录；陶瓦装在它下面的 platypus 目录里，没有它就没法装/起陶瓦。
  * @param onPlay 点「直接进」时把地址交出去；上层负责切到启动页并把地址交给游戏命令行。
  */
 @Composable
-fun LinkPage(onPlay: (String) -> Unit = {}) {
+fun LinkPage(initialGameRoot: String? = null, onPlay: (String) -> Unit = {}) {
     val scope = rememberCoroutineScope()
 
     var scanning by remember { mutableStateOf(false) }
@@ -249,6 +250,9 @@ fun LinkPage(onPlay: (String) -> Unit = {}) {
             }
         }
 
+        // 跨网络：本地扫不到不等于连不上，这两件事要分开放，否则用户会以为「扫不到就点这个」。
+        TerracottaSection(gameRoot = initialGameRoot) { text -> notice = text }
+
         Card(
             modifier = Modifier.fillMaxWidth(),
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
@@ -271,7 +275,8 @@ fun LinkPage(onPlay: (String) -> Unit = {}) {
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 Text(
-                    "UDP 打洞和公网中转服务器这一版没做 —— 那需要一台常驻服务器，跟「填对地址就能连」是两件事。",
+                    "UDP 打洞和公网中转不在这一块做 —— 那是上面「陶瓦联机」那张卡的事，由陶瓦自己的服务器牵线。" +
+                        "这一页只负责「你知道地址、我也知道地址」这种直连。",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )

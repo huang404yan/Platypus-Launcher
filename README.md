@@ -118,6 +118,7 @@ Windows 下也可以用 `gradlew.bat`。首次构建会下载约 300 MB 依赖�
 - `docs/48-fuwuduan-peizhi.md`：**服务端配置页**（`server.properties` 为什么按行保留而不是读成 Map、值里的换行为什么要压平、为什么只放 33 个键而不是全表、为什么 `level-seed` 要允许留空、`level-type` 的转义冒号为什么不能直接字符串比、两个负数范围为什么是刻意的、白名单与 OP 的 UUID 从哪来且「网络不通」与「这个正版账号不存在」为什么要分开说、`[]` 为什么不是空文件、端口解析为什么只剩一份）
 - `docs/49-xiazaiyuan.md`：**下载源偏好**（为什么只有「顺序」两个选项而没有「只用官方源」、为什么做成进程级全局量而不是一路透传、两个接入点为什么就够、镜像主机名两个方向都要卡、排序为什么必须是稳定的）
 - `docs/50-gengxin-jiancha.md`：**检查更新**（为什么只查不换、通道规则「孵化版才看预发布」、版本号为什么不能按字符串比、限流与 404 各说什么、说明只显示开头）
+- `docs/52-taowa-lianji.md`：**陶瓦联机**（为什么不打包二进制、集成契约的三条、房间码的校验位、房主为什么没有直连地址、对端消失时怎么分辨是谁走了）
 - `docs/51-waizhi-denglu.md`：**外置登录**（为什么拿到令牌不算成功、地址为什么只能剥一层后缀、jar 为什么不带版本号、账号 key 为什么要带上服务器地址、为什么必须「先令牌后 agent」）
 
 ## 下载
@@ -161,7 +162,7 @@ M0（骨架）+ M1（实例扫描）+ M2（下载器）+ M3（**Windows 一键�
 
 **下载断点续传**：先写 `<文件>.part`，校验通过才转正；`.part` 有内容就发 `Range` 接着下，断网不清半成品，下次自动接上。进度条会额外显示「其中 N 个接着上次下（省了 M MB）」（`docs/14`）。
 
-单测 **835 例全过**（69 个测试类，`./gradlew :core:test :ui:jvmTest`；`ui` 从这一版起有 `jvmTest` 源集，格式化函数与导航常量也进单测了）。另有十二个无头冒烟任务（`e2eInstall` / `settingsSmoke` / `instanceFlowSmoke` / `resumeSmoke` / `deleteSmoke` / `fabricE2e` / `modpackE2e` / `forgeE2e` / `neoForgeE2e` / `modsE2e` / `modUpdateE2e` / `isolationSmoke`），走的是界面按钮同一批函数；`resumeSmoke` / `fabricE2e` / `modpackE2e` / `forgeE2e` / `neoForgeE2e` / `modsE2e` 需要联网，分别在空目录真装 Fabric、真跑 Forge 与 NeoForge 官方安装器、真从 Modrinth 下模组、真把一个 `.mrpack` 从解析装到进主菜单；`deleteSmoke` 在 `dist/_delete-smoke` 里全程造假数据，不碰真实 `.minecraft`。
+单测 **858 例全过**（70 个测试类，`./gradlew :core:test :ui:jvmTest`；`ui` 从这一版起有 `jvmTest` 源集，格式化函数与导航常量也进单测了）。另有十二个无头冒烟任务（`e2eInstall` / `settingsSmoke` / `instanceFlowSmoke` / `resumeSmoke` / `deleteSmoke` / `fabricE2e` / `modpackE2e` / `forgeE2e` / `neoForgeE2e` / `modsE2e` / `modUpdateE2e` / `isolationSmoke`），走的是界面按钮同一批函数；`resumeSmoke` / `fabricE2e` / `modpackE2e` / `forgeE2e` / `neoForgeE2e` / `modsE2e` 需要联网，分别在空目录真装 Fabric、真跑 Forge 与 NeoForge 官方安装器、真从 Modrinth 下模组、真把一个 `.mrpack` 从解析装到进主菜单；`deleteSmoke` 在 `dist/_delete-smoke` 里全程造假数据，不碰真实 `.minecraft`。
 
 **能装 Fabric 了**：下载页勾「顺带装 Fabric」→ 拉 meta.fabricmc.net 的 loader 列表（默认落在最新 stable）→ 装 profile json（只改 `id`，保留 `inheritsFrom`）→ 按 maven 坐标补全 8 个库的地址并下载 → 登记成 `1.20.1-fabric-0.20.1` 这样的实例。实测空目录全流程 4 分 29 秒进主菜单，日志首行 `Loading Minecraft 1.20.1 with Fabric Loader 0.20.1`（`docs/15`）。
 
@@ -213,7 +214,9 @@ M0（骨架）+ M1（实例扫描）+ M2（下载器）+ M3（**Windows 一键�
 
 **联机页**：扫描局域网广播（`224.0.2.60:4445`，读 `[MOTD]`/`[AD]`）列出同网段的世界，也能手动解析 `host:port`。每个世界后面有「直接进」：1.20+ 拼官方的 `--quickPlayMultiplayer`，1.19 及更早自动退回 `--server` + `--port`，两条都跳过主菜单直接进那个世界——走的是游戏自己的连接流程，皮肤、会话、模组一概不少（`docs/33-lianji-zhilian.md`、`docs/43-zhilian-jiangji.md`）。
 
-联机页还多一段「让朋友连到你」：填游戏里「对局域网开放」给的端口，下面按地址种类列出本机的「地址:端口」（局域网 / 公网 IPv6 / 其它），一条一个复制按钮，并写清每条能用在什么场合。跨网络真正能连的两条路是「双方都有公网 IPv6」和「路由器端口转发」，界面把这两条说明白；**UDP 打洞与公网中转服务器仍然不做**——那需要一台常驻服务器。
+联机页还多一段「让朋友连到你」：填游戏里「对局域网开放」给的端口，下面按地址种类列出本机的「地址:端口」（局域网 / 公网 IPv6 / 其它），一条一个复制按钮，并写清每条能用在什么场合。跨网络真正能连的两条路是「双方都有公网 IPv6」和「路由器端口转发」，界面把这两条说明白。
+
+**跨网络那一块交给陶瓦了**：联机页最下面多一张「陶瓦联机」卡，一台机器建房、把房间码发给朋友、对方填进来就能进，双方都不用动路由器。陶瓦的二进制**不随包发**——它是 AGPL-3.0，本项目是 Apache-2.0 且公开发布产物，塞进去会触发传染条款，所以只有「安装 / 更新陶瓦」一个由用户点的动作，下到 `<游戏目录>/platypus/terracotta/` 下。房间码自己先校验一遍：21 位里最后一位是校验位，少抄一位或多抄一个字符当场说「格式不对」，而不是让用户去连一个不存在的房间等十几秒超时。房主态**故意不显示「复制直连地址」**——陶瓦给房主的那个地址是游客本机的回环地址，发出去对方一定连不上，留着就是一个必定失败的按钮。对端消失时界面分辨是谁走了：房主关游戏清掉房间码（这个码定义上已经死了），游客看到「房主已断开」但**不清码**（可能只是本机网络抖了一下，同一个码还能重连）（`docs/52`）。
 
 **窗口不用最大化也能用了**：以前 `Main.kt` 的 `Window` 没给尺寸，Compose 按内容开窗，一开就偏窄、右侧按钮被裁在框外，用户第一反应是「得最大化」。现在默认 1280x820、最小 1024x640，窄窗口下侧栏自动从 220dp 收到 180dp、留白从 24dp 收到 16dp。参照的是 PCL 的做法——它默认只有 850x500，但整个界面是按那个尺寸设计的（`docs/35`）。
 
