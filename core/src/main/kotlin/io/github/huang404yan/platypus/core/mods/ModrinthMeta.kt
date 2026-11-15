@@ -16,6 +16,13 @@ data class ModProject(
     val author: String? = null,
     val downloads: Long = 0L,
     val projectId: String = "",
+    /**
+     * 项目图标的地址（Modrinth 的 icon_url）。
+     *
+     * 列表里光有几行字很难一眼认出是哪个模组 —— 官网那种方图标列表之所以好扫，
+     * 靠的就是这张图。空串表示项目没上传图标（Modrinth 允许），界面上画占位。
+     */
+    val iconUrl: String = "",
 ) {
     /** 界面上「250,402,653 次下载」这种。 */
     val downloadsLabel: String get() = ModrinthMeta.formatCount(downloads)
@@ -188,6 +195,7 @@ object ModrinthMeta {
                 author = stringOf(obj, "author"),
                 downloads = longOf(obj, "downloads") ?: 0L,
                 projectId = stringOf(obj, "project_id").orEmpty(),
+                iconUrl = stringOf(obj, "icon_url").orEmpty(),
             )
         }
         return ModrinthParse.Ok(projects)
@@ -324,6 +332,7 @@ object ModrinthMeta {
                 author = null,
                 downloads = longOf(obj, "downloads") ?: 0L,
                 projectId = id,
+                iconUrl = stringOf(obj, "icon_url").orEmpty(),
             )
         }
         return ModrinthParse.Ok(result)

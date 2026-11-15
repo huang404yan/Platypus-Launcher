@@ -27,6 +27,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
@@ -43,6 +44,8 @@ import io.github.huang404yan.platypus.core.instance.InstanceEdits
 import io.github.huang404yan.platypus.core.instance.InstanceLayouts
 import io.github.huang404yan.platypus.core.instance.InstanceMigration
 import io.github.huang404yan.platypus.core.instance.formatBytes
+import io.github.huang404yan.platypus.core.mods.ModEntry
+import io.github.huang404yan.platypus.core.mods.ModScanner
 import io.github.huang404yan.platypus.core.runtime.GameJavaRules
 import io.github.huang404yan.platypus.core.runtime.JavaRuntime
 import io.github.huang404yan.platypus.core.runtime.findExactMajor
@@ -323,9 +326,36 @@ internal fun InstanceDetailPanel(
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 )
                             } else {
-                                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                                    modFiles.take(40).forEach { file ->
-                                        Text(file.name, style = MaterialTheme.typography.labelSmall, maxLines = 1)
+                                // 这里以前是 spacedBy(2.dp) 的一串纯文件名 —— 二十几行小字贴在一起，
+                                // 用户的原话是「离得有些近」。改成一行一个 jar：左边从 jar 里抽出来的
+                                // icon.png，右边这个文件自己的名字。
+                                // 读 jar 元数据要开 zip 读 fabric.mod.json，40 个文件在主线程上同步跑会
+                                // 卡住整个界面，所以挪到 IO 线程，第一次绘制先给空列表。
+                                val entries by produceState(initialValue = emptyList<ModEntry>(), d.gameDir, modFiles) {
+                                    value = withContext(Dispatchers.IO) {
+                                        modFiles.take(40).map { ModScanner.describe(it, enabled = true) }
+                                    }
+                                }
+                                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    entries.forEach { entry ->
+                                        Row(
+                                            Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                        ) {
+                                            ModIcon(entry, size = 28.dp)
+                                            Text(
+                                                entry.title,
+                                                style = MaterialTheme.typography.labelSmall,
+                                                maxLines = 1,
+                                                modifier = Modifier.weight(1f),
+                                            )
+                                            Text(
+                                                formatBytes(entry.sizeBytes),
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            )
+                                        }
                                     }
                                 }
                                 if (modFiles.size > 40) {

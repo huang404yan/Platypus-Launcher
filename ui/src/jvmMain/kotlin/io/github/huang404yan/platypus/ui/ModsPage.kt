@@ -941,7 +941,8 @@ private fun InstalledTab(
                     )
                 } else {
                     val updateByFile = updates.associateBy { it.fileName }
-                    LazyColumn(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    // 条目之间有图有按钮，6dp 会糊成一片；10dp 才看得出是独立两条。
+                    LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                         items(installed, key = { it.path }) { entry ->
                             InstalledModRow(
                                 entry = entry,
@@ -1022,7 +1023,7 @@ private fun BrowseTab(
                 if (results.isEmpty()) {
                     ModHint(if (searched) "没搜到。换个关键词，或放宽版本 / 加载器过滤。" else "输入名字后点「搜索」。")
                 } else {
-                    LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                         items(results, key = { it.projectId }) { project ->
                             SearchResultRow(
                                 project = project,
@@ -1160,56 +1161,76 @@ private fun InstalledModRow(
 ) {
     var confirmDelete by remember { mutableStateOf(false) }
     Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
-        Column(Modifier.fillMaxWidth().padding(10.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            Row(
-                Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Checkbox(
-                    checked = entry.enabled,
-                    onCheckedChange = { onToggleEnabled(it) },
-                )
-                Text(entry.title, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
-                if (update != null && update.status == ModUpdateStatus.OUTDATED) {
+        // 左边一张方图标、右边两行字：行高从「一行文件名」变成「一张缩略图」，
+        // 所以内边距和行距都比原来松一档 —— 挤成一行行小字时，扫一眼分不出哪个是哪个。
+        Row(
+            Modifier.fillMaxWidth().padding(10.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            ModIcon(entry, size = 40.dp)
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Row(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(entry.title, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
+                    if (update != null && update.status == ModUpdateStatus.OUTDATED) {
+                        Text(
+                            "有新版本 " + (update.latestVersion ?: ""),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.primary,
+                        )
+                    }
                     Text(
-                        "有新版本 " + (update.latestVersion ?: ""),
+                        formatBytesShort(entry.sizeBytes),
                         style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.primary,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
+                val detail = buildString {
+                    append(entry.fileName)
+                    entry.loader?.let { append(" · ").append(loaderLabel(it)) }
+                    if (!entry.enabled) append(" · 停用中（不会加载）")
+                    update?.let {
+                        if (it.status == ModUpdateStatus.UP_TO_DATE) append(" · 已是最新 ").append(it.currentVersion)
+                        if (it.status == ModUpdateStatus.NOT_ON_MODRINTH) append(" · Modrinth 不认识这个文件")
+                        if (it.status == ModUpdateStatus.NO_COMPATIBLE_VERSION) append(" · 没有适配当前版本的更新")
+                    }
+                }
                 Text(
-                    formatBytesShort(entry.sizeBytes),
+                    detail,
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-            }
-            val detail = buildString {
-                append(entry.fileName)
-                entry.loader?.let { append(" · ").append(loaderLabel(it)) }
-                if (!entry.enabled) append(" · 停用中（不会加载）")
-                update?.let {
-                    if (it.status == ModUpdateStatus.UP_TO_DATE) append(" · 已是最新 ").append(it.currentVersion)
-                    if (it.status == ModUpdateStatus.NOT_ON_MODRINTH) append(" · Modrinth 不认识这个文件")
-                    if (it.status == ModUpdateStatus.NO_COMPATIBLE_VERSION) append(" · 没有适配当前版本的更新")
+                entry.problem?.let {
+                    Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error)
                 }
-            }
-            Text(
-                detail,
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            entry.problem?.let {
-                Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error)
-            }
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("", modifier = Modifier.weight(1f))
-                if (update != null && update.status == ModUpdateStatus.OUTDATED) {
-                    OutlinedButton(onClick = { onUpdate(update) }, enabled = !busy) {
-                        Text(if (updating) "更新中…" else "更新到 " + (update.latestVersion ?: "新版"))
+                Row(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    // 勾选框从标题行搬下来：标题行现在要留给图标与更新标记，
+                    // 勾选框贴着图标竖排更符合「这一条的整体开关」的意思。
+                    Checkbox(
+                        checked = entry.enabled,
+                        onCheckedChange = { onToggleEnabled(it) },
+                    )
+                    Text(
+                        if (entry.enabled) "已启用" else "已停用",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.weight(1f),
+                    )
+                    if (update != null && update.status == ModUpdateStatus.OUTDATED) {
+                        OutlinedButton(onClick = { onUpdate(update) }, enabled = !busy) {
+                            Text(if (updating) "更新中…" else "更新到 " + (update.latestVersion ?: "新版"))
+                        }
                     }
+                    TextButton(onClick = { confirmDelete = true }, enabled = !confirmDelete) { Text("删除") }
                 }
-                TextButton(onClick = { confirmDelete = true }, enabled = !confirmDelete) { Text("删除") }
             }
         }
     }
@@ -1430,33 +1451,46 @@ private fun ConflictCard(
 
 @Composable
 private fun SearchResultRow(project: ModProject, busy: Boolean, onInstall: () -> Unit) {
+    // 照 Modrinth 网页那种列表：左边一张方图标，右边标题 + 下载量 + 简介 + 装。
+    // 有图的条目一眼就能认出是哪个模组，纯文字列表必须逐个读完标题才知道。
     Card {
-        Column(Modifier.fillMaxWidth().padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text(project.title, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
+        Row(
+            Modifier.fillMaxWidth().padding(10.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            ModIcon(project, size = 44.dp)
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(project.title, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
+                    Text(
+                        project.downloadsLabel + " 次下载",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                project.author?.let {
+                    Text("作者 " + it, style = MaterialTheme.typography.labelSmall)
+                }
                 Text(
-                    project.downloadsLabel + " 次下载",
+                    project.description,
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 3,
                 )
-            }
-            project.author?.let {
-                Text("作者 " + it, style = MaterialTheme.typography.labelSmall)
-            }
-            Text(
-                project.description,
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 3,
-            )
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text(
-                    project.slug,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.weight(1f),
-                )
-                Button(onClick = onInstall, enabled = !busy) { Text("装进 mods/") }
+                Row(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        project.slug,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.weight(1f),
+                    )
+                    Button(onClick = onInstall, enabled = !busy) { Text("装进 mods/") }
+                }
             }
         }
     }

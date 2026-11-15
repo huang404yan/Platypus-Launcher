@@ -231,29 +231,38 @@ fun App(
                 Modifier.fillMaxSize(),
                 color = MaterialTheme.colorScheme.background,
             ) {
-                when (currentOverlay) {
-                    Overlay.InstanceSelect -> InstancePage(
-                        backend = backend,
-                        initialGameRoot = initialGameRoot,
-                        onBack = { overlay = null },
-                        onLaunch = { instance ->
-                            focusKey = instanceKey(instance)
-                            page = Page.LAUNCH
-                            overlay = null
-                        },
-                        onOpenSetup = { instance -> openSetup(instance) },
-                    )
-                    is Overlay.InstanceSetup -> {
-                        val instance = overlayInstance
-                        if (instance == null) {
-                            overlay = null
-                        } else {
-                            InstanceDetailPanel(
-                                instance = instance,
-                                backend = backend,
-                                onBack = { overlay = null },
-                                onNotice = { println("[setup] " + it) },
-                            )
+                // 副页面以前是「铺满整块、文字从窗口左边缘起」，和主内容区那 24dp 留白
+                // 完全不是一个观感 —— 用户的原话是「离左侧有些近」。这里补上同一档留白，
+                // 窄窗口同样收到 16dp，免得表单被挤成一条。
+                val compactOverlay = LocalWindowInfo.current.containerSize.width < 1100
+                Box(
+                    Modifier.fillMaxSize()
+                        .padding(if (compactOverlay) 16.dp else 24.dp),
+                ) {
+                    when (currentOverlay) {
+                        Overlay.InstanceSelect -> InstancePage(
+                            backend = backend,
+                            initialGameRoot = initialGameRoot,
+                            onBack = { overlay = null },
+                            onLaunch = { instance ->
+                                focusKey = instanceKey(instance)
+                                page = Page.LAUNCH
+                                overlay = null
+                            },
+                            onOpenSetup = { instance -> openSetup(instance) },
+                        )
+                        is Overlay.InstanceSetup -> {
+                            val instance = overlayInstance
+                            if (instance == null) {
+                                overlay = null
+                            } else {
+                                InstanceDetailPanel(
+                                    instance = instance,
+                                    backend = backend,
+                                    onBack = { overlay = null },
+                                    onNotice = { println("[setup] " + it) },
+                                )
+                            }
                         }
                     }
                 }
