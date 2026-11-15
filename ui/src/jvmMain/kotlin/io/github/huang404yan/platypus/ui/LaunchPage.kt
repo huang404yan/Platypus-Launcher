@@ -1376,36 +1376,6 @@ private fun LaunchSidePanel(
                 onOpenAccountPage = onOpenAccountPage,
             )
             IdentityBadge(tab = identityTab)
-            // 大号按钮照 PCL 的 54 高：它是这一页唯一的主要动作，不该和旁边的次要按钮一样大。
-            Button(
-                onClick = onLaunch,
-                modifier = Modifier.fillMaxWidth().height(54.dp),
-                enabled = !busy && canLaunch,
-            ) {
-                Text(if (busy) "启动中…" else "启动游戏", style = MaterialTheme.typography.titleMedium)
-            }
-            if (running || busy) {
-                OutlinedButton(onClick = onStop, modifier = Modifier.fillMaxWidth(), enabled = running) {
-                    Text(if (running) "停止游戏" else "正在启动…")
-                }
-            } else if (stageText.isNotBlank()) {
-                SectionHint(stageText)
-            }
-            // 两个副页面入口照 PCL 的 PageLaunchLeft.xaml:27-28（版本选择 / 版本设置）。
-            Row(
-                Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                OutlinedButton(onClick = onOpenSelect, modifier = Modifier.weight(1f), enabled = !busy) {
-                    Text("版本选择")
-                }
-                OutlinedButton(
-                    onClick = onOpenSetup,
-                    modifier = Modifier.weight(1f),
-                    enabled = !busy && selected != null,
-                ) { Text("版本设置") }
-            }
-
             Spacer(Modifier.height(2.dp))
             Box(
                 Modifier.fillMaxWidth().height(1.dp)
@@ -1480,6 +1450,35 @@ private fun LaunchSidePanel(
                 memoryNotice.isNotBlank() -> SectionHint(memoryNotice)
                 memoryDirty && !memoryAuto ->
                     SectionHint("这个数还没写进实例：点「启动」会一起保存，或者点旁边的「存」。")
+            }
+            // 两个副页面入口照 PCL 的 PageLaunchLeft.xaml:27-28（版本选择 / 版本设置）。
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                OutlinedButton(onClick = onOpenSelect, modifier = Modifier.weight(1f), enabled = !busy) {
+                    Text("版本选择")
+                }
+                OutlinedButton(
+                    onClick = onOpenSetup,
+                    modifier = Modifier.weight(1f),
+                    enabled = !busy && selected != null,
+                ) { Text("版本设置") }
+            }
+            // 大号按钮照 PCL 的 54 高：它是这一页唯一的主要动作，不该和旁边的次要按钮一样大。
+            Button(
+                onClick = onLaunch,
+                modifier = Modifier.fillMaxWidth().height(54.dp),
+                enabled = !busy && canLaunch,
+            ) {
+                Text(if (busy) "启动中…" else "启动游戏", style = MaterialTheme.typography.titleMedium)
+            }
+            if (running || busy) {
+                OutlinedButton(onClick = onStop, modifier = Modifier.fillMaxWidth(), enabled = running) {
+                    Text(if (running) "停止游戏" else "正在启动…")
+                }
+            } else if (stageText.isNotBlank()) {
+                SectionHint(stageText)
             }
         }
     }

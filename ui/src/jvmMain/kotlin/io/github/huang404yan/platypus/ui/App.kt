@@ -3,6 +3,7 @@ package io.github.huang404yan.platypus.ui
 import androidx.compose.foundation.background
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -29,6 +30,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Path
@@ -287,6 +289,9 @@ private fun TopBar(current: Page, onSelect: (Page) -> Unit) {
     // 两端默认展开：第一次打开要让人知道自己用的是哪个启动器（孵化版）。
     var brandOpen by remember { mutableStateOf(true) }
     var versionOpen by remember { mutableStateOf(true) }
+    // 一级项的文字可以藏起来，只留图标（用户 2026-11-16 口径）。
+    // 藏起来不是为了省那点宽度，是为了让五个图标自己站成一排 —— 用熟了以后认形状比读字快。
+    var showLabels by remember { mutableStateOf(true) }
     Surface(color = MaterialTheme.colorScheme.surfaceVariant) {
         Row(
             Modifier
@@ -328,14 +333,34 @@ private fun TopBar(current: Page, onSelect: (Page) -> Unit) {
             Row(Modifier.weight(1f).fillMaxHeight(), verticalAlignment = Alignment.CenterVertically) {
                 Page.entries.forEach { item ->
                     TopTab(
-                        label = item.label,
+                        page = item,
                         selected = item == current,
+                        showLabel = showLabels,
+                        glyphSize = if (compact) 18.dp else 22.dp,
                         modifier = Modifier.weight(1f).fillMaxHeight(),
                     ) { onSelect(item) }
                 }
             }
-            // 右端：版本号，点一下收起成一个小标。收起后那个标也照样能点回来。
+            // 右端：文字开关 + 版本号。
+            // 文字开关放在这里而不是某个一级项里：它改的是「这一排怎么显示」，
+            // 不是某一页的内容，塞进任何一项下面都属于找错地方。
             Spacer(Modifier.width(if (compact) 4.dp else 8.dp))
+            Box(
+                Modifier
+                    .clickable { showLabels = !showLabels }
+                    .padding(horizontal = 6.dp, vertical = 6.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                LabelToggle(
+                    size = if (compact) 18.dp else 20.dp,
+                    expanded = showLabels,
+                    tint = if (showLabels) {
+                        MaterialTheme.colorScheme.primary
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    },
+                )
+            }
             Box(
                 Modifier
                     .clickable { versionOpen = !versionOpen }
@@ -360,33 +385,53 @@ private fun TopBar(current: Page, onSelect: (Page) -> Unit) {
 /**
  * 一个一级项：均分宽度、居中、选中时底色加底部一条高亮。
  *
+ * 图标在左、文字在右，照 PCL 的顶栏（FormMain.xaml:123-131 那排 MyRadioButton 每个都带图标）。
+ * 文字可以藏起来（showLabel），藏起来之后项还是那个项、位置不变 —— 所以只靠图标也认得出。
+ *
  * 底部那条高亮是给「选中」加第二层信号的 —— 只有底色的话，在深色主题里
  * primary 的 12% 透明度和 surfaceVariant 差别很小，一眼看不出来点在哪一项上。
  */
 @Composable
-private fun TopTab(label: String, selected: Boolean, modifier: Modifier, onClick: () -> Unit) {
+private fun TopTab(
+    page: Page,
+    selected: Boolean,
+    showLabel: Boolean,
+    glyphSize: Dp,
+    modifier: Modifier,
+    onClick: () -> Unit,
+) {
     val accent = MaterialTheme.colorScheme.primary
+    val tint = if (selected) accent else MaterialTheme.colorScheme.onSurfaceVariant
     Box(
         modifier
             .padding(horizontal = 2.dp)
             .background(
                 if (selected) accent.copy(alpha = 0.12f) else Color.Transparent,
-                MaterialTheme.shapes.small,
+                RoundedCornerShape(10.dp),
             )
             .clickable(onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
-        Text(
-            text = label,
-            style = MaterialTheme.typography.titleMedium,
-            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
-            color = if (selected) accent else MaterialTheme.colorScheme.onSurfaceVariant,
-        )
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(if (showLabel) 8.dp else 0.dp),
+        ) {
+            TabGlyph(page = page, size = glyphSize, tint = tint)
+            if (showLabel) {
+                Text(
+                    text = page.label,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+                    color = tint,
+                    maxLines = 1,
+                )
+            }
+        }
         if (selected) {
             Box(
                 Modifier
                     .align(Alignment.BottomCenter)
-                    .fillMaxWidth(0.46f)
+                    .fillMaxWidth(if (showLabel) 0.46f else 0.34f)
                     .height(2.5.dp)
                     .background(accent, RoundedCornerShape(topStart = 2.dp, topEnd = 2.dp)),
             )
@@ -394,6 +439,132 @@ private fun TopTab(label: String, selected: Boolean, modifier: Modifier, onClick
     }
 }
 
+/**
+ * 五个一级项的图标，照 PCL 顶栏那一排：启动是播放三角、下载是落进托盘的下箭头、
+ * 联机是 wifi 弧、设置是六边形里一个圆、更多是四宫格。
+ *
+ * 全部 Canvas 自绘：ui 模块没有图标库依赖，为五个 20dp 的图形拉一整个 material-icons
+ * 不划算，而且图标库里的形状和 PCL 那套对不上。
+ */
+@Composable
+private fun TabGlyph(page: Page, size: Dp, tint: Color) {
+    Canvas(Modifier.size(size)) {
+        val w = this.size.width
+        val h = this.size.height
+        val line = Stroke(width = w * 0.11f, cap = StrokeCap.Round, join = StrokeJoin.Round)
+        when (page) {
+            Page.LAUNCH -> {
+                // 播放三角：这一项的动作就是「开游戏」
+                val tri = Path().apply {
+                    moveTo(w * 0.30f, h * 0.18f)
+                    lineTo(w * 0.82f, h * 0.5f)
+                    lineTo(w * 0.30f, h * 0.82f)
+                    close()
+                }
+                drawPath(tri, tint)
+            }
+            Page.DOWNLOAD -> {
+                // 下箭头落进托盘
+                drawLine(tint, Offset(w * 0.5f, h * 0.12f), Offset(w * 0.5f, h * 0.6f), w * 0.11f, StrokeCap.Round)
+                val head = Path().apply {
+                    moveTo(w * 0.28f, h * 0.4f)
+                    lineTo(w * 0.5f, h * 0.64f)
+                    lineTo(w * 0.72f, h * 0.4f)
+                }
+                drawPath(head, tint, style = line)
+                val tray = Path().apply {
+                    moveTo(w * 0.16f, h * 0.7f)
+                    lineTo(w * 0.16f, h * 0.88f)
+                    lineTo(w * 0.84f, h * 0.88f)
+                    lineTo(w * 0.84f, h * 0.7f)
+                }
+                drawPath(tray, tint, style = line)
+            }
+            Page.LINK -> {
+                // wifi：三段同心弧 + 底部一个点，弧口朝下
+                val cx = w * 0.5f
+                val cy = h * 0.82f
+                listOf(0.46f, 0.30f, 0.15f).forEach { frac ->
+                    val radius = w * frac
+                    drawArc(
+                        color = tint,
+                        startAngle = 200f,
+                        sweepAngle = 140f,
+                        useCenter = false,
+                        topLeft = Offset(cx - radius, cy - radius),
+                        size = Size(radius * 2f, radius * 2f),
+                        style = Stroke(width = w * 0.1f, cap = StrokeCap.Round),
+                    )
+                }
+                drawCircle(tint, radius = w * 0.075f, center = Offset(cx, cy))
+            }
+            Page.SETTINGS -> {
+                // 六边形外框 + 中心一个圆（PCL 的设置图标就是这个结构）
+                val hex = Path()
+                val radius = w * 0.44f
+                for (i in 0 until 6) {
+                    val angle = Math.toRadians((60.0 * i - 90.0))
+                    val x = w * 0.5f + (radius * Math.cos(angle)).toFloat()
+                    val y = h * 0.5f + (radius * Math.sin(angle)).toFloat()
+                    if (i == 0) hex.moveTo(x, y) else hex.lineTo(x, y)
+                }
+                hex.close()
+                drawPath(hex, tint, style = line)
+                drawCircle(tint, radius = w * 0.14f, center = Offset(w * 0.5f, h * 0.5f))
+            }
+            Page.MORE -> {
+                // 四宫格：三个圆角方块 + 一个方框，读起来是「还有别的」
+                val cell = w * 0.34f
+                val gap = w * 0.12f
+                val origin = (w - cell * 2f - gap) / 2f
+                for (row in 0 until 2) {
+                    for (col in 0 until 2) {
+                        drawRoundRect(
+                            color = tint,
+                            topLeft = Offset(origin + col * (cell + gap), origin + row * (cell + gap)),
+                            size = Size(cell, cell),
+                            cornerRadius = CornerRadius(w * 0.07f),
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * 顶栏右端那个「显示文字 / 只留图标」的开关：三条横线，展开时右边多一道竖线收口。
+ * 收起后图标变淡，一眼能看出当前是哪种状态。
+ */
+@Composable
+private fun LabelToggle(size: Dp, expanded: Boolean, tint: Color) {
+    Canvas(Modifier.size(size)) {
+        val w = this.size.width
+        val h = this.size.height
+        val stroke = w * 0.11f
+        val ys = listOf(0.24f, 0.5f, 0.76f)
+        ys.forEachIndexed { i, frac ->
+            val endX = if (expanded) w * 0.86f else w * 0.62f + i * w * 0.08f
+            drawLine(
+                color = tint,
+                start = Offset(w * 0.14f, h * frac),
+                end = Offset(endX, h * frac),
+                strokeWidth = stroke,
+                cap = StrokeCap.Round,
+            )
+        }
+        if (expanded) {
+            // 展开状态再加一道竖线，像「文字就在这几行里」
+            drawLine(
+                color = tint,
+                start = Offset(w * 0.9f, h * 0.24f),
+                end = Offset(w * 0.9f, h * 0.76f),
+                strokeWidth = stroke,
+                cap = StrokeCap.Round,
+            )
+        }
+    }
+}
 /**
  * 品牌标志：一颗蛋（鸭嘴兽是从蛋里孵出来的，「孵化版」也接着这层意思）。
  *
