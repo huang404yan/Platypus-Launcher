@@ -413,22 +413,37 @@ object ServerInstaller {
         )
     }
 
-    /** 找 installer 装出来的服务端 jar：新版本在 libraries/ 下，老版本在目录根上。 */
-    private fun findInstalledServerJar(
+    /**
+     * 找 installer 装出来的服务端 jar：新版本在 libraries/ 下，老版本在目录根上。
+     *
+     * 两条路都要走：1.17 起 installer 会生成 run.bat/run.sh，jar 被塞进 libraries/，
+     * 根目录反而干净；1.16 及更早没有 run 脚本，靠的就是根目录那个 forge-<mc>-<ver>.jar。
+     * 以前这里只查根目录 —— 注释写着「新版本在 libraries/ 下」，代码却没去那儿找，
+     * 那句注释等于一句没兑现的承诺。
+     */
+    internal fun findInstalledServerJar(
         targetDir: File,
         gameVersion: String,
         loaderVersion: String,
         isForge: Boolean,
     ): File? {
-        val root = targetDir.listFiles().orEmpty()
         val marker = if (isForge) {
             "forge-" + gameVersion + "-" + loaderVersion
         } else {
             "neoforge-" + loaderVersion
         }
-        root.firstOrNull { it.isFile && it.name.startsWith(marker) && it.name.endsWith(".jar") && !it.name.contains("installer") }
-            ?.let { return it }
-        return null
+        fun matches(file: File): Boolean =
+            file.isFile && file.name.startsWith(marker) && file.name.endsWith(".jar") &&
+                !file.name.contains("installer")
+
+        targetDir.listFiles().orEmpty().firstOrNull(::matches)?.let { return it }
+
+        // 有 run 脚本时它才是正路，这里找不到 jar 不算失败 —— 调用方会看脚本。
+        val libraries = File(targetDir, "libraries")
+        if (!libraries.isDirectory) return null
+        return runCatching {
+            libraries.walkTopDown().firstOrNull { matches(it) }
+        }.getOrNull()
     }
 
     // ---- 收尾：eula + 开服脚本 ----

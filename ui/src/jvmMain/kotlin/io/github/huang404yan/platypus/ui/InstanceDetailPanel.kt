@@ -35,6 +35,7 @@ import io.github.huang404yan.platypus.core.instance.InstanceDetailsLoader
 import io.github.huang404yan.platypus.core.instance.InstanceEditResult
 import io.github.huang404yan.platypus.core.instance.InstanceEdits
 import io.github.huang404yan.platypus.core.instance.InstanceLayouts
+import io.github.huang404yan.platypus.core.instance.InstanceMigration
 import io.github.huang404yan.platypus.core.instance.formatBytes
 import io.github.huang404yan.platypus.core.runtime.GameJavaRules
 import io.github.huang404yan.platypus.core.runtime.JavaRuntime
@@ -78,6 +79,11 @@ internal fun InstanceDetailPanel(
 
     var notice by remember(instance.directory) { mutableStateOf("") }
     var saving by remember(instance.directory) { mutableStateOf(false) }
+    //
+    // 实例目录里还留着多少东西没搬到游戏根目录。只在「开关拨到关」时才需要看 ——
+    // 开着隔离时那份东西正是游戏在用的，谈不上「没搬」。
+    var pendingDirs by remember(instance.directory) { mutableStateOf<List<String>>(emptyList()) }
+    var merging by remember(instance.directory) { mutableStateOf(false) }
 
     val scope = rememberCoroutineScope()
 
@@ -90,6 +96,58 @@ internal fun InstanceDetailPanel(
             }
         } finally {
             loading = false
+        }
+    }
+
+    // 开关拨到「关」的时候算一次：实例目录里有什么是游戏马上就会看不见的。
+    // 放在 LaunchedEffect 而不是渲染里算，因为要 listFiles() 走一遍盘。
+    LaunchedEffect(instance.directory, isolated) {
+        pendingDirs = if (isolated) {
+            emptyList()
+        } else {
+            withContext(Dispatchers.IO) {
+                runCatching {
+                    InstanceMigration.pending(File(instance.directory.trim().trim('"')))
+                }.getOrDefault(emptyList())
+            }
+        }
+    }
+
+    /**
+     * 把实例目录里的存档/模组/配置复制到游戏根目录。
+     *
+     * 复制而不是移动：用户可能只是关掉隔离试两天，原件留在原地才能随时开回去。
+     */
+    fun mergeToRoot() {
+        merging = true
+        notice = ""
+        scope.launch {
+            val result = withContext(Dispatchers.IO) {
+                runCatching {
+                    InstanceMigration.merge(File(instance.directory.trim().trim('"')))
+                }
+            }
+            merging = false
+            val merged = result.getOrNull()
+            if (merged == null) {
+                notice = "合并失败：" + (result.exceptionOrNull()?.message ?: "未知原因")
+                return@launch
+            }
+            // 合并完再算一次：这时列表应当空了，按钮也就该消失了。
+            pendingDirs = withContext(Dispatchers.IO) {
+                runCatching {
+                    InstanceMigration.pending(File(instance.directory.trim().trim('"')))
+                }.getOrDefault(emptyList())
+            }
+            notice = when {
+                merged.total == 0 -> "实例目录里没有需要合并的东西。"
+                merged.failed > 0 -> "合并了一部分：复制 " + merged.copied + " 个，跳过 " +
+                    merged.skipped + " 个（同名），失败 " + merged.failed + " 个。失败的写进了日志以外的清单，" +
+                    "可以手动把实例目录里那些文件拷过去。"
+                merged.skipped > 0 -> "合并完成：复制 " + merged.copied + " 个，跳过 " + merged.skipped +
+                    " 个同名文件（游戏根目录里已经有的没覆盖）。"
+                else -> "合并完成：复制了 " + merged.copied + " 个文件到 " + merged.toDir.absolutePath + "。"
+            }
         }
     }
 
@@ -223,6 +281,37 @@ internal fun InstanceDetailPanel(
                     "改完要点下面的「保存」才生效，下次启动游戏才用新目录。",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.primary,
+                )
+            }
+            //
+            // 关掉隔离之后，游戏改读游戏根目录那一份 —— 实例目录里的存档它就不再看了。
+            // 只提示「现在读写游戏根目录」是不够的：对用户来说体验就是「我的存档没了」。
+            if (!isolated && pendingDirs.isNotEmpty()) {
+                Text(
+                    "这个实例目录里还有 " + pendingDirs.joinToString("、") + "，关掉隔离后游戏就读不到它们了（它会去游戏根目录找）。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                )
+                Row(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    OutlinedButton(onClick = { mergeToRoot() }, enabled = !merging && !saving) {
+                        Text(if (merging) "正在合并…" else "复制到游戏根目录")
+                    }
+                    Text(
+                        "复制而不是移动：原件留在实例目录里，想开回隔离随时能开。同名文件不会覆盖。",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+            if (notice.isNotBlank()) {
+                Text(
+                    notice,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
         }

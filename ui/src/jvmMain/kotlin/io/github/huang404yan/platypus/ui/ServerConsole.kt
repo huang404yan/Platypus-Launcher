@@ -30,6 +30,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import io.github.huang404yan.platypus.core.install.ServerInstaller
+import io.github.huang404yan.platypus.core.install.ServerPorts
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -79,6 +80,15 @@ internal object ServerRuntime {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var process: Process? = null
 
+    /**
+     * 需要一直留在屏幕上的提示（目前只有端口绑不上这一种）。
+     *
+     * [append] 每来一行日志都会把 notice 清空 —— 那是给「起不来：xxx」这类一次性消息用的。
+     * 但端口冲突的说明是在日志**中间**认出来的：设完它，服务端还会再刷几行然后退出，
+     * 按老逻辑这几行会立刻把说明擦掉，用户就只剩一屏看不懂的英文堆栈。
+     */
+    private var pinned: String = ""
+
     /** 目录里能开服的那个脚本。Windows 优先 .bat，其它平台 .sh。 */
     fun scriptOf(dir: File): File? {
         val names = if (isWindows()) {
@@ -111,11 +121,29 @@ internal object ServerRuntime {
             return
         }
 
+        pinned = ""
         _state.value = ServerConsoleState(
             starting = true,
             dir = dir.absolutePath,
             lines = listOf("[启动] " + script.name),
         )
+        // 端口预检放后台：查占用者要跑一遍 netstat，最长等 1.5 秒，压在界面线程上会卡一下。
+        // 先亮「正在启动」，用户点完立刻有反馈，检查完再决定是真起还是拦住。
+        scope.launch { startProcess(dir, script) }
+    }
+
+    /**
+     * 预检端口，通过了才真的起进程。
+     *
+     * 端口被占时不放行，让服务端自己去撞：那样界面上只会看到日志刷两行、状态变回
+     * 「已停止」，真正的原因（那句 FAILED TO BIND TO PORT）夹在一屏英文中间，很容易漏掉。
+     */
+    private fun startProcess(dir: File, script: File) {
+        val port = ServerPorts.portOf(dir)
+        if (!ServerPorts.isFree(port)) {
+            _state.update { it.copy(starting = false, notice = ServerPorts.occupiedHint(dir, port)) }
+            return
+        }
         val command = if (isWindows()) {
             listOf("cmd.exe", "/c", script.name)
         } else {
@@ -213,18 +241,28 @@ internal object ServerRuntime {
     fun isProcessAlive(): Boolean = process?.isAlive == true
 
     private fun notice(text: String) {
+        // 一次性消息优先：清掉粘住的那条，否则下一次 append 会把它又贴回屏幕上。
+        pinned = ""
         _state.update { it.copy(notice = text) }
     }
 
     private fun append(line: String) {
         val clean = line.trimEnd()
+        if (pinned.isEmpty() && ServerPorts.looksLikeBindFailure(clean)) {
+            // 预检能挡住绝大部分端口冲突，但挡不住「预检读到的那份 server.properties 和
+            // 服务端实际读的不是同一份」：用户刚手改过、或者从别的工作目录起。这时只能事后认领。
+            val dir = _state.value.dir.takeIf { it.isNotBlank() }?.let(::File)
+            if (dir != null && dir.isDirectory) {
+                pinned = ServerPorts.bindFailureHint(dir, ServerPorts.portOf(dir))
+            }
+        }
         _state.update { s ->
             val next = if (s.lines.size >= MAX_LINES) {
                 s.lines.drop(s.lines.size - MAX_LINES + 1) + clean
             } else {
                 s.lines + clean
             }
-            s.copy(lines = next, notice = "")
+            s.copy(lines = next, notice = pinned)
         }
     }
 

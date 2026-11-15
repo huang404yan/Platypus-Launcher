@@ -1,6 +1,8 @@
 package io.github.huang404yan.platypus.ui
 
 import java.io.File
+import java.net.InetSocketAddress
+import java.net.ServerSocket
 import java.nio.file.Files
 import kotlin.test.AfterTest
 import kotlin.test.Test
@@ -88,6 +90,59 @@ class ServerConsoleTest {
         val state = ServerRuntime.state.value
         assertFalse(state.running, "没有脚本却启动了")
         assertTrue(state.notice.contains("开服脚本"), "提示不对，实际：" + state.notice)
+    }
+
+    @Test
+    fun `端口已被占用时不开进程并说清怎么改`() {
+        if (!isWindows) return
+        writeEula()
+        writeScript(listOf("@echo off", "echo should-not-run"))
+        // 真占一个端口：比起硬编码 25599，这样不会和机器上别的东西撞车。
+        ServerSocket().use { socket ->
+            socket.reuseAddress = false
+            socket.bind(InetSocketAddress(0), 1)
+            File(dir, "server.properties").writeText("server-port=" + socket.localPort + "\n", Charsets.UTF_8)
+            ServerRuntime.start(dir.absolutePath)
+            // 预检在后台线程里做（要跑 netstat 查占用者），所以要等它出结论。
+            assertTrue(
+                waitUntil(8000) { ServerRuntime.state.value.notice.isNotBlank() },
+                "没有给出任何提示",
+            )
+            val state = ServerRuntime.state.value
+            assertFalse(state.running, "端口被占还照样起进程了")
+            assertFalse(state.starting, "预检完还停在「正在启动」")
+            assertTrue(state.notice.contains(socket.localPort.toString()), "提示里没写端口号：" + state.notice)
+            assertTrue(state.notice.contains("server-port"), "提示里没说改哪个键：" + state.notice)
+            assertFalse(
+                state.lines.any { it.contains("should-not-run") },
+                "脚本被执行了，说明预检没挡住：" + state.lines,
+            )
+        }
+    }
+
+    @Test
+    fun `日志里出现绑定失败时会给出提示且不被后续日志擦掉`() {
+        if (!isWindows) return
+        writeEula()
+        writeScript(
+            listOf(
+                "@echo off",
+                "chcp 65001 >nul",
+                "echo **** FAILED TO BIND TO PORT!",
+                "echo java.net.BindException: Address already in use: bind",
+                "echo [Server] 后面还有几行普通日志",
+                "echo [Server] 又一行普通日志",
+                "exit /b 1",
+            ),
+        )
+        ServerRuntime.start(dir.absolutePath)
+        // 关键点：说明是在日志中间认出来的，后面还会继续刷行；那些行不许把说明顶掉。
+        assertTrue(
+            waitUntil(8000) { ServerRuntime.state.value.lines.any { it.contains("又一行普通日志") } },
+            "脚本没跑完，实际日志：" + ServerRuntime.state.value.lines,
+        )
+        val notice = ServerRuntime.state.value.notice
+        assertTrue(notice.contains("server-port"), "说明被后面的日志擦掉了，实际：" + notice)
     }
 
     private fun writeEula() {
