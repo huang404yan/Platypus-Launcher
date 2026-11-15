@@ -1,6 +1,7 @@
 package io.github.huang404yan.platypus.core.settings
 
 import io.github.huang404yan.platypus.core.instance.Instance
+import io.github.huang404yan.platypus.core.saves.AutoBackupPolicy
 import kotlinx.serialization.Serializable
 
 /**
@@ -50,6 +51,22 @@ data class LauncherSettings(
      *（游戏本体、模组、整合包、Java、服务端），因为国内网络下官方源经常不是慢而是根本连不上。
      */
     val downloadSource: String = "auto",
+    /**
+     * 存档自动备份开着没有。
+     *
+     * 默认开着：存档是玩家唯一无法重新下载的东西（模组能重下、Java 能重装、
+     * 整合包能重导），而「备份」这件事人一定会忘。代价只是盘上多几个 zip。
+     */
+    val autoBackupEnabled: Boolean = true,
+    /**
+     * 同一个世界隔多少小时再备份一次。
+     *
+     * 存数字而不是枚举档位：用户可能就想改成 6 小时，档位里塞不下这些组合。
+     * 超范围的值由 [normalize] 夹回 [io.github.huang404yan.platypus.core.saves.AutoBackupPolicy.INTERVAL_RANGE]。
+     */
+    val autoBackupHours: Int = AutoBackupPolicy.DEFAULT_INTERVAL_HOURS,
+    /** 每个世界最多留几份自动备份；超出的从最旧的开始删。 */
+    val autoBackupKeep: Int = AutoBackupPolicy.DEFAULT_KEEP,
     /** 最近一次写盘时间（毫秒）；0 表示还没写过。 */
     val updatedAt: Long = 0L,
 ) {
@@ -70,6 +87,21 @@ data class LauncherSettings(
             microsoftClientId = raw.microsoftClientId.trim().trim('"').trim(),
             theme = raw.theme.trim().lowercase(),
             downloadSource = raw.downloadSource.trim().lowercase(),
+            autoBackupHours = raw.autoBackupHours.coerceIn(
+                AutoBackupPolicy.INTERVAL_RANGE.first,
+                AutoBackupPolicy.INTERVAL_RANGE.last,
+            ),
+            autoBackupKeep = raw.autoBackupKeep.coerceIn(
+                AutoBackupPolicy.KEEP_RANGE.first,
+                AutoBackupPolicy.KEEP_RANGE.last,
+            ),
+        )
+
+        /** 设置里的三格合成自动备份策略，界面与启动页都从这一处取。 */
+        fun policyOf(settings: LauncherSettings): AutoBackupPolicy = AutoBackupPolicy.of(
+            enabled = settings.autoBackupEnabled,
+            intervalHours = settings.autoBackupHours,
+            keep = settings.autoBackupKeep,
         )
     }
 }

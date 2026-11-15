@@ -221,7 +221,7 @@ internal fun InstanceDetailPanel(
     }
 
     if (browsingSaves) {
-        SavesPanel(instance = instance, onBack = { browsingSaves = false })
+        SavesPanel(instance = instance, backend = backend, onBack = { browsingSaves = false })
         return
     }
 

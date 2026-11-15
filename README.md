@@ -114,7 +114,7 @@ Windows 下也可以用 `gradlew.bat`。首次构建会下载约 300 MB 依赖�
 - `docs/44-duankou-yujian-yu-geli-qianyi.md`：**服务端端口预检、关隔离后搬文件、Forge 的 jar 藏在哪**（`SO_REUSEADDR` 在 Windows 上会让「预检永远通过」这个坑、`pinned` 提示为什么不能走普通 notice、合并为什么是复制不是移动且默认不覆盖、`libraries/` 兜底与 installer jar 的排除、Paper 的 `server:mojang` 为什么是伪问题）
 - `docs/45-android-yunxingshi.md`：**安卓端的 Java 运行时这一层**（为什么安卓不能跑 `java -version` 只能读 `release` 文件、`isInstalled` 与 `canLaunch` 为什么是两条判据、`component` 里的 ABI 约定、把「启动翻译成命令行」抽到 `core/launch/LaunchPlanner.kt` 的理由与它承诺不写盘、`OsFamily` 里为什么还没有 `ANDROID`）
 - `docs/46-zhenghebao-daochu.md`：**整合包导出**（MCBBS v2、CurseForge、Modrinth 不是「压缩方式不同」而是「谁持有文件」、三种元数据为什么一句都不能混写、`addons` 用短名而 `modLoaders` 用短名加版本、存档默认不打、sha512 为什么自己算、`downloads` 里 Modrinth 的 CDN 排最后、纯 CurseForge 包为什么原本装不上以及怎么补的回退）
-- `docs/47-cundang-guanli.md`：**存档管理**（`level.dat` 的 NBT 为什么自己读、读不出来为什么不算错误、删除为什么永远先备份、备份为什么是一个 zip 而不是一份目录、还原为什么默认不覆盖且名字可改、备份与世界为什么分成两张卡）
+- `docs/47-cundang-guanli.md`：**存档管理**（`level.dat` 的 NBT 为什么自己读、读不出来为什么不算错误、删除为什么永远先备份、备份为什么是一个 zip 而不是一份目录、还原为什么默认不覆盖且名字可改、备份与世界为什么分成两张卡、自动备份为什么用「退出后」而不是定时器、失败时为什么不删旧备份）
 - `docs/48-fuwuduan-peizhi.md`：**服务端配置页**（`server.properties` 为什么按行保留而不是读成 Map、值里的换行为什么要压平、为什么只放 18 个键、白名单与 OP 的 UUID 从哪来且「网络不通」与「这个正版账号不存在」为什么要分开说、`[]` 为什么不是空文件、端口解析为什么只剩一份）
 - `docs/49-xiazaiyuan.md`：**下载源偏好**（为什么只有「顺序」两个选项而没有「只用官方源」、为什么做成进程级全局量而不是一路透传、两个接入点为什么就够、镜像主机名两个方向都要卡、排序为什么必须是稳定的）
 - `docs/50-gengxin-jiancha.md`：**检查更新**（为什么只查不换、通道规则「孵化版才看预发布」、版本号为什么不能按字符串比、限流与 404 各说什么、说明只显示开头）
@@ -161,7 +161,7 @@ M0（骨架）+ M1（实例扫描）+ M2（下载器）+ M3（**Windows 一键�
 
 **下载断点续传**：先写 `<文件>.part`，校验通过才转正；`.part` 有内容就发 `Range` 接着下，断网不清半成品，下次自动接上。进度条会额外显示「其中 N 个接着上次下（省了 M MB）」（`docs/14`）。
 
-单测 **818 例全过**（68 个测试类，`./gradlew :core:test :ui:jvmTest`；`ui` 从这一版起有 `jvmTest` 源集，格式化函数与导航常量也进单测了）。另有十二个无头冒烟任务（`e2eInstall` / `settingsSmoke` / `instanceFlowSmoke` / `resumeSmoke` / `deleteSmoke` / `fabricE2e` / `modpackE2e` / `forgeE2e` / `neoForgeE2e` / `modsE2e` / `modUpdateE2e` / `isolationSmoke`），走的是界面按钮同一批函数；`resumeSmoke` / `fabricE2e` / `modpackE2e` / `forgeE2e` / `neoForgeE2e` / `modsE2e` 需要联网，分别在空目录真装 Fabric、真跑 Forge 与 NeoForge 官方安装器、真从 Modrinth 下模组、真把一个 `.mrpack` 从解析装到进主菜单；`deleteSmoke` 在 `dist/_delete-smoke` 里全程造假数据，不碰真实 `.minecraft`。
+单测 **830 例全过**（69 个测试类，`./gradlew :core:test :ui:jvmTest`；`ui` 从这一版起有 `jvmTest` 源集，格式化函数与导航常量也进单测了）。另有十二个无头冒烟任务（`e2eInstall` / `settingsSmoke` / `instanceFlowSmoke` / `resumeSmoke` / `deleteSmoke` / `fabricE2e` / `modpackE2e` / `forgeE2e` / `neoForgeE2e` / `modsE2e` / `modUpdateE2e` / `isolationSmoke`），走的是界面按钮同一批函数；`resumeSmoke` / `fabricE2e` / `modpackE2e` / `forgeE2e` / `neoForgeE2e` / `modsE2e` 需要联网，分别在空目录真装 Fabric、真跑 Forge 与 NeoForge 官方安装器、真从 Modrinth 下模组、真把一个 `.mrpack` 从解析装到进主菜单；`deleteSmoke` 在 `dist/_delete-smoke` 里全程造假数据，不碰真实 `.minecraft`。
 
 **能装 Fabric 了**：下载页勾「顺带装 Fabric」→ 拉 meta.fabricmc.net 的 loader 列表（默认落在最新 stable）→ 装 profile json（只改 `id`，保留 `inheritsFrom`）→ 按 maven 坐标补全 8 个库的地址并下载 → 登记成 `1.20.1-fabric-0.20.1` 这样的实例。实测空目录全流程 4 分 29 秒进主菜单，日志首行 `Loading Minecraft 1.20.1 with Fabric Loader 0.20.1`（`docs/15`）。
 
@@ -180,6 +180,8 @@ M0（骨架）+ M1（实例扫描）+ M2（下载器）+ M3（**Windows 一键�
 **整合包能直接在启动器里搜了**：以前得先在浏览器里翻到 Files 标签、认出哪个是能导入的 `.mrpack`、下载到本地，再回启动器点「选择文件…」。现在下载页的导入卡片多了「从 Modrinth 搜」：关键词 + 游戏版本 + 加载器（按钮循环切换），空关键词也放行（直接看热门）。选中后启动器把 `.mrpack` 下到 `%TEMP%\platypus-modpacks\packs`，再走原来那条本地导入流水线——两条路只有「取包」不同，进度、错误、重试都共用一份。实测搜 `cobblemon` 装 Cobblemon Official Modpack [Fabric]：包 100,855,720 B，预览写「77 个文件要下载，共 209.1 MB」，13 分钟装完（含 209 MB 游戏文件与按需下载的 76 MB Java 运行时），登记实例 `1.21.1-fabric-0.20.1`，`mods/` 下 60 个 jar（`docs/31`）。
 
 **存档能管了**：以前 `saves/` 只在三处被动出现过（删实例时保护、整合包导入时不覆盖、详情页统计大小），想看有哪些世界、想备份一个、想把删掉的捞回来，只能自己开资源管理器翻。现在实例详情页多了「存档与备份」：列出每个世界（名字取 `level.dat` 的 `LevelName`、上次游玩时间、大小、游戏模式、硬核标记，有 `icon.png` 就显示缩略图），一行一个「备份 / 删除」，下面一张卡列历史备份，每份能还原。**删除永远是先备份再删**，备份失败就一个字节都不删 —— 存档是玩家唯一无法重新下载的东西（模组能重下、Java 能重装、连游戏本体都能一键装回来）。备份**是一个 zip 而不是一份目录**：复制几百兆要等十几秒，手滑点两次盘上就留两个同名目录，过两个月谁也分不清；zip 里路径相对世界目录，解出来就能直接塞回 `saves/`。还原默认**不覆盖同名世界**且名字可改 —— 同名时「还原」只有两种结局（覆盖玩家正玩着的那个、或静默失败），所以默认要求换个名字，要覆盖得显式勾上。`level.dat` 是 gzip 压的 NBT，这里自己写了三十来行 reader 而不是引依赖；读不出来不算错误（别人给的存档、复制一半的目录都可能是这样），标一句「读不出元数据」照样能备份能删（`docs/47`）。
+
+**存档还会自己备份**：设置页多了「存档」一栏（开关 / 间隔 1–168 小时 / 每个世界留几份 1–50），默认**开**、24 小时一份、留 5 份。触发点是**游戏正常退出之后**，不是定时器 —— 启动器关着的时候在背后动用户的文件太危险（可能撞上另一个启动器、撞上用户自己在拷存档、撞上半路断电），而游戏退出那一刻是唯一保证世界文件已全部落盘的时刻。三条判据都按**世界**算，不是全局：新开的世界第一次退出就备、某个世界失败只影响它自己、清理只针对本轮成功备份过的那个世界且从最旧删起（最新那份永远留着）。退出码非 0 不备份 —— 崩在半路时世界文件未必写完，留一个刚坏在那儿的 zip 没有意义。备份结果在启动页状态行下面显示一行，自动备份出来的 zip 和手动备份的在同一个列表里，一样能还原。
 
 **整合包也能导出了**：之前只有导入，想把配好的实例发给别人只能手动拖压缩包、再凭记忆写元数据。现在实例详情页的「这个实例在哪」卡里多一个「导出整合包」，三种格式任选 —— MCBBS v2（文件全打进 `overrides/`，不联网也能导，包大）与 CurseForge（只写 `manifest.json`，同样全打进包，体积与 MCBBS 一模一样；差别只在对 CurseForge App 来说少一个陌生文件）与 Modrinth（认得出的模组只写下载地址，包小，要联网核对）。**默认是前两者里的 MCBBS**：没人帮忙的时候它一定成功，而且它的 `manifest.json` 本身就是标准 CurseForge 清单，两边都吃得开。三种元数据一句都不能混写（HMCL 见到 `modrinth.index.json` 就按 Modrinth 包解析，加载器版本对不上整个导入失败，真正对的 `mcbbs.packmeta` 反而读不到），所以是二选一写而不是能写就都写；`addons` 里必须是短名（`forge` 不是 `net.minecraftforge`），而 `manifest.json` 的 `modLoaders` 又要是「短名 + 版本」。**存档默认不打** —— 里面有别人的世界、服务器地址、聊天记录，要打必须自己勾。导出前先纯读盘数一遍，给出「N 个文件，共 X MB」和各目录各几个；写 `.part` 成功才改名，目标已存在会先问一次（`docs/46`）。
 

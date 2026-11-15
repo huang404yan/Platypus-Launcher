@@ -17,6 +17,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -37,6 +38,7 @@ import io.github.huang404yan.platypus.core.Brand
 import io.github.huang404yan.platypus.core.download.DownloadPreference
 import io.github.huang404yan.platypus.core.download.DownloadSource
 import io.github.huang404yan.platypus.core.instance.Instance
+import io.github.huang404yan.platypus.core.saves.AutoBackupPolicy
 import io.github.huang404yan.platypus.core.settings.LauncherSettings
 import io.github.huang404yan.platypus.core.theme.LauncherTheme
 import io.github.huang404yan.platypus.core.theme.paletteOf
@@ -61,6 +63,9 @@ const val SETTINGS_TAB_JAVA = "java"
 
 /** 「下载」二级项的 id：下载源偏好。 */
 const val SETTINGS_TAB_DOWNLOAD = "download"
+
+/** 「存档」二级项的 id：自动备份的开关、间隔与保留份数。 */
+const val SETTINGS_TAB_SAVES = "saves"
 
 /** 「其他」二级项的 id。 */
 const val SETTINGS_TAB_OTHER = "other"
@@ -142,6 +147,9 @@ fun SettingsPage(
     var activeAccountUuid by remember { mutableStateOf("") }
     var microsoftClientId by remember { mutableStateOf("") }
     var downloadSource by remember { mutableStateOf(DownloadSource.DEFAULT.id) }
+    var autoBackupEnabled by remember { mutableStateOf(AutoBackupPolicy.DEFAULT.enabled) }
+    var autoBackupHours by remember { mutableStateOf(AutoBackupPolicy.DEFAULT.intervalHours.toString()) }
+    var autoBackupKeep by remember { mutableStateOf(AutoBackupPolicy.DEFAULT.keep.toString()) }
 
     LaunchedEffect(Unit) {
         val settings = withContext(Dispatchers.IO) {
@@ -153,9 +161,16 @@ fun SettingsPage(
         activeAccountUuid = settings.activeAccountUuid
         microsoftClientId = settings.microsoftClientId
         downloadSource = DownloadSource.of(settings.downloadSource).id
+        autoBackupEnabled = settings.autoBackupEnabled
+        autoBackupHours = settings.autoBackupHours.toString()
+        autoBackupKeep = settings.autoBackupKeep.toString()
         loaded = true
         loadedFrom = (repository as? JsonSettingsRepository)?.path.orEmpty()
     }
+
+    /** 立刻要落盘的那几处（换账号、存 Client ID、换配色、换下载源）用它带上备份三格。 */
+    fun backupPolicyNow(): AutoBackupPolicy =
+        AutoBackupPolicy.parse(autoBackupEnabled, autoBackupHours, autoBackupKeep)
 
     fun save() {
         val parsedMemory = memoryText.trim().toIntOrNull()
@@ -164,6 +179,20 @@ fun SettingsPage(
             noticeIsError = true
             return
         }
+        val parsedHours = autoBackupHours.trim().toIntOrNull()
+        if (parsedHours == null) {
+            notice = "自动备份的间隔要填整数，单位小时。"
+            noticeIsError = true
+            return
+        }
+        val parsedKeep = autoBackupKeep.trim().toIntOrNull()
+        if (parsedKeep == null) {
+            notice = "自动备份的保留份数要填整数。"
+            noticeIsError = true
+            return
+        }
+        val clampedHours = parsedHours.coerceIn(AutoBackupPolicy.INTERVAL_RANGE.first, AutoBackupPolicy.INTERVAL_RANGE.last)
+        val clampedKeep = parsedKeep.coerceIn(AutoBackupPolicy.KEEP_RANGE.first, AutoBackupPolicy.KEEP_RANGE.last)
         val clamped = Instance.clampMemoryMb(parsedMemory)
         val cleanedName = normalizeOfflineUsername(username)
         scope.launch {
@@ -177,6 +206,9 @@ fun SettingsPage(
                         microsoftClientId = microsoftClientId,
                         theme = theme.id,
                         downloadSource = downloadSource,
+                        autoBackupEnabled = autoBackupEnabled,
+                        autoBackupHours = clampedHours,
+                        autoBackupKeep = clampedKeep,
                     ),
                 )
             }
@@ -184,6 +216,8 @@ fun SettingsPage(
                 username = stored.offlineUsername
                 gameRoot = stored.defaultGameRoot
                 memoryText = stored.defaultMemoryMb.toString()
+                autoBackupHours = stored.autoBackupHours.toString()
+                autoBackupKeep = stored.autoBackupKeep.toString()
                 savedAt = stored.updatedAt
                 noticeIsError = false
                 notice = buildString {
@@ -196,6 +230,24 @@ fun SettingsPage(
                         append(" MB）改成了 ")
                         append(clamped)
                         append(" MB。")
+                    }
+                    if (clampedHours != parsedHours) {
+                        append("备份间隔按允许范围（")
+                        append(AutoBackupPolicy.INTERVAL_RANGE.first)
+                        append("–")
+                        append(AutoBackupPolicy.INTERVAL_RANGE.last)
+                        append(" 小时）改成了 ")
+                        append(clampedHours)
+                        append(" 小时。")
+                    }
+                    if (clampedKeep != parsedKeep) {
+                        append("保留份数按允许范围（")
+                        append(AutoBackupPolicy.KEEP_RANGE.first)
+                        append("–")
+                        append(AutoBackupPolicy.KEEP_RANGE.last)
+                        append("）改成了 ")
+                        append(clampedKeep)
+                        append(" 份。")
                     }
                     val problem = usernameProblem(stored.offlineUsername)
                     if (problem != null) append("注意：").append(problem)
@@ -227,6 +279,9 @@ fun SettingsPage(
                         microsoftClientId = microsoftClientId,
                         theme = theme.id,
                         downloadSource = downloadSource,
+                        autoBackupEnabled = autoBackupEnabled,
+                        autoBackupHours = backupPolicyNow().intervalHours,
+                        autoBackupKeep = backupPolicyNow().keep,
                     ),
                 )
             }
@@ -267,6 +322,9 @@ fun SettingsPage(
                         microsoftClientId = cleaned,
                         theme = theme.id,
                         downloadSource = downloadSource,
+                        autoBackupEnabled = autoBackupEnabled,
+                        autoBackupHours = backupPolicyNow().intervalHours,
+                        autoBackupKeep = backupPolicyNow().keep,
                     ),
                 )
             }
@@ -300,6 +358,9 @@ fun SettingsPage(
                         microsoftClientId = microsoftClientId,
                         theme = picked.id,
                         downloadSource = downloadSource,
+                        autoBackupEnabled = autoBackupEnabled,
+                        autoBackupHours = backupPolicyNow().intervalHours,
+                        autoBackupKeep = backupPolicyNow().keep,
                     ),
                 )
             }.onSuccess { stored ->
@@ -321,6 +382,9 @@ fun SettingsPage(
         // Client ID 刻意不跟着填回默认值：默认值是空串，而用户是从 Azure 门户抄来的，
         // 手边没有备份就找不回来了（那个 ID 在门户里还能看到，但他得再走一遍）。
         // 「填回默认值」的语义是「把可重建的设置恢复」，这一项不属于。
+        autoBackupEnabled = AutoBackupPolicy.DEFAULT.enabled
+        autoBackupHours = AutoBackupPolicy.DEFAULT.intervalHours.toString()
+        autoBackupKeep = AutoBackupPolicy.DEFAULT.keep.toString()
         noticeIsError = false
         notice = "已填回默认值，点「保存」才生效。"
     }
@@ -346,6 +410,9 @@ fun SettingsPage(
                         microsoftClientId = microsoftClientId,
                         theme = theme.id,
                         downloadSource = picked.id,
+                        autoBackupEnabled = autoBackupEnabled,
+                        autoBackupHours = backupPolicyNow().intervalHours,
+                        autoBackupKeep = backupPolicyNow().keep,
                     ),
                 )
             }.onSuccess {
@@ -387,6 +454,14 @@ fun SettingsPage(
             SETTINGS_TAB_DOWNLOAD -> DownloadTab(
                 current = DownloadSource.of(downloadSource),
                 onPick = { pickDownloadSource(it) },
+            )
+            SETTINGS_TAB_SAVES -> SavesTab(
+                enabled = autoBackupEnabled,
+                onEnabledChange = { autoBackupEnabled = it },
+                hoursText = autoBackupHours,
+                onHoursChange = { autoBackupHours = it },
+                keepText = autoBackupKeep,
+                onKeepChange = { autoBackupKeep = it },
             )
             SETTINGS_TAB_UI -> InterfaceTab(
                 theme = theme,
@@ -595,7 +670,112 @@ private fun DownloadSourceRow(
 }
 
 /**
- * 「界面」：选配色。
+ * 「存档」：自动备份的开关、间隔与保留份数。
+ *
+ * 为什么默认开：存档是玩家唯一没法重新下载的东西。模组能重下、Java 能重装、
+ * 整合包能重导，只有世界里那几百小时没了就是没了 —— 而「记得手动备份」这件事，
+ * 人是做不到的。代价只是备份目录里几个 zip。
+ *
+ * 触发时机是每次游戏正常退出之后（见 [io.github.huang404yan.platypus.ui.LaunchPage]）：
+ * 那时世界文件已经全部落盘，是唯一不会备到半份数据的时刻。
+ *
+ * 与「下载」「界面」不同，这一页的三个值要在底部点「保存」才生效 ——
+ * 间隔和份数是输入框，边敲边存会把「2」当成最终值写下去（用户想敲的是 24）。
+ */
+@Composable
+private fun SavesTab(
+    enabled: Boolean,
+    onEnabledChange: (Boolean) -> Unit,
+    hoursText: String,
+    onHoursChange: (String) -> Unit,
+    keepText: String,
+    onKeepChange: (String) -> Unit,
+) {
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        SettingCard(
+            "自动备份存档",
+            "每次游戏正常退出后，把该备份的世界打成一个 zip 放进 platypus/saves-backup。"
+                + "改完点下面的「保存」才生效。",
+        ) {
+            Row(
+                Modifier.fillMaxWidth().clickable { onEnabledChange(!enabled) }.padding(vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Checkbox(checked = enabled, onCheckedChange = onEnabledChange)
+                Column(Modifier.weight(1f)) {
+                    Text("开", style = MaterialTheme.typography.titleSmall)
+                    Text(
+                        "关掉之后一份都不会自动备；手动备份（实例详情 → 存档与备份）不受影响。",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+            Row(
+                Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                OutlinedTextField(
+                    value = hoursText,
+                    onValueChange = { onHoursChange(it.filter { ch -> ch.isDigit() }.take(3)) },
+                    label = { Text("间隔（小时）") },
+                    singleLine = true,
+                    enabled = enabled,
+                    modifier = Modifier.width(150.dp),
+                )
+                Text(
+                    AutoBackupPolicy.INTERVAL_RANGE.first.toString() + "–" +
+                        AutoBackupPolicy.INTERVAL_RANGE.last + " 小时。默认 " +
+                        AutoBackupPolicy.DEFAULT_INTERVAL_HOURS + " 小时：一天玩一次的人第二天就会有一份新的。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.weight(1f),
+                )
+            }
+            Row(
+                Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                OutlinedTextField(
+                    value = keepText,
+                    onValueChange = { onKeepChange(it.filter { ch -> ch.isDigit() }.take(2)) },
+                    label = { Text("每个世界留几份") },
+                    singleLine = true,
+                    enabled = enabled,
+                    modifier = Modifier.width(150.dp),
+                )
+                Text(
+                    "按世界分别算，不是所有世界一共几张。超出时从最旧的那份开始删，" +
+                        "最新那份永远留着。默认 " + AutoBackupPolicy.DEFAULT_KEEP + " 份。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.weight(1f),
+                )
+            }
+        }
+        SettingCard("什么时候备、备哪些", "这几条是刻意这么定的，不是漏了。") {
+            Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                InfoLine("时机", "游戏正常退出之后；崩在启动阶段没进世界的那种不算，那时存档没变")
+                InfoLine("判据", "按每个世界各自的「上次备份时间」算，不是全局一次 —— 新开的世界第一次就备")
+                InfoLine("跳过", "目录里读不出 level.dat 的、文件数为 0 的（空目录）")
+                InfoLine("失败", "某个世界备份失败只影响它自己，其余照备；失败时不会删它的旧备份")
+                InfoLine("还原", "实例详情 →「存档与备份」里能看到并还原自动备份出来的 zip")
+            }
+        }
+        SettingCard("还没做的", "没做的不摆控件。") {
+            Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                InfoLine("定时", "只有「退出游戏后」这一个触发点，没有后台定时器 —— 启动器关着的时候不该在背后动文件")
+                InfoLine("云备份", "只备到本机 platypus/saves-backup，没有上传")
+                InfoLine("整目录", "一个世界一个 zip，不能把整个 saves/ 一次打包")
+            }
+        }
+    }
+}
+
+/** 「界面」：选配色。
  *
  * 只有两套可选，外加一个「跟随版本」。这不是设置项没做完 —— 配色多到能调的时候，
  * 用户会先花十分钟纠结，然后所有页面的验收都要乘以主题数量。两套够用来区分

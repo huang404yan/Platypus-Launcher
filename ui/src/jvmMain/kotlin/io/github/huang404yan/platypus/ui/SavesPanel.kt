@@ -43,8 +43,11 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import io.github.huang404yan.platypus.core.instance.Instance
 import io.github.huang404yan.platypus.core.instance.InstanceLayouts
+import io.github.huang404yan.platypus.core.settings.LauncherSettings
+import io.github.huang404yan.platypus.core.saves.AutoBackupPolicy
 import io.github.huang404yan.platypus.core.saves.LevelDat
 import io.github.huang404yan.platypus.core.saves.Saves
+import io.github.huang404yan.platypus.core.saves.SavesAutoBackup
 import io.github.huang404yan.platypus.core.saves.SavesSnapshot
 import io.github.huang404yan.platypus.core.saves.WorldBackup
 import io.github.huang404yan.platypus.core.saves.WorldEntry
@@ -73,6 +76,7 @@ import java.util.Locale
 @Composable
 internal fun SavesPanel(
     instance: Instance,
+    backend: LauncherBackend? = null,
     onBack: () -> Unit,
 ) {
     val scope = rememberCoroutineScope()
@@ -91,6 +95,16 @@ internal fun SavesPanel(
 
     var pendingDelete by remember { mutableStateOf<WorldEntry?>(null) }
     var pendingRestore by remember { mutableStateOf<WorldBackup?>(null) }
+    // 自动备份策略：null 表示还没读到（后端没注入设置仓库时也用默认值）。
+    var policy by remember { mutableStateOf<AutoBackupPolicy?>(null) }
+
+    LaunchedEffect(gameDir) {
+        policy = backend?.settings?.let { repository ->
+            withContext(Dispatchers.IO) {
+                runCatching { LauncherSettings.policyOf(repository.load()) }.getOrNull()
+            }
+        } ?: AutoBackupPolicy.DEFAULT
+    }
 
     fun speak(text: String, error: Boolean = false) {
         notice = text
@@ -225,6 +239,45 @@ internal fun SavesPanel(
                             color = MaterialTheme.colorScheme.tertiary,
                         )
                     }
+                }
+            }
+        }
+
+        val currentPolicy = policy
+        if (currentPolicy != null) {
+            SavesCard("自动备份") {
+                if (!currentPolicy.enabled) {
+                    Text(
+                        "自动备份是关着的。每次游戏正常退出后不会自动备份，上面那些备份都是手动做的。" +
+                            "要打开就去「设置 → 存档」。",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                } else {
+                    Text(
+                        "每次游戏正常退出后自动备份。每 " + currentPolicy.intervalHours + " 小时最多一份，" +
+                            "每个世界留最新的 " + currentPolicy.keep + " 份，超出时从最旧的开始删。",
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                    val latest = SavesAutoBackup.lastBackupByWorld(backups)
+                    val shown = snapshot?.worlds.orEmpty()
+                    if (shown.isNotEmpty()) {
+                        shown.forEach { world ->
+                            val last = latest[world.name]
+                            Text(
+                                "「" + world.displayName + "」· " +
+                                    (if (last == null) "还没备份过，下次退出就会备" else "上次 " + formatTime(last.createdAt)),
+                                style = MaterialTheme.typography.bodySmall,
+                                fontFamily = FontFamily.Monospace,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                    Text(
+                        "间隔与份数在「设置 → 存档」里改。",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                 }
             }
         }

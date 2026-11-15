@@ -48,6 +48,7 @@ import androidx.compose.ui.unit.dp
 import io.github.huang404yan.platypus.core.auth.OfflineProfile
 import io.github.huang404yan.platypus.core.auth.StoredAccount
 import io.github.huang404yan.platypus.core.instance.Instance
+import io.github.huang404yan.platypus.core.instance.InstanceLayouts
 import io.github.huang404yan.platypus.core.instance.InstanceScanner
 import io.github.huang404yan.platypus.core.instance.ScanResult
 import io.github.huang404yan.platypus.core.instance.instanceKey
@@ -62,6 +63,9 @@ import io.github.huang404yan.platypus.core.launch.LaunchRequest
 import io.github.huang404yan.platypus.core.runtime.GameJavaRules
 import io.github.huang404yan.platypus.core.runtime.JavaRuntime
 import io.github.huang404yan.platypus.core.runtime.findExactMajor
+import io.github.huang404yan.platypus.core.saves.AutoBackupPolicy
+import io.github.huang404yan.platypus.core.saves.SavesAutoBackup
+import io.github.huang404yan.platypus.core.settings.LauncherSettings
 import io.github.huang404yan.platypus.core.settings.normalizeOfflineUsername
 import io.github.huang404yan.platypus.core.version.parseVersionJson
 import java.awt.Desktop
@@ -144,6 +148,8 @@ fun LaunchPage(
     // 本次启动的开始时刻：退出后只认比它新的 crash-report，
     // 否则实例上一次崩过的话，这次正常退出也会把旧报告当成新的挂出来。
     var startedAt by remember { mutableStateOf(0L) }
+    // 退出后自动备份的结果，一行字贴在状态行下面；没有备份（关着 / 没到间隔 / 没事可做）就留空
+    var autoBackupNotice by remember { mutableStateOf("") }
     // 联机页点「直接进」带过来的地址。用户清掉（或换实例）就回到普通启动。
     var quickTarget by remember { mutableStateOf(quickPlayServer.trim()) }
     LaunchedEffect(quickPlayServer) { quickTarget = quickPlayServer.trim() }
@@ -249,6 +255,30 @@ fun LaunchPage(
         return updated
     }
 
+    /**
+     * 退出后跑一轮自动备份，返回给界面看的一句话。
+     *
+     * 只在这个页面里做，不放到 core 的后台服务里：启动器关掉之后不该还在背后动文件。
+     * 崩溃退出（退出码非 0）不进来 —— 见调用处的理由。
+     */
+    fun runAutoBackup(instance: Instance, policy: AutoBackupPolicy): String {
+        if (!policy.enabled) return ""
+        return runCatching {
+            val layout = InstanceLayouts.of(instance)
+            val result = SavesAutoBackup.run(
+                gameDir = layout.gameDir,
+                gameRoot = layout.gameRoot,
+                policy = policy,
+            )
+            if (result.hasWork) {
+                val text = result.summary()
+                if (result.backedUp.isEmpty()) "自动备份没做成：$text" else "已自动备份存档：$text"
+            } else {
+                ""
+            }
+        }.getOrElse { "自动备份没做成：" + (it.message ?: it.javaClass.simpleName) }
+    }
+
     fun launchGame() {
         launchCancelRequested = false
         val instance = saveMemory() ?: return
@@ -285,11 +315,20 @@ fun LaunchPage(
         stageFraction = 0f
         handle = null
         startedAt = System.currentTimeMillis()
+        autoBackupNotice = ""
         phase = LaunchPhase.Starting
         val offlineSession = OfflineProfile.session(username.trim().ifBlank { "Dev" })
         val account = activeAccount
         scope.launch {
             try {
+                // 备份策略在启动这一刻读一次：用户可能刚在设置里改过间隔，
+                // 每次启动重读比缓存到进程里更不容易出现「改了没生效」。
+                val backupPolicy = withContext(Dispatchers.IO) {
+                    runCatching { backend.settings?.load() }
+                        .getOrNull()
+                        ?.let { LauncherSettings.policyOf(it) }
+                        ?: AutoBackupPolicy.DEFAULT
+                }
                 // 正版账号每次启动现换一份会话：MC 令牌两小时就过期，缓存下来十个九个是废的。
                 // 换不到就停在这儿说清楚 —— 静默退回离线会让人以为自己登录着，
                 // 等进了服务器才发现是个离线号，那时候已经说不清了。
@@ -379,6 +418,13 @@ fun LaunchPage(
                                 reachedMenu = LaunchDiagnosis.reachedMenu(buffer.tail(1_000)),
                                 crash = crash,
                             )
+                            // 自动备份：只在退出码为 0 时做。非 0 可能是崩在半路，
+                            // 那时世界文件未必写完，打出来的 zip 有可能是半份 ——
+                            // 备份的意义是留一个能用的还原点，不是留一个刚好坏在那儿的文件。
+                            // 回调本就在 IO 线程，这里直接同步跑（与上面读崩溃报告同一个理由）。
+                            if (event.code == 0) {
+                                autoBackupNotice = runAutoBackup(instance, backupPolicy)
+                            }
                         }
                     }
                 }
@@ -614,6 +660,20 @@ fun LaunchPage(
             }
 
             StatusLine(phase = phase, stageText = stageText, menuReached = menuReached)
+
+            // 自动备份的结果：只占一行。失败用 error 色（这时通常是备份目录被占住、
+            // 或者磁盘满了），成功用 onSurfaceVariant 而不是主色 —— 它不是需要被注意的消息。
+            if (autoBackupNotice.isNotBlank()) {
+                Text(
+                    autoBackupNotice,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if (autoBackupNotice.startsWith("自动备份没做成")) {
+                        MaterialTheme.colorScheme.error
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    },
+                )
+            }
 
             // 崩溃报告：退出后才有，读不到就不占位置
             (phase as? LaunchPhase.Exited)?.crash?.let { crash ->
