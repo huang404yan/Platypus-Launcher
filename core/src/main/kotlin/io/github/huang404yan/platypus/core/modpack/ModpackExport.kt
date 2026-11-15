@@ -27,6 +27,18 @@ enum class ModpackExportFormat(val label: String, val extension: String) {
     /** MCBBS v2：文件实体全放 overrides/，元数据是 mcbbs.packmeta + manifest.json。 */
     MCBBS("MCBBS v2（.zip）", "zip"),
 
+    /**
+     * CurseForge：只写 manifest.json + overrides/。
+     *
+     * 与 [MCBBS] 的差别只有「少写一份 mcbbs.packmeta」——文件实体照样全部打进包里，
+     * 体积与 MCBBS 完全一样。单独列出来是因为 CurseForge App 与一些第三方工具只认
+     * 这种形状，把 mcbbs.packmeta 一起塞进去对它们只是多一个陌生文件。
+     *
+     * 顺序上排在 [MRPACK] 之前：界面直接遍历 entries 出选项，两种「文件全带」的 zip
+     * 挨着放比隔一个更说得通。
+     */
+    CURSE("CurseForge（.zip）", "zip"),
+
     /** Modrinth：能认出来的文件只留下载地址，认不出的才打进 overrides/。 */
     MRPACK("Modrinth（.mrpack）", "mrpack"),
 }
@@ -265,7 +277,7 @@ object ModpackExport {
 
         ModpackExportResult(
             archive = target,
-            entries = packaged.size + if (resolved.format == ModpackExportFormat.MRPACK) 1 else 2,
+            entries = packaged.size + metaFileCount(resolved.format),
             hosted = hosted.size,
             packaged = packaged.size,
             bytes = bytes,
@@ -286,6 +298,13 @@ object ModpackExport {
         }
         onProgress(ModpackExportProgress("计算文件哈希", entries.size, entries.size))
         return out
+    }
+
+    /** 这个格式往包里写几份元数据文件。CurseForge 只写 manifest.json。 */
+    fun metaFileCount(format: ModpackExportFormat): Int = when (format) {
+        ModpackExportFormat.MRPACK -> 1
+        ModpackExportFormat.MCBBS -> 2
+        ModpackExportFormat.CURSE -> 1
     }
 
     /** Modrinth 自己的地址排最后：PCL 的做法，理由是那个地址对国内网络最不好用。 */
@@ -328,6 +347,15 @@ object ModpackExport {
                         PACKMETA_NAME,
                         packmetaJson(options, instance.gameVersion, instance.loader, instance.loaderVersion),
                     )
+                    writeText(
+                        zip,
+                        MANIFEST_NAME,
+                        curseManifestJson(options, instance.gameVersion, instance.loader, instance.loaderVersion),
+                    )
+                }
+                ModpackExportFormat.CURSE -> {
+                    // 只写 manifest.json：多一份 mcbbs.packmeta 对 CurseForge 侧是陌生文件，
+                    // 而这份 manifest.json 已经把所有信息写全了。
                     writeText(
                         zip,
                         MANIFEST_NAME,

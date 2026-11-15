@@ -258,6 +258,72 @@ class ModpackMetaTest {
         assertTrue(failure(ModpackMeta.parseMcbbs("坏", "也坏")).contains("读不出来"))
     }
 
+    // ---------- CurseForge（manifest.json 没有 addons 的形状） ----------
+
+    @Test
+    fun `纯 CurseForge 包从 minecraft 字段读出游戏版本与加载器`() {
+        val manifest = ok(
+            ModpackMeta.parseMcbbs(
+                packmetaText = null,
+                manifestText = """{"manifestType":"minecraftModpack","manifestVersion":1,"name":"CF 包","version":"1.2.0","minecraft":{"version":"1.20.1","modLoaders":[{"id":"forge-47.2.0","primary":true}]},"files":[],"overrides":"overrides"}""",
+            ),
+        )
+        assertEquals("CF 包", manifest.name)
+        assertEquals("1.20.1", manifest.gameVersion)
+        assertEquals(LoaderKind.FORGE, manifest.loader)
+        assertEquals("47.2.0", manifest.loaderVersion)
+        assertEquals(listOf("overrides"), manifest.overrideDirs)
+        // 得说清是按 CurseForge 字段读的，用户才知道包没写错
+        assertTrue(manifest.warnings.any { it.contains("CurseForge") }, manifest.warnings.toString())
+    }
+
+    @Test
+    fun `CurseForge 包没写加载器时当原版`() {
+        val manifest = ok(
+            ModpackMeta.parseMcbbs(
+                packmetaText = null,
+                manifestText = """{"name":"原版包","minecraft":{"version":"1.21.1"}}""",
+            ),
+        )
+        assertEquals("1.21.1", manifest.gameVersion)
+        assertEquals(LoaderKind.VANILLA, manifest.loader)
+        assertNull(manifest.loaderVersion)
+    }
+
+    @Test
+    fun `CurseForge 包用 fabric-loader 这种写法也认`() {
+        val manifest = ok(
+            ModpackMeta.parseMcbbs(
+                packmetaText = null,
+                manifestText = """{"name":"x","minecraft":{"version":"1.19.4","modLoaders":[{"id":"fabric-0.15.11","primary":true}]}}""",
+            ),
+        )
+        assertEquals(LoaderKind.FABRIC, manifest.loader)
+        assertEquals("0.15.11", manifest.loaderVersion)
+    }
+
+    @Test
+    fun `CurseForge 包只声明 quilt 时明确拒绝`() {
+        val reason = failure(
+            ModpackMeta.parseMcbbs(
+                packmetaText = null,
+                manifestText = """{"name":"x","minecraft":{"version":"1.20.1","modLoaders":[{"id":"quilt-0.23.1","primary":true}]}}""",
+            ),
+        )
+        assertTrue(reason.contains("Quilt"), reason)
+    }
+
+    @Test
+    fun `CurseForge 包没写游戏版本时仍然失败`() {
+        val reason = failure(
+            ModpackMeta.parseMcbbs(
+                packmetaText = null,
+                manifestText = """{"name":"x","minecraft":{"modLoaders":[{"id":"forge-47.2.0"}]}}""",
+            ),
+        )
+        assertTrue(reason.contains("游戏版本信息"), reason)
+    }
+
     // ---------- 路径安全 ----------
 
     @Test

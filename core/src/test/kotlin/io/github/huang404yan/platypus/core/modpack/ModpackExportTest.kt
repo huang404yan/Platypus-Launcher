@@ -143,6 +143,62 @@ class ModpackExportTest {
         assertFalse(packmeta.contains("\"id\": \"fabric\""), packmeta)
     }
 
+    // ---- CurseForge ----
+
+    @Test
+    fun `CurseForge 包只写 manifest 不写 mcbbs 描述`() = runBlocking {
+        write("mods/sodium.jar", "sodium")
+        write("config/a.json", "{}")
+        val target = File(root, "cf/pack.zip")
+        val result = ModpackExport.export(
+            instance(LoaderKind.FORGE, "47.2.0"),
+            target,
+            ModpackExportOptions(version = "3.1.0", format = ModpackExportFormat.CURSE),
+        )
+        val names = entriesOf(target)
+        assertTrue(names.contains(ModpackExport.MANIFEST_NAME), names.toString())
+        // 对 CurseForge 侧来说 mcbbs.packmeta 是个陌生文件，不许混进去
+        assertFalse(names.contains(ModpackExport.PACKMETA_NAME), names.toString())
+        assertFalse(names.contains(ModpackExport.INDEX_NAME), names.toString())
+        assertTrue(names.contains("overrides/mods/sodium.jar"), names.toString())
+        assertTrue(names.contains("overrides/config/a.json"), names.toString())
+        // 元数据只有一份 manifest.json，所以打包计数是文件数 + 1
+        assertEquals(2, result.packaged)
+        assertEquals(3, result.entries)
+        val manifest = textOf(target, ModpackExport.MANIFEST_NAME).orEmpty()
+        assertTrue(manifest.contains("minecraftModpack"), manifest)
+        assertTrue(manifest.contains("forge-47.2.0"), manifest)
+        assertTrue(manifest.contains("3.1.0"), manifest)
+    }
+
+    @Test
+    fun `导出的 CurseForge 包能被自己的解析器读回来`() = runBlocking {
+        write("mods/sodium.jar")
+        val target = File(root, "cf/pack.zip")
+        ModpackExport.export(
+            instance(LoaderKind.NEOFORGE, "21.1.80"),
+            target,
+            ModpackExportOptions(name = "水星包", version = "1.4.0", format = ModpackExportFormat.CURSE),
+        )
+        val names = entriesOf(target)
+        // detect 认 CurseForge 包靠的就是 manifest.json + overrides/
+        val layout = ModpackMeta.detect(names)
+        assertEquals(ModpackKind.MCBBS_V2, layout.kind)
+        val parsed = ModpackMeta.parseMcbbs(
+            packmetaText = null,
+            manifestText = textOf(target, ModpackExport.MANIFEST_NAME),
+        )
+        assertTrue(parsed is ModpackParse.Ok, parsed.toString())
+        val manifest = parsed.value
+        assertEquals("水星包", manifest.name)
+        assertEquals("1.20.1", manifest.gameVersion)
+        assertEquals(LoaderKind.NEOFORGE, manifest.loader)
+        assertEquals("21.1.80", manifest.loaderVersion)
+        assertEquals(listOf("overrides"), manifest.overrideDirs)
+        // 必须告诉用户这是按 CurseForge 字段读的，而不是包写错了
+        assertTrue(manifest.warnings.any { it.contains("CurseForge") }, manifest.warnings.toString())
+    }
+
     // ---- Modrinth ----
 
     @Test

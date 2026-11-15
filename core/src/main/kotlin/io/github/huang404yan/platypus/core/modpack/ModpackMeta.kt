@@ -314,10 +314,25 @@ object ModpackMeta {
             val id = obj.str("id") ?: return@forEach
             addons[id.lowercase()] = obj.str("version").orEmpty()
         }
-        val gameVersion = addons["game"]
+        // 真正的 CurseForge 包没有 addons：它把版本写在 minecraft.version 与
+        // minecraft.modLoaders 里。这两种形状在本启动器里都归到 MCBBS_V2 一类
+        // （见 detect：manifest.json + overrides/ 就认），所以这里退一步读 CF 字段，
+        // 否则从 CurseForge 下下来的包一律报「未提供游戏版本信息」装不了。
+        var gameVersion = addons["game"]
+        var fromCurseManifest = false
+        if (gameVersion.isNullOrBlank()) {
+            val curse = meta["minecraft"] as? JsonObject
+            val fromManifest = curse?.str("version")
+            if (!fromManifest.isNullOrBlank()) {
+                gameVersion = fromManifest
+                fromCurseManifest = true
+            }
+        }
         if (gameVersion.isNullOrBlank()) {
             // PCL 同样在这里拒绝：「该 MCBBS 整合包未提供游戏版本信息，无法安装！」
-            return ModpackParse.Failure("该整合包未提供游戏版本信息（addons 里缺 game），无法安装")
+            return ModpackParse.Failure(
+                "该整合包未提供游戏版本信息（addons 里缺 game，CurseForge 的 manifest.json 里也没有 minecraft.version），无法安装",
+            )
         }
         if (addons.containsKey("quilt")) {
             return ModpackParse.Failure("暂不支持 Quilt 整合包（包里声明了 quilt " + addons["quilt"] + "）")
@@ -328,13 +343,26 @@ object ModpackMeta {
         addons["forge"]?.takeIf { it.isNotBlank() }?.let { loader = LoaderKind.FORGE; loaderVersion = it }
         addons["neoforge"]?.takeIf { it.isNotBlank() }?.let { loader = LoaderKind.NEOFORGE; loaderVersion = it }
         addons["fabric"]?.takeIf { it.isNotBlank() }?.let { loader = LoaderKind.FABRIC; loaderVersion = it }
+        if (fromCurseManifest) {
+            val fromManifest = loaderFromCurse(meta)
+            if (fromManifest.first == LoaderKind.QUILT) {
+                return ModpackParse.Failure("暂不支持 Quilt 整合包（manifest.json 里写的是 quilt " + (fromManifest.second ?: "") + "）")
+            }
+            loader = fromManifest.first
+            loaderVersion = fromManifest.second
+        }
         if (addons.containsKey("optifine")) {
             warnings += "包声明了 OptiFine " + addons["optifine"] + "，本启动器暂不支持，已忽略（不影响启动，只是没高清修复）"
         }
         for ((id, _) in addons) {
             if (id !in KNOWN_ADDONS) warnings += "包声明了不认识的组件「" + id + "」，已忽略"
         }
-        if (usedManifest) warnings += "包只有 manifest.json（没有 mcbbs.packmeta），按 MCBBS 字段读"
+        if (usedManifest && !fromCurseManifest) {
+            warnings += "包只有 manifest.json（没有 mcbbs.packmeta），按 MCBBS 字段读"
+        }
+        if (fromCurseManifest) {
+            warnings += "这是 CurseForge 格式的 manifest.json，按 manifest.json 的 minecraft 字段读"
+        }
 
         val launchInfo = meta["launchInfo"] as? JsonObject
         return ModpackParse.Ok(
@@ -352,6 +380,34 @@ object ModpackMeta {
                 warnings = warnings,
             ),
         )
+    }
+
+    /**
+     * 从 CurseForge 的 `manifest.json` 里读加载器。
+     *
+     * 形状：`"minecraft": {"version":"1.20.1", "modLoaders":[{"id":"forge-47.2.0","primary":true}]}`。
+     * id 是「短名-版本」，短名只认 forge / neoforge / fabric（CurseForge 自己的约定）。
+     * 没写 primary 的按第一项算：绝大多数包只有一项，多加载器混装本来也不被支持。
+     */
+    private fun loaderFromCurse(meta: JsonObject): Pair<LoaderKind, String?> {
+        val list = (meta["minecraft"] as? JsonObject)?.get("modLoaders")
+            as? kotlinx.serialization.json.JsonArray ?: return LoaderKind.VANILLA to null
+        val primary = list.mapNotNull { it as? JsonObject }
+            .firstOrNull { (it["primary"] as? JsonPrimitive)?.content?.toBooleanStrictOrNull() == true }
+            ?: list.mapNotNull { it as? JsonObject }.firstOrNull()
+            ?: return LoaderKind.VANILLA to null
+        val raw = primary.str("id")?.trim()?.takeIf { it.isNotBlank() } ?: return LoaderKind.VANILLA to null
+        val dash = raw.indexOf('-')
+        if (dash <= 0 || dash == raw.length - 1) return LoaderKind.VANILLA to null
+        val name = raw.substring(0, dash).lowercase()
+        val version = raw.substring(dash + 1).trim().takeIf { it.isNotBlank() }
+        return when (name) {
+            "forge" -> LoaderKind.FORGE to version
+            "neoforge" -> LoaderKind.NEOFORGE to version
+            "fabric" -> LoaderKind.FABRIC to version
+            "quilt" -> LoaderKind.QUILT to version
+            else -> LoaderKind.OTHER to version
+        }
     }
 
     private val KNOWN_ADDONS = setOf("game", "forge", "neoforge", "fabric", "quilt", "optifine", "liteloader")

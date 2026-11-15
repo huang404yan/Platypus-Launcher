@@ -440,6 +440,7 @@ private fun sizeTextOf(bytes: Long): String = when {
 private fun formatNoteOf(format: ModpackExportFormat): String = when (format) {
     ModpackExportFormat.MCBBS -> "HMCL、PCL 都认，文件全打在包里，离线也能装。包会比较大。"
     ModpackExportFormat.MRPACK -> "Modrinth 包。认得出的模组只留下载地址，包小；认不出的仍然打进去。"
+    ModpackExportFormat.CURSE -> "CurseForge 包。只写 manifest.json，模组、配置、资源包全打在包里，离线也能装。体积与 MCBBS 一样大。"
 }
 
 @Composable
