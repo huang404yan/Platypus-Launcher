@@ -43,6 +43,13 @@ data class LauncherSettings(
      * 认不出来的一律当 auto（[io.github.huang404yan.platypus.core.theme.launcherThemeOf]）。
      */
     val theme: String = "auto",
+    /**
+     * 下载源偏好：auto 官方源优先（默认），mirror 优先国内镜像。
+     *
+     * 存 id 字符串而不是枚举下标，理由同 theme。这一项影响的是全部下载
+     *（游戏本体、模组、整合包、Java、服务端），因为国内网络下官方源经常不是慢而是根本连不上。
+     */
+    val downloadSource: String = "auto",
     /** 最近一次写盘时间（毫秒）；0 表示还没写过。 */
     val updatedAt: Long = 0L,
 ) {
@@ -62,6 +69,7 @@ data class LauncherSettings(
             activeAccountUuid = raw.activeAccountUuid.trim(),
             microsoftClientId = raw.microsoftClientId.trim().trim('"').trim(),
             theme = raw.theme.trim().lowercase(),
+            downloadSource = raw.downloadSource.trim().lowercase(),
         )
     }
 }

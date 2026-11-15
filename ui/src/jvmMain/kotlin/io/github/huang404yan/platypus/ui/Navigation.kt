@@ -60,6 +60,9 @@ val PAGE_SUB_TABS: Map<Page, List<SubTab>> = mapOf(
         // Java 单独一项：它不属于「启动参数」，而是「往盘上装一份运行时」，
         // 和下载页那几项是同一类动作，只是入口挂在设置里（PCL 也是这么分的）。
         SubTab("java", "Java", refreshable = true),
+        // 下载源排在「界面」前面：它和 Java 一样属于「装东西的那条路怎么走」，
+        // 而不是外观。放这里也让它离「界面」这种纯观感项远一点。
+        SubTab("download", "下载"),
         SubTab("ui", "界面"),
         SubTab("other", "其他"),
     ),

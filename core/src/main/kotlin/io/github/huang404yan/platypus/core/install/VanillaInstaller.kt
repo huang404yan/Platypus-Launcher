@@ -3,6 +3,8 @@ package io.github.huang404yan.platypus.core.install
 import io.github.huang404yan.platypus.core.download.DownloadItem
 import io.github.huang404yan.platypus.core.download.DownloadProgress
 import io.github.huang404yan.platypus.core.download.DownloadReport
+import io.github.huang404yan.platypus.core.download.DownloadPreference
+import io.github.huang404yan.platypus.core.download.DownloadSources
 import io.github.huang404yan.platypus.core.download.HttpDownloader
 import io.github.huang404yan.platypus.core.runtime.GameJavaRules
 import io.github.huang404yan.platypus.core.version.DownloadPlanner
@@ -148,10 +150,16 @@ object VanillaInstaller {
 
     private fun fetchText(url: String): String = fetchText(listOf(url))
 
-    /** 依次尝试每个地址，全部失败时抛 [IOException] 并列出试过的地址。 */
+    /**
+     * 依次尝试每个地址，全部失败时抛 [IOException] 并列出试过的地址。
+     *
+     * 顺序受下载源偏好影响（见 [DownloadSources.orderAll]）：调用方写死的是「官方源在前」，
+     * 用户选了「优先国内镜像」时这里把镜像提到前面。文本接口（版本清单、安装器清单、
+     * 构建列表）同样会被墙住，只给文件下载做偏好、清单还走官方源是说不通的。
+     */
     fun fetchText(urls: List<String>): String {
         val tried = mutableListOf<String>()
-        for (url in urls.distinct()) {
+        for (url in DownloadSources.orderAll(urls, DownloadPreference.source)) {
             if (url.isBlank()) continue
             tried += url
             val text = tryFetch(url)

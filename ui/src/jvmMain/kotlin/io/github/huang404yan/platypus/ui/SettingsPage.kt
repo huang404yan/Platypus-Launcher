@@ -34,6 +34,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import io.github.huang404yan.platypus.core.Brand
+import io.github.huang404yan.platypus.core.download.DownloadPreference
+import io.github.huang404yan.platypus.core.download.DownloadSource
 import io.github.huang404yan.platypus.core.instance.Instance
 import io.github.huang404yan.platypus.core.settings.LauncherSettings
 import io.github.huang404yan.platypus.core.theme.LauncherTheme
@@ -56,6 +58,9 @@ const val SETTINGS_TAB_ACCOUNT = "account"
 
 /** 「Java」二级项的 id。 */
 const val SETTINGS_TAB_JAVA = "java"
+
+/** 「下载」二级项的 id：下载源偏好。 */
+const val SETTINGS_TAB_DOWNLOAD = "download"
 
 /** 「其他」二级项的 id。 */
 const val SETTINGS_TAB_OTHER = "other"
@@ -136,6 +141,7 @@ fun SettingsPage(
     var savedAt by remember { mutableStateOf(0L) }
     var activeAccountUuid by remember { mutableStateOf("") }
     var microsoftClientId by remember { mutableStateOf("") }
+    var downloadSource by remember { mutableStateOf(DownloadSource.DEFAULT.id) }
 
     LaunchedEffect(Unit) {
         val settings = withContext(Dispatchers.IO) {
@@ -146,6 +152,7 @@ fun SettingsPage(
         memoryText = settings.defaultMemoryMb.toString()
         activeAccountUuid = settings.activeAccountUuid
         microsoftClientId = settings.microsoftClientId
+        downloadSource = DownloadSource.of(settings.downloadSource).id
         loaded = true
         loadedFrom = (repository as? JsonSettingsRepository)?.path.orEmpty()
     }
@@ -169,6 +176,7 @@ fun SettingsPage(
                         activeAccountUuid = activeAccountUuid,
                         microsoftClientId = microsoftClientId,
                         theme = theme.id,
+                        downloadSource = downloadSource,
                     ),
                 )
             }
@@ -218,6 +226,7 @@ fun SettingsPage(
                         activeAccountUuid = uuid,
                         microsoftClientId = microsoftClientId,
                         theme = theme.id,
+                        downloadSource = downloadSource,
                     ),
                 )
             }
@@ -257,6 +266,7 @@ fun SettingsPage(
                         activeAccountUuid = activeAccountUuid,
                         microsoftClientId = cleaned,
                         theme = theme.id,
+                        downloadSource = downloadSource,
                     ),
                 )
             }
@@ -289,6 +299,7 @@ fun SettingsPage(
                         activeAccountUuid = activeAccountUuid,
                         microsoftClientId = microsoftClientId,
                         theme = picked.id,
+                        downloadSource = downloadSource,
                     ),
                 )
             }.onSuccess { stored ->
@@ -312,6 +323,40 @@ fun SettingsPage(
         // 「填回默认值」的语义是「把可重建的设置恢复」，这一项不属于。
         noticeIsError = false
         notice = "已填回默认值，点「保存」才生效。"
+    }
+
+    /**
+     * 立刻把下载源偏好写进设置，并就地更新进程级的那份。
+     *
+     * 与配色一样不跟底部「保存」按钮走：用户改完就想马上重试一次下载，
+     * 如果那时还没落盘、也没同步到 [DownloadPreference]，点了下载还是老顺序。
+     */
+    fun pickDownloadSource(picked: DownloadSource) {
+        downloadSource = picked.id
+        DownloadPreference.source = picked
+        val parsedMemory = memoryText.trim().toIntOrNull() ?: Instance.DEFAULT_MEMORY_MB
+        scope.launch {
+            runCatching {
+                repository.save(
+                    LauncherSettings(
+                        offlineUsername = normalizeOfflineUsername(username),
+                        defaultGameRoot = gameRoot.trim(),
+                        defaultMemoryMb = Instance.clampMemoryMb(parsedMemory),
+                        activeAccountUuid = activeAccountUuid,
+                        microsoftClientId = microsoftClientId,
+                        theme = theme.id,
+                        downloadSource = picked.id,
+                    ),
+                )
+            }.onSuccess {
+                savedAt = it.updatedAt
+                noticeIsError = false
+                // 成功不在这里说话：选中的那一行自己会打勾。
+            }.onFailure {
+                noticeIsError = true
+                notice = "下载源没能存下来：" + (it.message ?: it.javaClass.simpleName)
+            }
+        }
     }
 
     val nameProblem = usernameProblem(username)
@@ -339,6 +384,10 @@ fun SettingsPage(
                 onSaveClientId = { saveClientId(it) },
             )
             SETTINGS_TAB_JAVA -> JavaTab(backend, gameRoot, refreshTick)
+            SETTINGS_TAB_DOWNLOAD -> DownloadTab(
+                current = DownloadSource.of(downloadSource),
+                onPick = { pickDownloadSource(it) },
+            )
             SETTINGS_TAB_UI -> InterfaceTab(
                 theme = theme,
                 onPick = { picked ->
@@ -366,7 +415,9 @@ fun SettingsPage(
 
         // 「界面」只改配色，点一下就已经落盘了，底部那排「保存 / 填回默认值」
         // 对它没有意义 —— 留着反而让人以为不点保存不生效。
-        if (subTab != SETTINGS_TAB_JAVA && subTab != SETTINGS_TAB_ACCOUNT && subTab != SETTINGS_TAB_UI) {
+        if (subTab != SETTINGS_TAB_JAVA && subTab != SETTINGS_TAB_ACCOUNT &&
+            subTab != SETTINGS_TAB_UI && subTab != SETTINGS_TAB_DOWNLOAD
+        ) {
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 Button(onClick = { save() }, enabled = loaded) { Text("保存") }
                 OutlinedButton(onClick = { resetDefaults() }, enabled = loaded) { Text("填回默认值") }
@@ -463,6 +514,81 @@ private fun LaunchTab(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 },
+            )
+        }
+    }
+}
+
+/**
+ * 「下载」：同一个文件先走哪条路。
+ *
+ * 只有两个选项，且两个都不是「只走一条」—— 差别只是顺序。这条取舍写在
+ * DownloadSource 的 KDoc 里，界面上也照原样说给用户：选「优先国内镜像」不代表
+ * 拿不到官方原件，镜像挂了照样退回官方源；sha1 校验会兜住镜像内容坏掉的情况。
+ */
+@Composable
+private fun DownloadTab(
+    current: DownloadSource,
+    onPick: (DownloadSource) -> Unit,
+) {
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        SettingCard(
+            "下载源",
+            "影响所有下载：游戏本体、模组、整合包、Java、服务端。改完立刻生效，下次下载就按新顺序走。",
+        ) {
+            DownloadSource.entries.forEach { option ->
+                DownloadSourceRow(
+                    option = option,
+                    selected = option == current,
+                    onSelect = { onPick(option) },
+                )
+            }
+        }
+        SettingCard(
+            "镜像到底是什么",
+            "镜像不是另一份内容，是同一批文件的另一台服务器。下载器按文件名与 sha1 校验，" +
+                "镜像给的东西对不上就会被判失败并退回官方源，不会装上一个坏文件。",
+        ) {
+            Text(
+                "现在用的镜像是 BMCLAPI（bmclapi2.bangbang93.com）：游戏本体、libraries、assets " +
+                    "都走它。模组与整合包本来就是从 Modrinth / CurseForge 直接下，没有国内镜像可用，" +
+                    "这一项对它们没有影响。",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+@Composable
+private fun DownloadSourceRow(
+    option: DownloadSource,
+    selected: Boolean,
+    onSelect: () -> Unit,
+) {
+    Row(
+        Modifier.fillMaxWidth().clickable(onClick = onSelect).padding(vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(
+                option.label,
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+                color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+            )
+            Text(
+                option.note,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        if (selected) {
+            Text(
+                "✓",
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.primary,
             )
         }
     }

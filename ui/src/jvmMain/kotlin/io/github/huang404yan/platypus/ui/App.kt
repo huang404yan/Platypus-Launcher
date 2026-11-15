@@ -31,6 +31,8 @@ import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import io.github.huang404yan.platypus.core.Brand
+import io.github.huang404yan.platypus.core.download.DownloadPreference
+import io.github.huang404yan.platypus.core.download.DownloadSource
 import io.github.huang404yan.platypus.core.instance.Instance
 import io.github.huang404yan.platypus.core.instance.instanceKey
 import io.github.huang404yan.platypus.core.packs.PackKind
@@ -78,7 +80,11 @@ fun App(
     // 每页各读会让主题在切换瞬间闪一下，而且同一份文件被反复解析。
     LaunchedEffect(backend) {
         val repository = backend?.settings ?: return@LaunchedEffect
-        theme = runCatching { launcherThemeOf(repository.load().theme) }.getOrDefault(LauncherTheme.AUTO)
+        val settings = runCatching { repository.load() }.getOrNull() ?: return@LaunchedEffect
+        theme = runCatching { launcherThemeOf(settings.theme) }.getOrDefault(LauncherTheme.AUTO)
+        // 下载源偏好是进程级全局量（见 DownloadPreference 的说明）：这里灌一次，
+        // 之后所有新建的下载器都按它排序。设置页改的时候会就地覆写。
+        DownloadPreference.source = DownloadSource.of(settings.downloadSource)
     }
 
     LaunchedEffect(theme) { onThemeChanged(theme) }

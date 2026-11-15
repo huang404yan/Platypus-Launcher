@@ -5,6 +5,7 @@ import java.net.InetSocketAddress
 import java.net.ServerSocket
 import java.nio.file.Files
 import kotlin.test.AfterTest
+import kotlin.test.BeforeTest
 import kotlin.test.Test
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
@@ -27,7 +28,20 @@ class ServerConsoleTest {
     @AfterTest
     fun tearDown() {
         ServerRuntime.stop()
+        // stop() 是异步的：它发出 stop 命令后由另一个协程等着进程退出。不等它落定就删目录、
+        // 让下一条测试开始，会出现「上一条的进程还活着 → start() 在 running 时直接 return →
+        // 这一条什么都没发生」的假失败（实测过一次：整跑挂、单跑过）。
+        waitUntil(20_000) { !ServerRuntime.state.value.running && !ServerRuntime.isProcessAlive() }
         runCatching { dir.deleteRecursively() }
+    }
+
+    @BeforeTest
+    fun waitIdle() {
+        // 双保险：单例的运行状态可能被上一条或别的测试类留着。
+        if (ServerRuntime.state.value.running || ServerRuntime.state.value.starting) {
+            ServerRuntime.stop()
+            waitUntil(20_000) { !ServerRuntime.state.value.running && !ServerRuntime.isProcessAlive() }
+        }
     }
 
     private val isWindows: Boolean

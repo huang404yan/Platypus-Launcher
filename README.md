@@ -113,9 +113,10 @@ Windows 下也可以用 `gradlew.bat`。首次构建会下载约 300 MB 依赖�
 - `docs/42-liangtao-peise.md`：**两套配色**（为什么是两套而不是调色盘、60/30/10 的四色对照、正文为什么不用纯白与强调色上的字为什么用深色、默认值按版本给且选过就记住、色值为什么打包成 `Long` 放进 core、换主题只要换一个 `ColorScheme`、对比度是怎么算出来的）
 - `docs/44-duankou-yujian-yu-geli-qianyi.md`：**服务端端口预检、关隔离后搬文件、Forge 的 jar 藏在哪**（`SO_REUSEADDR` 在 Windows 上会让「预检永远通过」这个坑、`pinned` 提示为什么不能走普通 notice、合并为什么是复制不是移动且默认不覆盖、`libraries/` 兜底与 installer jar 的排除、Paper 的 `server:mojang` 为什么是伪问题）
 - `docs/45-android-yunxingshi.md`：**安卓端的 Java 运行时这一层**（为什么安卓不能跑 `java -version` 只能读 `release` 文件、`isInstalled` 与 `canLaunch` 为什么是两条判据、`component` 里的 ABI 约定、把「启动翻译成命令行」抽到 `core/launch/LaunchPlanner.kt` 的理由与它承诺不写盘、`OsFamily` 里为什么还没有 `ANDROID`）
+- `docs/46-zhenghebao-daochu.md`：**整合包导出**（MCBBS v2 与 Modrinth 不是「压缩方式不同」而是「谁持有文件」、三种元数据为什么一句都不能混写、`addons` 用短名而 `modLoaders` 用短名加版本、存档默认不打、sha512 为什么自己算、`downloads` 里 Modrinth 的 CDN 排最后）
 - `docs/47-cundang-guanli.md`：**存档管理**（`level.dat` 的 NBT 为什么自己读、读不出来为什么不算错误、删除为什么永远先备份、备份为什么是一个 zip 而不是一份目录、还原为什么默认不覆盖且名字可改、备份与世界为什么分成两张卡）
 - `docs/48-fuwuduan-peizhi.md`：**服务端配置页**（`server.properties` 为什么按行保留而不是读成 Map、值里的换行为什么要压平、为什么只放 18 个键、白名单与 OP 的 UUID 从哪来且「网络不通」与「这个正版账号不存在」为什么要分开说、`[]` 为什么不是空文件、端口解析为什么只剩一份）
-- `docs/46-zhenghebao-daochu.md`：**整合包导出**（MCBBS v2 与 Modrinth 不是「压缩方式不同」而是「谁持有文件」、三种元数据为什么一句都不能混写、`addons` 用短名而 `modLoaders` 用短名加版本、存档默认不打、sha512 为什么自己算、`downloads` 里 Modrinth 的 CDN 排最后）
+- `docs/49-xiazaiyuan.md`：**下载源偏好**（为什么只有「顺序」两个选项而没有「只用官方源」、为什么做成进程级全局量而不是一路透传、两个接入点为什么就够、镜像主机名两个方向都要卡、排序为什么必须是稳定的）
 
 ## 下载
 
@@ -158,7 +159,7 @@ M0（骨架）+ M1（实例扫描）+ M2（下载器）+ M3（**Windows 一键�
 
 **下载断点续传**：先写 `<文件>.part`，校验通过才转正；`.part` 有内容就发 `Range` 接着下，断网不清半成品，下次自动接上。进度条会额外显示「其中 N 个接着上次下（省了 M MB）」（`docs/14`）。
 
-单测 **765 例全过**（65 个测试类，`./gradlew :core:test :ui:jvmTest`；`ui` 从这一版起有 `jvmTest` 源集，格式化函数与导航常量也进单测了）。另有十二个无头冒烟任务（`e2eInstall` / `settingsSmoke` / `instanceFlowSmoke` / `resumeSmoke` / `deleteSmoke` / `fabricE2e` / `modpackE2e` / `forgeE2e` / `neoForgeE2e` / `modsE2e` / `modUpdateE2e` / `isolationSmoke`），走的是界面按钮同一批函数；`resumeSmoke` / `fabricE2e` / `modpackE2e` / `forgeE2e` / `neoForgeE2e` / `modsE2e` 需要联网，分别在空目录真装 Fabric、真跑 Forge 与 NeoForge 官方安装器、真从 Modrinth 下模组、真把一个 `.mrpack` 从解析装到进主菜单；`deleteSmoke` 在 `dist/_delete-smoke` 里全程造假数据，不碰真实 `.minecraft`。
+单测 **778 例全过**（66 个测试类，`./gradlew :core:test :ui:jvmTest`；`ui` 从这一版起有 `jvmTest` 源集，格式化函数与导航常量也进单测了）。另有十二个无头冒烟任务（`e2eInstall` / `settingsSmoke` / `instanceFlowSmoke` / `resumeSmoke` / `deleteSmoke` / `fabricE2e` / `modpackE2e` / `forgeE2e` / `neoForgeE2e` / `modsE2e` / `modUpdateE2e` / `isolationSmoke`），走的是界面按钮同一批函数；`resumeSmoke` / `fabricE2e` / `modpackE2e` / `forgeE2e` / `neoForgeE2e` / `modsE2e` 需要联网，分别在空目录真装 Fabric、真跑 Forge 与 NeoForge 官方安装器、真从 Modrinth 下模组、真把一个 `.mrpack` 从解析装到进主菜单；`deleteSmoke` 在 `dist/_delete-smoke` 里全程造假数据，不碰真实 `.minecraft`。
 
 **能装 Fabric 了**：下载页勾「顺带装 Fabric」→ 拉 meta.fabricmc.net 的 loader 列表（默认落在最新 stable）→ 装 profile json（只改 `id`，保留 `inheritsFrom`）→ 按 maven 坐标补全 8 个库的地址并下载 → 登记成 `1.20.1-fabric-0.20.1` 这样的实例。实测空目录全流程 4 分 29 秒进主菜单，日志首行 `Loading Minecraft 1.20.1 with Fabric Loader 0.20.1`（`docs/15`）。
 
@@ -182,6 +183,7 @@ M0（骨架）+ M1（实例扫描）+ M2（下载器）+ M3（**Windows 一键�
 
 **服务端能配了**：以前服务端页只有「装一个、点启动、看控制台」，想改端口、改游戏模式、给朋友加白名单，只能自己开记事本改 `server.properties`、手写 `whitelist.json`。现在服务端列表每行多一个「配置」：18 个真正影响玩法的键做成了对应控件（数字框、勾选框、一排小按钮、整行输入框），带范围校验；白名单与管理员两张卡能加人、能撤，加人时去查 Mojang 档案接口拿正版 UUID，查不到按离线规则算。三个规矩：**服务端在跑时配置页只读**（它把 properties 读进内存、退出时按自己顺序写回，我们改盘上的文件会被盖掉，用户看到的是「改了没生效」）；白名单与 OP 在跑时要走控制台命令（文件改了也要重启才认，提示里直接给出该发哪条命令）；改完 properties 明说「重启才生效」。`server.properties` **按行保留**而不是读成 Map 再写回 —— 服务端会重排键、里面还夹着用户手写的注释与被 `#` 注释掉的旧值，读成 Map 写回去这些全会消失，用户改一个端口发现整个文件被重排就不敢点第二次了（`docs/48`）。
 
+**国内网络可以优先走镜像了**：以前所有下载都是「官方源排第一、镜像当兜底」写死在代码里，国内网络下每个文件都要先等官方源超时（连接 15 秒、读取 60 秒）再换镜像重来一遍。现在「设置 → 下载」两行选项，点一下立刻生效并落盘。只有「自动（官方源优先）」与「优先国内镜像」两个，**没有「只用官方源」**——那等于把兜底关掉，官方源被墙时用户就只剩一根不动的进度条。两者的差别只是顺序，镜像挂了照样退回官方源，镜像内容坏掉靠 sha1 校验兜住。偏好做成进程级的 `DownloadPreference` 而不是一路透传参数：这条链有十几层（界面 → 各类安装器 → 下载器），漏传一处不会编译报错，只表现为「设置了没用」。两个接入点就覆盖全部 —— 文件走 `HttpDownloader.fetch()`，文本接口（版本清单、安装器清单）走 `VanillaInstaller.fetchText()`；后者容易被漏掉，但它被墙时发生得更早，清单拉不下来后面的文件根本没机会开始。认镜像不能简单 `contains`：`evilbmclapi2.bangbang93.com` 与 `bmclapi2.bangbang93.com.evil.cn` 两方向都得判否，各有单测盯着（`docs/49`）。
 **导入完会自己复核一遍磁盘**：以前「导入完成」只看流程有没有抛异常——切个页面就把导入协程砍了，`.part` 留在磁盘上，界面却停在「已完成 X / Y 个文件」看着像装完了（实测那次 77 个文件只落 76 个，缺的正是 139,966,403 字节的 Cobblemon 本体）。现在下完所有文件后按清单再核一遍：先比大小（`.mrpack` 基本都带 `fileSize`，77 个文件 650 MB 只要几毫秒），清单没写大小时才读盘算 sha1；对不上就收集成清单，标题从「导入完成」改成「导入没装齐」并逐个列出原因（半成品会写明「只下到一半（49.2 MB / 133.5 MB）」）。取消也不再静默：界面明确写「导入已中断（停在「下载整合包文件」）」，重试自动续上没下完的那几个（`docs/32`）。
 
 **崩了会告诉你为什么**：游戏非正常退出时读实例 `crash-reports/` 里最新一份报告，卡片上给文件名、时间、大小、`Description:` 那句和第一个异常，可展开全文 / 复制全文 / 打开目录。两道闸防误报：退出码 0 不读、报告 mtime 必须不早于本次启动（留 5 秒余量），否则实例上次崩过会把旧报告挂成新的。归因规则新增「模组冲突或缺依赖」与「模组文件损坏」两条，且必须排在「加载器未能启动」之前——缺前置的日志后面必跟 `NoClassDefFoundError: cpw/mods` 连带噪声。日志区同时补了复制 / 导出 / 打开崩溃目录（`docs/26`）。

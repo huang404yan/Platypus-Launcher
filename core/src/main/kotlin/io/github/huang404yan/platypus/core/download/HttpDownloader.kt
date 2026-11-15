@@ -156,10 +156,9 @@ class HttpDownloader(
             }
         }
 
-        val candidates = buildList {
-            if (item.url.isNotBlank()) add(item.url)
-            addAll(item.mirrors.filter { it.isNotBlank() && it != item.url })
-        }.distinct()
+        // 候选顺序由进程级的下载源偏好决定：用户选了「优先国内镜像」时镜像排前面，
+        // 否则维持「官方源在前、失败再换镜像」的老行为。
+        val candidates = DownloadSources.order(item.url, item.mirrors, DownloadPreference.source)
         if (candidates.isEmpty()) return FetchOutcome("没有可用的下载地址")
 
         var lastReason = "下载失败"
