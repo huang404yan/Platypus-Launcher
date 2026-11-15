@@ -117,6 +117,7 @@ Windows 下也可以用 `gradlew.bat`。首次构建会下载约 300 MB 依赖�
 - `docs/47-cundang-guanli.md`：**存档管理**（`level.dat` 的 NBT 为什么自己读、读不出来为什么不算错误、删除为什么永远先备份、备份为什么是一个 zip 而不是一份目录、还原为什么默认不覆盖且名字可改、备份与世界为什么分成两张卡）
 - `docs/48-fuwuduan-peizhi.md`：**服务端配置页**（`server.properties` 为什么按行保留而不是读成 Map、值里的换行为什么要压平、为什么只放 18 个键、白名单与 OP 的 UUID 从哪来且「网络不通」与「这个正版账号不存在」为什么要分开说、`[]` 为什么不是空文件、端口解析为什么只剩一份）
 - `docs/49-xiazaiyuan.md`：**下载源偏好**（为什么只有「顺序」两个选项而没有「只用官方源」、为什么做成进程级全局量而不是一路透传、两个接入点为什么就够、镜像主机名两个方向都要卡、排序为什么必须是稳定的）
+- `docs/50-gengxin-jiancha.md`：**检查更新**（为什么只查不换、通道规则「孵化版才看预发布」、版本号为什么不能按字符串比、限流与 404 各说什么、说明只显示开头）
 
 ## 下载
 
@@ -159,7 +160,7 @@ M0（骨架）+ M1（实例扫描）+ M2（下载器）+ M3（**Windows 一键�
 
 **下载断点续传**：先写 `<文件>.part`，校验通过才转正；`.part` 有内容就发 `Range` 接着下，断网不清半成品，下次自动接上。进度条会额外显示「其中 N 个接着上次下（省了 M MB）」（`docs/14`）。
 
-单测 **778 例全过**（66 个测试类，`./gradlew :core:test :ui:jvmTest`；`ui` 从这一版起有 `jvmTest` 源集，格式化函数与导航常量也进单测了）。另有十二个无头冒烟任务（`e2eInstall` / `settingsSmoke` / `instanceFlowSmoke` / `resumeSmoke` / `deleteSmoke` / `fabricE2e` / `modpackE2e` / `forgeE2e` / `neoForgeE2e` / `modsE2e` / `modUpdateE2e` / `isolationSmoke`），走的是界面按钮同一批函数；`resumeSmoke` / `fabricE2e` / `modpackE2e` / `forgeE2e` / `neoForgeE2e` / `modsE2e` 需要联网，分别在空目录真装 Fabric、真跑 Forge 与 NeoForge 官方安装器、真从 Modrinth 下模组、真把一个 `.mrpack` 从解析装到进主菜单；`deleteSmoke` 在 `dist/_delete-smoke` 里全程造假数据，不碰真实 `.minecraft`。
+单测 **791 例全过**（67 个测试类，`./gradlew :core:test :ui:jvmTest`；`ui` 从这一版起有 `jvmTest` 源集，格式化函数与导航常量也进单测了）。另有十二个无头冒烟任务（`e2eInstall` / `settingsSmoke` / `instanceFlowSmoke` / `resumeSmoke` / `deleteSmoke` / `fabricE2e` / `modpackE2e` / `forgeE2e` / `neoForgeE2e` / `modsE2e` / `modUpdateE2e` / `isolationSmoke`），走的是界面按钮同一批函数；`resumeSmoke` / `fabricE2e` / `modpackE2e` / `forgeE2e` / `neoForgeE2e` / `modsE2e` 需要联网，分别在空目录真装 Fabric、真跑 Forge 与 NeoForge 官方安装器、真从 Modrinth 下模组、真把一个 `.mrpack` 从解析装到进主菜单；`deleteSmoke` 在 `dist/_delete-smoke` 里全程造假数据，不碰真实 `.minecraft`。
 
 **能装 Fabric 了**：下载页勾「顺带装 Fabric」→ 拉 meta.fabricmc.net 的 loader 列表（默认落在最新 stable）→ 装 profile json（只改 `id`，保留 `inheritsFrom`）→ 按 maven 坐标补全 8 个库的地址并下载 → 登记成 `1.20.1-fabric-0.20.1` 这样的实例。实测空目录全流程 4 分 29 秒进主菜单，日志首行 `Loading Minecraft 1.20.1 with Fabric Loader 0.20.1`（`docs/15`）。
 
@@ -187,6 +188,12 @@ M0（骨架）+ M1（实例扫描）+ M2（下载器）+ M3（**Windows 一键�
 **导入完会自己复核一遍磁盘**：以前「导入完成」只看流程有没有抛异常——切个页面就把导入协程砍了，`.part` 留在磁盘上，界面却停在「已完成 X / Y 个文件」看着像装完了（实测那次 77 个文件只落 76 个，缺的正是 139,966,403 字节的 Cobblemon 本体）。现在下完所有文件后按清单再核一遍：先比大小（`.mrpack` 基本都带 `fileSize`，77 个文件 650 MB 只要几毫秒），清单没写大小时才读盘算 sha1；对不上就收集成清单，标题从「导入完成」改成「导入没装齐」并逐个列出原因（半成品会写明「只下到一半（49.2 MB / 133.5 MB）」）。取消也不再静默：界面明确写「导入已中断（停在「下载整合包文件」）」，重试自动续上没下完的那几个（`docs/32`）。
 
 **崩了会告诉你为什么**：游戏非正常退出时读实例 `crash-reports/` 里最新一份报告，卡片上给文件名、时间、大小、`Description:` 那句和第一个异常，可展开全文 / 复制全文 / 打开目录。两道闸防误报：退出码 0 不读、报告 mtime 必须不早于本次启动（留 5 秒余量），否则实例上次崩过会把旧报告挂成新的。归因规则新增「模组冲突或缺依赖」与「模组文件损坏」两条，且必须排在「加载器未能启动」之前——缺前置的日志后面必跟 `NoClassDefFoundError: cpw/mods` 连带噪声。日志区同时补了复制 / 导出 / 打开崩溃目录（`docs/26`）。
+
+**能看到有没有新版了**：关于页上多了一块「更新」，进去就自动问一次 GitHub。查到就显示版本号、发布日期、说明开头几行，以及「下载 .msi」「下载 .zip」「打开发布页」三个按钮；查不到就把原因写在原地（限流、404、断网各有各的话）。
+
+它**只回答、不替你办**：不自动下载，更不会把自己换掉。原因很实际——Windows 上正在跑的 exe 是被占用的，自我替换要处理改名、断电、回滚；而一旦换上一个起不来的新版，用户手里那个能用的程序已经没了，**打不开的启动器没法靠自己修回来**。卡片上这句也写着。
+
+通道规则跟着版本号走：版本里带 `-preview` 的才看 Pre-release，正式版不看，否则稳定版用户天天收到实验包提醒；草稿哪条通道都不算。版本号按段比而不是按字符串比——字符串会得出 `preview.9 > preview.10` 这种结论，正式版还要比同号的预发布新。
 
 **日志里的中文不再是方块**：以前游戏按 GBK 往 stdout 写、启动器按 UTF-8 解，中文全变成 一串替换符，字节当场丢失。现在两头都改：给 JVM 传 `-Dstdout.encoding=UTF-8` 与 `-Dfile.encoding=UTF-8`（JDK 18+ 只认前者、17 及更早只认后者），读侧再补一个「先严格试 UTF-8、不合法就整行退回 GBK」的 `LogLineReader`。实测 1.20.1 + Forge 47 模组环境，导出日志 35 137 B / 244 行 / `U+FFFD` 计数 0，原先那条全是方块的声音设备名已经完整显示为「扬声器 (适用于 I2S 音频的英特尔® 智音技术)」（`docs/27`）。
 

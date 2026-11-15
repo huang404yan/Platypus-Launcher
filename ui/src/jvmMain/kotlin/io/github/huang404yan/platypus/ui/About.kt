@@ -64,6 +64,9 @@ fun AboutPage() {
         InfoRow("仓库", Brand.HOMEPAGE)
 
         Spacer(Modifier.height(4.dp))
+        UpdateSection()
+
+        Spacer(Modifier.height(4.dp))
         HorizontalDivider()
 
         CreditsSection()
