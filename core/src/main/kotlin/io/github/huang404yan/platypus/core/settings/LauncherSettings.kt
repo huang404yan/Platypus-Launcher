@@ -75,6 +75,14 @@ data class LauncherSettings(
      * 没填时导出照样能导，只是 manifest.json 的 files 列表空着（文件全在 overrides/ 里）。
      */
     val curseForgeApiKey: String = "",
+    /**
+     * 首次启动引导走完的时刻（毫秒）；0 表示还没走过。
+     *
+     * 用时间戳而不是一个布尔：布尔能回答「走没走过」，时间戳还能回答「什么时候装的」。
+     * 后者在排查「我明明登录过，为什么又弹窗」时是唯一的线索 —— 常见原因是游戏目录换了，
+     * 而 settings.json 是跟着游戏目录走的（见 [io.github.huang404yan.platypus.core.edition.FirstRun]）。
+     */
+    val firstRunAt: Long = 0L,
     /** 最近一次写盘时间（毫秒）；0 表示还没写过。 */
     val updatedAt: Long = 0L,
 ) {
@@ -96,6 +104,8 @@ data class LauncherSettings(
             theme = raw.theme.trim().lowercase(),
             downloadSource = raw.downloadSource.trim().lowercase(),
             curseForgeApiKey = raw.curseForgeApiKey.trim().trim('"').trim(),
+            // 负数一律当没走过：时间戳只可能从 0 往上长，负值是手改文件或写坏的结果。
+            firstRunAt = raw.firstRunAt.coerceAtLeast(0L),
             autoBackupHours = raw.autoBackupHours.coerceIn(
                 AutoBackupPolicy.INTERVAL_RANGE.first,
                 AutoBackupPolicy.INTERVAL_RANGE.last,

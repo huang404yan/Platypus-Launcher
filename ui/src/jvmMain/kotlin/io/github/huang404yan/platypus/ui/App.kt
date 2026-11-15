@@ -185,6 +185,15 @@ fun App(
                 }
             }
         }
+
+        // 首次启动挡在最前面。放在 Row 之后而不是之前：它是覆盖式的弹窗，
+        // 底下的页面照常创建，用户在弹窗里犹豫时背景不是一片空白。
+        // 「去登录」只切一级页不够 —— 不选二级项的话用户会落在「设置 → 启动」上，
+        // 找不到填应用 ID 的那张卡（这个问题在帮助页那儿已经踩过一次）。
+        FirstRunGate(backend) {
+            subSelection[Page.SETTINGS.name] = SETTINGS_TAB_ACCOUNT
+            page = Page.SETTINGS
+        }
     }
 }
 
