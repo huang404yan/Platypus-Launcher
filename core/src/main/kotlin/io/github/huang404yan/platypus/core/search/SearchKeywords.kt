@@ -166,6 +166,70 @@ object SearchKeywords {
         SearchTerm("砍树", "fallingtree", SearchTerm.Kind.MOD),
         SearchTerm("一键砍树", "fallingtree", SearchTerm.Kind.MOD),
 
+        // —— 科技与魔法（老牌大模组，中文叫法对不上英文名）——
+        SearchTerm("工业时代2", "industrialcraft", SearchTerm.Kind.MOD),
+        SearchTerm("工业2", "industrialcraft", SearchTerm.Kind.MOD),
+        SearchTerm("工业模组", "industrialcraft", SearchTerm.Kind.MOD),
+        SearchTerm("格雷科技", "gregtech", SearchTerm.Kind.MOD),
+        SearchTerm("等价交换", "projecte", SearchTerm.Kind.MOD),
+        SearchTerm("转换桌", "projecte", SearchTerm.Kind.MOD),
+        SearchTerm("龙之研究", "draconic-evolution", SearchTerm.Kind.MOD),
+        SearchTerm("龙研", "draconic-evolution", SearchTerm.Kind.MOD),
+        SearchTerm("星辉魔法", "astral-sorcery", SearchTerm.Kind.MOD),
+        SearchTerm("星空", "ad-astra", SearchTerm.Kind.MOD),
+        SearchTerm("宇航", "ad-astra", SearchTerm.Kind.MOD),
+
+        // —— 冒险、地牢与地形 ——
+        SearchTerm("超多生物群系", "biomes-o-plenty", SearchTerm.Kind.MOD),
+        SearchTerm("更多生物群系", "biomes-o-plenty", SearchTerm.Kind.MOD),
+        SearchTerm("你将要去的地方", "byg", SearchTerm.Kind.MOD),
+        SearchTerm("byg", "byg", SearchTerm.Kind.MOD),
+        SearchTerm("更好的地牢", "yungs-better-dungeons", SearchTerm.Kind.MOD),
+        SearchTerm("地牢生成", "when-dungeons-arise", SearchTerm.Kind.MOD),
+        SearchTerm("结构生成", "structory", SearchTerm.Kind.MOD),
+        SearchTerm("遗迹", "structory", SearchTerm.Kind.MOD),
+
+        // —— 装备、背包与生活 ——
+        SearchTerm("传送石碑", "waystones", SearchTerm.Kind.MOD),
+        SearchTerm("传送点", "waystones", SearchTerm.Kind.MOD),
+        SearchTerm("自然罗盘", "natures-compass", SearchTerm.Kind.MOD),
+        SearchTerm("生物罗盘", "natures-compass", SearchTerm.Kind.MOD),
+        SearchTerm("时间之瓶", "time-in-a-bottle", SearchTerm.Kind.MOD),
+        SearchTerm("旅行者背包", "travelers-backpack", SearchTerm.Kind.MOD),
+        SearchTerm("末影存储", "enderstorage", SearchTerm.Kind.MOD),
+        SearchTerm("末影箱升级", "enderstorage", SearchTerm.Kind.MOD),
+        SearchTerm("附魔描述", "enchantment-descriptions", SearchTerm.Kind.MOD),
+        SearchTerm("附魔说明", "enchantment-descriptions", SearchTerm.Kind.MOD),
+        SearchTerm("更多附魔", "apotheosis", SearchTerm.Kind.MOD),
+        SearchTerm("神秘农业", "mystical-agriculture", SearchTerm.Kind.MOD),
+        SearchTerm("潘马斯", "pams-harvestcraft", SearchTerm.Kind.MOD),
+        SearchTerm("农场物语", "pams-harvestcraft", SearchTerm.Kind.MOD),
+        SearchTerm("烹饪", "cooking-for-blockheads", SearchTerm.Kind.MOD),
+        SearchTerm("自动农场", "smart-farm", SearchTerm.Kind.MOD),
+        SearchTerm("耐久显示", "durability-viewer", SearchTerm.Kind.MOD),
+        SearchTerm("全亮度", "gamma-utils", SearchTerm.Kind.MOD),
+        SearchTerm("自动钓鱼", "autofish", SearchTerm.Kind.MOD),
+        SearchTerm("砍树辅助", "treecapitator", SearchTerm.Kind.MOD),
+        SearchTerm("进度扩展", "better-advancements", SearchTerm.Kind.MOD),
+        SearchTerm("任务书", "ftb-quests", SearchTerm.Kind.MOD),
+        SearchTerm("背包整理", "inventory-sorter", SearchTerm.Kind.MOD),
+        SearchTerm("自动整理", "inventory-profiles-next", SearchTerm.Kind.MOD),
+        SearchTerm("平滑字体", "smooth-font", SearchTerm.Kind.MOD),
+        SearchTerm("漏斗过滤", "hopper-filter", SearchTerm.Kind.MOD),
+        SearchTerm("机械动力航空", "create-aeronautics", SearchTerm.Kind.MOD),
+        SearchTerm("机械动力火车", "create-steam-n-rails", SearchTerm.Kind.MOD),
+
+        // —— 音效与氛围 ——
+        SearchTerm("声音物理", "sound-physics-remastered", SearchTerm.Kind.MOD),
+        SearchTerm("脚步声", "presence-footsteps", SearchTerm.Kind.MOD),
+        SearchTerm("环境音效", "ambientsounds", SearchTerm.Kind.MOD),
+        SearchTerm("洞穴音效", "ambientsounds", SearchTerm.Kind.MOD),
+        SearchTerm("披风", "capes", SearchTerm.Kind.MOD),
+        SearchTerm("聊天改善", "chattweaks", SearchTerm.Kind.MOD),
+
+        // —— 服务器与多人 ——
+        SearchTerm("语音聊天", "simple-voice-chat", SearchTerm.Kind.MOD),
+        SearchTerm("权限管理", "luckperms", SearchTerm.Kind.MOD),
         // —— 前置与开发 ——
         SearchTerm("前置", "fabric-api", SearchTerm.Kind.MOD),
         SearchTerm("模组前置", "fabric-api", SearchTerm.Kind.MOD),
@@ -234,16 +298,18 @@ object SearchKeywords {
     )
 
     /**
-     * 这条查询里有没有「一个拉丁字母或数字都没有」。
+     * 这条查询是不是「中文里可能夹着数字」而不是「已经写了英文」。
      *
-     * 只判 CJK 不算数：用户可能连着标点一起粘进来（「钠？！」），那也应当当纯中文处理。
-     * 反过来「sodium 钠」这种混写不能提示，用户已经写了英文，直接搜就行。
+     * 判据是「有 CJK 且一个拉丁字母都没有」。数字刻意不算拉丁字母：社区里最常见的叫法
+     * 本身就带编号 ——「工业2」「匠魂3」「应用能源2」，这类查询原样退化成「搜不到」很冤。
+     * 标点同理（「钠？！」应当当纯中文）。反过来「sodium 钠」这种真的写了英文的不提示，
+     * 用户已经给了能搜的词，直接搜就行。
      */
     fun looksCjk(query: String): Boolean {
         var hasCjk = false
         for (ch in query) {
             when {
-                ch in 'a'..'z' || ch in 'A'..'Z' || ch in '0'..'9' -> return false
+                ch in 'a'..'z' || ch in 'A'..'Z' -> return false
                 isCjk(ch) -> hasCjk = true
             }
         }

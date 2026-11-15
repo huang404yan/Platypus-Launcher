@@ -154,7 +154,7 @@ M0（骨架）+ M1（实例扫描）+ M2（下载器）+ M3（**Windows 一键�
 
 **下载断点续传**：先写 `<文件>.part`，校验通过才转正；`.part` 有内容就发 `Range` 接着下，断网不清半成品，下次自动接上。进度条会额外显示「其中 N 个接着上次下（省了 M MB）」（`docs/14`）。
 
-单测 **672 例全过**（58 个测试类，`./gradlew :core:test :ui:jvmTest`；`ui` 从这一版起有 `jvmTest` 源集，格式化函数与导航常量也进单测了）。另有十二个无头冒烟任务（`e2eInstall` / `settingsSmoke` / `instanceFlowSmoke` / `resumeSmoke` / `deleteSmoke` / `fabricE2e` / `modpackE2e` / `forgeE2e` / `neoForgeE2e` / `modsE2e` / `modUpdateE2e` / `isolationSmoke`），走的是界面按钮同一批函数；`resumeSmoke` / `fabricE2e` / `modpackE2e` / `forgeE2e` / `neoForgeE2e` / `modsE2e` 需要联网，分别在空目录真装 Fabric、真跑 Forge 与 NeoForge 官方安装器、真从 Modrinth 下模组、真把一个 `.mrpack` 从解析装到进主菜单；`deleteSmoke` 在 `dist/_delete-smoke` 里全程造假数据，不碰真实 `.minecraft`。
+单测 **675 例全过**（58 个测试类，`./gradlew :core:test :ui:jvmTest`；`ui` 从这一版起有 `jvmTest` 源集，格式化函数与导航常量也进单测了）。另有十二个无头冒烟任务（`e2eInstall` / `settingsSmoke` / `instanceFlowSmoke` / `resumeSmoke` / `deleteSmoke` / `fabricE2e` / `modpackE2e` / `forgeE2e` / `neoForgeE2e` / `modsE2e` / `modUpdateE2e` / `isolationSmoke`），走的是界面按钮同一批函数；`resumeSmoke` / `fabricE2e` / `modpackE2e` / `forgeE2e` / `neoForgeE2e` / `modsE2e` 需要联网，分别在空目录真装 Fabric、真跑 Forge 与 NeoForge 官方安装器、真从 Modrinth 下模组、真把一个 `.mrpack` 从解析装到进主菜单；`deleteSmoke` 在 `dist/_delete-smoke` 里全程造假数据，不碰真实 `.minecraft`。
 
 **能装 Fabric 了**：下载页勾「顺带装 Fabric」→ 拉 meta.fabricmc.net 的 loader 列表（默认落在最新 stable）→ 装 profile json（只改 `id`，保留 `inheritsFrom`）→ 按 maven 坐标补全 8 个库的地址并下载 → 登记成 `1.20.1-fabric-0.20.1` 这样的实例。实测空目录全流程 4 分 29 秒进主菜单，日志首行 `Loading Minecraft 1.20.1 with Fabric Loader 0.20.1`（`docs/15`）。
 
@@ -202,7 +202,7 @@ M0（骨架）+ M1（实例扫描）+ M2（下载器）+ M3（**Windows 一键�
 
 **关于页有开源致谢了**：分四组写清「使用了代码 / 设计参考（未使用代码）/ 格式与协议 / 运行时依赖」。PCL2 是专有许可、HMCL 与 Prism 是 GPL-3.0，本项目一行没抄，所以「使用了代码」这一组是空的——空着是有意的，不是漏写，单测里就有一条断言盯着它：一旦有人真的搬了实现，这条会变红，提醒同时改仓库根 `NOTICE`。致谢数据在 `core/Credits.kt`，关于页与 `NOTICE` 同源，不会出现「界面说没抄、NOTICE 里写着抄了」。
 
-**中文搜索**：Modrinth 只认英文名与 slug，直接搜「钠」什么也搜不到。PCL 能做到是因为它内置了一份 3 万余行的中文名数据库（`PCLCS/Resource/WikiEntries.txt`），而 `pcl-src` 没有 LICENSE 文件、许可状态不明，不能直接拷进本项目。这里改成手写 140 余条常用中英对照（`core/search/SearchKeywords.kt`，每条 slug 都用 Modrinth 的 `/search` 实测过「搜出来非空」）：输入中文时界面直接说明「搜不到是因为 Modrinth 不认中文」，并给一组可点的英文候选 chip，点一下替换关键词；输入框为空时给这一类热门词（`docs/35`）。
+**中文搜索**：Modrinth 只认英文名与 slug，直接搜「钠」什么也搜不到。PCL 能做到是因为它内置了一份 3 万余行的中文名数据库（`PCLCS/Resource/WikiEntries.txt`），而 `pcl-src` 没有 LICENSE 文件、许可状态不明，不能直接拷进本项目。这里改成手写 200 余条常用中英对照（这一版从 153 条扩到 208 条）（`core/search/SearchKeywords.kt`，每条 slug 都用 Modrinth 的 `/search` 实测过「搜出来非空」—— 这一批新增 60 余条时又跑了一遍 141 个 slug 的并发核对，0 条空结果）：输入中文时界面直接说明「搜不到是因为 Modrinth 不认中文」，并给一组可点的英文候选 chip，点一下替换关键词；输入框为空时给这一类热门词（`docs/35`）。这一批还改掉一个判据 bug：原来把「数字」也算成英文，于是「工业2」「匠魂3」「应用能源2」这些自带编号的常用叫法全被当成英文查询发给 Modrinth，悄悄返回空列表 —— 现在只有真正的拉丁字母才算英文（`docs/44` 之前的搜索段没写这件事，记在这条里）。
 
 **整合包之外还能装数据包与服务端了**：下载栏按 PCL 的分法补了两项。数据包和资源包共用同一套扫描/安装代码（`datapacks/` + `loaders=["datapack"]`），中文词典跟着加了 11 条。
 

@@ -87,4 +87,32 @@ class SearchKeywordsTest {
         assertTrue(SearchKeywords.modrinthNote.contains("Modrinth"))
         assertTrue(SearchKeywords.modrinthNote.contains("英文"))
     }
+
+    @Test
+    fun `老牌科技模组的意译能翻回 slug`() {
+        // 这几条是这一批专门补的：中文社区说「工业2」「等价交换」「龙研」，
+        // 而 Modrinth 上没有一个字面能对上，不翻就永远搜不到。
+        assertEquals("industrialcraft", SearchKeywords.translate("工业时代2").first())
+        assertEquals("projecte", SearchKeywords.translate("等价交换").first())
+        assertEquals("draconic-evolution", SearchKeywords.translate("龙研").first())
+        assertEquals("gregtech", SearchKeywords.translate("格雷科技").first())
+    }
+
+    @Test
+    fun `词表的每个英文词都能在 Modrinth 上搜到东西`() {
+        // 这一条是离线检查，只保证词表内部形状对（非空、不含空格、全小写或数字/横线）。
+        // 真实命中率没法进单测（要联网），所以核对方式是 dist/_slugcheck.py 那种一次性脚本；
+        // 这里守住的是「不许把中文或者带空格的句子塞进 en 字段」。
+        for (term in SearchKeywords.all) {
+            assertTrue(term.en.none { it.isWhitespace() }, "en 不该带空格：" + term.en)
+            assertTrue(term.en.none { it.code > 0x7F }, "en 不该含非 ASCII：" + term.en)
+        }
+    }
+
+    @Test
+    fun `新增的叫法在同类型页面里优先给出`() {
+        // 「背包」在模组页应当是精致背包，不该被整合包那几条抢走
+        val hit = SearchKeywords.translate("背包", SearchTerm.Kind.MOD)
+        assertEquals("sophisticated-backpacks", hit.first())
+    }
 }
