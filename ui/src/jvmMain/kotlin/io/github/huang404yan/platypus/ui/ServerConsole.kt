@@ -31,6 +31,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import io.github.huang404yan.platypus.core.install.ServerInstaller
 import io.github.huang404yan.platypus.core.install.ServerPorts
+import io.github.huang404yan.platypus.core.server.RconClient
+import io.github.huang404yan.platypus.core.server.ServerProperties
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -56,6 +58,13 @@ internal data class ServerConsoleState(
     val lines: List<String> = emptyList(),
     val exitCode: Int? = null,
     val notice: String = "",
+    /**
+     * 命令走哪条通道。空串 = 还没定（刚起、正在试 RCON）。
+     *
+     * 这不是给日志看的，是给用户看「我发的命令到底送到哪去了」：
+     * 走标准输入时只有**我们自己起的那个进程**收得到，用户用 start.bat 另开的服发命令是没反应的。
+     */
+    val channel: String = "",
 )
 
 /**
@@ -79,6 +88,18 @@ internal object ServerRuntime {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var process: Process? = null
+
+    /** 两条命令通道的名字，state.channel 用它。 */
+    private const val RCON_CHANNEL = "RCON"
+    private const val STDIN_CHANNEL = "标准输入"
+
+    /** 等服务端把 RCON 端口监听起来，最长等这么久。世界加载慢的服要十几秒。 */
+    private const val RCON_ATTACH_TIMEOUT_MS = 25_000L
+    private const val RCON_RETRY_MILLIS = 700L
+
+    /** 连上之后的 RCON 连接；为 null 表示走标准输入。 */
+    @Volatile
+    private var rcon: RconClient? = null
 
     /**
      * 需要一直留在屏幕上的提示（目前只有端口绑不上这一种）。
@@ -168,6 +189,46 @@ internal object ServerRuntime {
         _state.update { it.copy(starting = false, running = true) }
         scope.launch { pump(p) }
         scope.launch { watch(p) }
+        scope.launch { attachRcon(dir) }
+    }
+
+    /**
+     * 试着接管一条 RCON 通道。
+     *
+     * 为什么值得多这一步：走进程的标准输入时，命令只有**我们自己起的那个进程**收得到。
+     * 用户双击 start.bat 起的、或者用别的启动器起的服，我们手上没有它的 stdin；
+     * RCON 是 TCP，只要服务端开了就能连，跟谁起的无关。
+     *
+     * 拿不到不算失败：绝大多数服没开 RCON（原版默认是关的），那就老老实实走标准输入，
+     * 界面上把通道写清楚，用户至少知道「为什么我这台机器能发命令、那台不行」。
+     */
+    private suspend fun attachRcon(dir: File) {
+        val settings = runCatching { RconClient.settingsOf(dir) }.getOrNull() ?: return
+        if (!settings.usable) {
+            _state.update { it.copy(channel = STDIN_CHANNEL) }
+            return
+        }
+        // 服务端要先把世界加载完才监听 RCON 端口，刚起那几秒连不上是正常的，重试到超时。
+        val deadline = System.currentTimeMillis() + RCON_ATTACH_TIMEOUT_MS
+        while (System.currentTimeMillis() < deadline) {
+            val alive = process?.isAlive == true
+            if (!alive) return
+            val client = runCatching {
+                withContext(Dispatchers.IO) {
+                    RconClient(port = settings.port, password = settings.password).connect()
+                }
+            }.getOrNull()
+            if (client != null) {
+                rcon = client
+                _state.update { it.copy(channel = RCON_CHANNEL) }
+                append("[本地] 已接上 RCON（127.0.0.1:" + settings.port + "），之后的命令走它")
+                return
+            }
+            kotlinx.coroutines.delay(RCON_RETRY_MILLIS)
+        }
+        // 到点了还没连上：可能是密码不对，也可能 RCON 就没真开起来。不打断开服，只说明一句。
+        _state.update { it.copy(channel = STDIN_CHANNEL) }
+        append("[本地] RCON 连不上（127.0.0.1:" + settings.port + "），命令改走标准输入")
     }
 
     /** 读输出。脚本结尾那句「按任意键关闭窗口」是判断 java 已退出的信号。 */
@@ -197,21 +258,50 @@ internal object ServerRuntime {
         if (!ok) return
         val code = runCatching { p.exitValue() }.getOrDefault(-1)
         append("[退出] 退出码 " + code)
-        _state.update { it.copy(running = false, exitCode = code) }
+        // 连接必须主动关：服务端没了之后那条 socket 只会一直挂着，下次开服还指着这个死连接发命令。
+        closeRcon()
+        _state.update { it.copy(running = false, exitCode = code, channel = "") }
         process = null
     }
 
     fun send(text: String) {
-        val p = process ?: return
         val command = text.trim()
         if (command.isEmpty()) return
         append("[本地] " + command)
+        val channel = rcon
+        if (channel != null) {
+            // RCON 的回执就是命令的输出（不经过 stdout）。原样打出来，
+            // 否则用户会发现「发了 list 但屏幕上什么都没有」。
+            val reply = runCatching { withContextBlocking { channel.command(command) } }
+            reply.onSuccess { text ->
+                if (text.isNotBlank()) {
+                    text.lineSequence().forEach { append("[RCON] " + it) }
+                }
+            }.onFailure { error ->
+                append("[RCON] 发不出去：" + (error.message ?: error::class.simpleName.orEmpty()))
+                // 连接坏了就退回去走标准输入，别让后面的命令全砸在这一条死连接上。
+                closeRcon()
+                _state.update { it.copy(channel = STDIN_CHANNEL) }
+            }
+            return
+        }
+        val p = process ?: return
         runCatching {
             p.outputStream.write((command + "\n").toByteArray(Charsets.UTF_8))
             p.outputStream.flush()
         }.onFailure {
             append("[本地] 发不出去：" + (it.message ?: "输出流已关闭"))
         }
+    }
+
+    /** 在 IO 线程上同步跑一段。RCON 是阻塞 IO，不能压在界面线程上。 */
+    private fun <T> withContextBlocking(block: () -> T): T =
+        kotlinx.coroutines.runBlocking(Dispatchers.IO) { block() }
+
+    private fun closeRcon() {
+        val client = rcon
+        rcon = null
+        runCatching { client?.close() }
     }
 
     /**
@@ -326,6 +416,21 @@ internal fun ServerConsoleCard(
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+            if (state.channel.isNotBlank()) {
+                // 把通道写出来是有用的：走标准输入时命令只有**这个**进程收得到，
+                // 用户拿同一个目录另开一个服、在控制台里发命令却没反应，就是因为这个。
+                Text(
+                    "命令通道：" + state.channel + (
+                        if (state.channel == "标准输入") {
+                            "（只有本启动器起的这个服务端收得到）"
+                        } else {
+                            "（服务端开着 RCON，和谁起的进程无关）"
+                        }
+                    ),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
             Box(
                 Modifier
                     .fillMaxWidth()

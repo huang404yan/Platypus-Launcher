@@ -34,12 +34,15 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import io.github.huang404yan.platypus.core.server.PlayerLookup
 import io.github.huang404yan.platypus.core.server.PlayerLookupKind
 import io.github.huang404yan.platypus.core.server.PropertyField
 import io.github.huang404yan.platypus.core.server.PropertyKind
 import io.github.huang404yan.platypus.core.server.ServerPlayer
+import io.github.huang404yan.platypus.core.server.RconClient
 import io.github.huang404yan.platypus.core.server.ServerPlayers
 import io.github.huang404yan.platypus.core.server.ServerProperties
 import io.github.huang404yan.platypus.core.server.ServerPropertiesView
@@ -479,6 +482,9 @@ private fun PropertyRow(
                 }
             }
             PropertyKind.TEXT -> {
+                // RCON 密码是要照抄到别处去的，但它在屏幕上也该遮着 —— 开会投屏、
+                // 截图发群里的时候，明文密码就是泄了。
+                val masked = field.key == RconClient.PASSWORD_KEY
                 OutlinedTextField(
                     value = value,
                     onValueChange = onChange,
@@ -487,10 +493,21 @@ private fun PropertyRow(
                     singleLine = true,
                     enabled = enabled,
                     isError = problem.isNotBlank(),
+                    visualTransformation = if (masked) {
+                        PasswordVisualTransformation()
+                    } else {
+                        VisualTransformation.None
+                    },
                     supportingText = {
                         Text(if (problem.isNotBlank()) problem else field.note)
                     },
                 )
+                if (masked) {
+                    TextButton(
+                        onClick = { onChange(RconClient.suggestPassword()) },
+                        enabled = enabled,
+                    ) { Text("随机生成一个密码") }
+                }
             }
         }
         if (problem.isNotBlank() && field.kind != PropertyKind.TEXT) {
