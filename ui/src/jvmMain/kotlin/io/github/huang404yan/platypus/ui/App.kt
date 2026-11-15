@@ -54,6 +54,8 @@ enum class Page(val label: String) {
     DOWNLOAD("下载"),
     LINK("联机"),
     SETTINGS("设置"),
+    // 帮助放在「关于」之前：遇到问题的人找的是它，不是版本号与致谢。
+    HELP("帮助"),
     ABOUT("关于"),
 }
 
@@ -173,6 +175,12 @@ fun App(
                         // 所以这里不能提前同步调用，否则标题栏又会抢在内容前面变。
                         onThemeChange = { theme = it },
                     )
+                    // 「去这里」要既切页又选中那一页的二级项：只切页的话，
+                    // 用户会落在默认的二级项上，还是找不到说明里说的那个入口。
+                    Page.HELP -> HelpPage(subTab = subTabOf(Page.HELP)) { target: Page, targetSub: String? ->
+                        if (targetSub != null) subSelection[target.name] = targetSub
+                        page = target
+                    }
                     Page.ABOUT -> AboutPage()
                 }
             }

@@ -69,6 +69,10 @@ val PAGE_SUB_TABS: Map<Page, List<SubTab>> = mapOf(
         SubTab("ui", "界面"),
         SubTab("other", "其他"),
     ),
+    // 「帮助」放在「关于」之前：它是一级页而不是设置下的一项 —— 玩家遇到问题时
+    // 不会想到先去「设置」里翻。章节列表直接取自 HelpPage.kt 的 HELP_CHAPTERS，
+    // 免得侧栏与正文各写一份、加一章忘改一处。
+    Page.HELP to HELP_CHAPTERS.map { SubTab(it.id, it.label) },
 )
 
 /** 「下载」下的七个二级项 id。页面按下标判断自己该渲染哪一块。 */
