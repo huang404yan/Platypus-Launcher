@@ -300,4 +300,20 @@ class YggdrasilClientTest {
         assertEquals("client-token", ygg.clientToken)
         assertFalse(reread.first { !it.isYggdrasil }.isYggdrasil)
     }
+
+    // ── 2026-11-15 打真站之后补的一条 ────────────────────────────────────
+
+    @Test
+    fun `密码错时把服务端的原话带出来而不是空白`() {
+        // 实测 LittleSkin 对「用户名或密码不对」回的是 403（不是 401），
+        // 而 403 在这份代码里还有另一个含义：令牌失效。所以这两条路必须分开 ——
+        // 曾经 request 对所有请求都先抛 TokenRejected，导致密码错的用户
+        // 只看到一句空白的「外置登录失败：」，既不知道是密码错也不知道改什么。
+        val text = YggdrasilClient.describeLoginFailure(
+            403,
+            "{\"error\":\"ForbiddenOperationException\",\"errorMessage\":\"用户名或密码错误。Incorrect username or password.\"}",
+        )
+        assertTrue(text.contains("用户名或密码不对"), text)
+        assertTrue(text.contains("Incorrect username or password"), text)
+    }
 }

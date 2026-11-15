@@ -180,7 +180,8 @@ class YggdrasilClient(
             if (clientToken.isNotBlank()) put("clientToken", clientToken)
         }.toString()
         try {
-            request("POST", apiRoot + VALIDATE_PATH, body) { status, _ ->
+            // 只有这一处把 401/403 当「令牌无效」处理：validate 的回答本来就是是/否。
+            request("POST", apiRoot + VALIDATE_PATH, body, rejectOnAuthFailure = true) { status, _ ->
                 describeStatus(status, "", "校验登录状态")
             }
             true
@@ -205,13 +206,26 @@ class YggdrasilClient(
         }
     }
 
-    /** 令牌被服务端否掉时抛的私有异常，只给 [validate] 用。 */
+    /** 令牌被服务端否掉时抛的私有异常，**只给 [validate] 用**。 */
     private class TokenRejected : RuntimeException()
 
+    /**
+     * 发一个请求。
+     *
+     * [rejectOnAuthFailure] 是给 [validate] 用的开关：它问的就是「这枚令牌还有效吗」，
+     * 401/403 对它是答案而不是错误，所以抛一个不带文案的 [TokenRejected] 让它接住。
+     *
+     * **其它地方一律不能这么干。** 2026-11-15 打真站才发现：
+     * LittleSkin 对「用户名或密码不对」回的是 **403**（不是 401），
+     * 而这里原来对所有请求都先抛 TokenRejected —— 于是密码敲错的用户看到的
+     * 是一句空白的「外置登录失败：」，既不知道是密码错，也不知道该改什么。
+     * 现在只有 validate 会走那条分支，别的请求一律走 [onFailure] 翻成人话。
+     */
     private fun request(
         method: String,
         url: String,
         body: String?,
+        rejectOnAuthFailure: Boolean = false,
         onFailure: (Int, String) -> String,
     ): String {
         val connection = (URL(url).openConnection() as HttpURLConnection).apply {
@@ -235,7 +249,7 @@ class YggdrasilClient(
             val stream = if (status in 200..299) connection.inputStream else connection.errorStream
             val text = stream?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }.orEmpty()
             if (status !in 200..299) {
-                if (status == 401 || status == 403) throw TokenRejected()
+                if (rejectOnAuthFailure && (status == 401 || status == 403)) throw TokenRejected()
                 throw YggdrasilException(onFailure(status, text))
             }
             return text
