@@ -232,4 +232,22 @@ class TerracottaTest {
         assertEquals(128, Terracotta.PACKAGE_SHA512.length)
         assertTrue(Terracotta.PACKAGE_SHA512.all { it in "0123456789abcdef" })
     }
+
+    // ── 建房 / 加入的请求路径（2026-11-15 真实链路实测后补） ──────────────
+
+    @Test
+    fun `加入房间时房间码里的斜杠必须转义`() {
+        val client = TerracottaClient(File(root, "terracotta"))
+        val path = client.guestPathOf("U/ABCD-EFGH-JKLM-NPQR")
+        assertEquals("/state/guesting?room=U%2FABCD-EFGH-JKLM-NPQR", path)
+        assertFalse(path.contains("U/"), "斜杠没转义，陶瓦会回 400：")
+    }
+
+    @Test
+    fun `建房请求在没给房间码时不带查询串`() {
+        val client = TerracottaClient(File(root, "terracotta"))
+        assertEquals("/state/scanning", client.hostPathOf(""))
+        assertEquals("/state/scanning", client.hostPathOf("   "))
+        assertEquals("/state/scanning?room=U%2FABCD-EFGH-JKLM-NPQR", client.hostPathOf("U/ABCD-EFGH-JKLM-NPQR"))
+    }
 }

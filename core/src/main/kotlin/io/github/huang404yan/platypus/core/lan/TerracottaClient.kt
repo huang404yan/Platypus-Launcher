@@ -79,10 +79,14 @@ class TerracottaClient(
             )
                 .directory(executable.parentFile ?: dir)
                 .redirectErrorStream(true)
+                // 输出直接丢给系统，**不要建管道再去关它**：
+                // 2026-11-15 实测，先把 outputStream 接过来再 close inputStream，
+                // 父进程会立刻以 0 退出（同一条命令不接管道跑得好好的）。
+                // 原因是管道读端一关，子进程写日志就收到 EPIPE，Rust 那边直接 panic 退出。
+                // 表现是「装了陶瓦却怎么都起不来」，而端口文件永远是空的。
+                .redirectOutput(ProcessBuilder.Redirect.DISCARD)
                 .start()
-            // 父进程立刻退出是正常的，这里只负责别让输出管道堆满。
-            runCatching { process.inputStream.close() }
-            runCatching { process.outputStream.close() }
+            // 父进程跑完把活交给子进程后立刻退出是正常的，这里不等它的退出码。
 
             val deadline = System.currentTimeMillis() + startTimeoutMillis
             while (System.currentTimeMillis() < deadline) {
@@ -128,16 +132,15 @@ class TerracottaClient(
      */
     fun host(roomCode: String = ""): String {
         val target = ensure()
-        if (target <= 0) return notInstalledText()
+        if (target <= 0) return startFailureText()
 
         val before = state(false)
         val oldRoom = if (before.ok && before.stage == TerracottaStages.HOST_OK) before.room else ""
 
         ensureIdle(target)
 
-        val query = if (roomCode.isBlank()) "" else "?room=" + encode(roomCode.trim())
         try {
-            httpGet(target, "/state/scanning" + query, LONG_TIMEOUT_MS)
+            httpGet(target, hostPathOf(roomCode), LONG_TIMEOUT_MS)
         } catch (e: IOException) {
             return "启动建房失败：" + (e.message ?: "连不上陶瓦")
         }
@@ -163,11 +166,11 @@ class TerracottaClient(
         if (!Terracotta.checkCode(code)) return Terracotta.codeChecksumProblem()
 
         val target = ensure()
-        if (target <= 0) return notInstalledText()
+        if (target <= 0) return startFailureText()
         ensureIdle(target)
 
         try {
-            httpGet(target, "/state/guesting?room=" + encode(code), LONG_TIMEOUT_MS)
+            httpGet(target, guestPathOf(code), LONG_TIMEOUT_MS)
         } catch (e: IOException) {
             return "加入失败：" + (e.message ?: "连不上陶瓦")
         }
@@ -204,6 +207,18 @@ class TerracottaClient(
     /** 还没装时的说法。 */
     fun notInstalledText(): String =
         "还没装陶瓦联机：点「安装 / 更新陶瓦」自动下载（约 8 MB）。"
+
+    /**
+     * 起不来时的说法。**要分开「没装」与「装了但起不来」** ——
+     * 2026-11-15 实测踩到过：exe 明明在盘上（installed = true），守护进程却没有起来，
+     * 而旧代码不管哪种都回一句「还没装陶瓦联机」，用户于是去点「安装 / 更新」，
+     * 重下一遍还是起不来，完全看不出真正的原因。
+     */
+    fun startFailureText(): String {
+        if (exe == null) return notInstalledText()
+        return "陶瓦装了，但守护进程没起来（文件在：" + dir.absolutePath + "）。" +
+            "先等几秒再点一次；反复失败就把它删掉，再点「安装 / 更新陶瓦」重下一份。"
+    }
 
     // ── 内部 ───────────────────────────────────────────────────────────────────
 
@@ -263,7 +278,33 @@ class TerracottaClient(
         }
     }
 
-    /** 房间码里可能带 / 与空格，必须转义再放进查询串。 */
+    /**
+     * 建房请求的路径。房间码为空时不带查询串（正常用法就是这样）。
+     *
+     * 抽成 internal 是为了能被单测盯住 —— 见 [guestPathOf]。
+     */
+    internal fun hostPathOf(roomCode: String): String =
+        if (roomCode.isBlank()) {
+            "/state/scanning"
+        } else {
+            "/state/scanning?room=" + encode(roomCode.trim())
+        }
+
+    /**
+     * 加入请求的路径。
+     *
+     * 房间码长这样 U/ABCD-EFGH-JKLM-NPQR，第一段是 U、第二段是斜杠。
+     * 2026-11-15 实测：把斜杠原样塞进查询串，陶瓦直接回 400 Bad Request
+     * （它把斜杠当成路径分隔符，多出一段）；换成 %2F 之后回 200，
+     * 状态跟着进 guest-starting。
+     *
+     * 这一步出错时界面上只有一句「加入失败」，没有任何线索，
+     * 所以把 URLEncoder 这个细节固化成单测，免得以后有人「顺手」改成手拼字符串。
+     */
+    internal fun guestPathOf(code: String): String =
+        "/state/guesting?room=" + encode(code)
+
+    /** 房间码里带 / 与空格，必须整体转义再放进查询串。 */
     private fun encode(text: String): String = URLEncoder.encode(text, "UTF-8")
 
     companion object {
