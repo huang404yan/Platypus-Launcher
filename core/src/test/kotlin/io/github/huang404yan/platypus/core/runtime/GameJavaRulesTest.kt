@@ -67,7 +67,7 @@ class GameJavaRulesTest {
     @Test
     fun `周号快照按年份分段`() {
         // 边界来自官方 744 个快照的 javaVersion.majorVersion 实测跃迁点
-        // （2026-11-14 拉 version_manifest_v2 统计，见 docs/05 的 GameJavaRules 条目）
+        // （2026-11-14 拉 version_manifest_v2 统计）
         assertEquals(8, GameJavaRules.requiredMajor("13w16a"))
         assertEquals(8, GameJavaRules.requiredMajor("20w51a"))
         assertEquals(8, GameJavaRules.requiredMajor("21w18a"))

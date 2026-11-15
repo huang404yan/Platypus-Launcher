@@ -4,7 +4,7 @@ package io.github.huang404yan.platypus.core
  * 品牌与法务文案的唯一真源。
  *
  * 界面上所有出现名字、口号、免责声明的地方都从这里取，避免各处写死之后漂移。
- * 免责声明的措辞是模板固定的，改动前先看 docs/04-juece-jilu.md 里的品牌决策。
+ * 免责声明的措辞是模板固定的，品牌决策在写这一版之前就定死了，别随手改措辞。
  */
 object Brand {
     const val NAME_ZH: String = "鸭嘴兽启动器"

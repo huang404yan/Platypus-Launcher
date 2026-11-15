@@ -11,7 +11,7 @@ import kotlin.test.assertTrue
 
 /**
  * 这一层不碰进程、不碰 JNI，只校验「参数拼得对不对」与「自检判据对不对」。
- * 真机能不能进游戏是另一回事（见 docs/45 第 4 层）。
+ * 真机能不能进游戏是另一回事。
  */
 class AndroidLaunchArgsTest {
 

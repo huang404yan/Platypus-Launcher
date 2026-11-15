@@ -14,7 +14,7 @@ import java.io.IOException
  *
  * 这里只管「单模组安装」：选版本 → 下载 → sha1 校验 → 落到 mods/。
  * 依赖展开（Modrinth 的 required dependencies 只给 project id，得再查项目与版本）
- * 在 ModDependencyResolver 里，见 docs/28。本对象只负责把 [installFile] 这一个文件装好。
+ * 在 ModDependencyResolver 里。本对象只负责把 [installFile] 这一个文件装好。
  */
 object ModInstaller {
 

@@ -12,7 +12,7 @@ import java.awt.Window
  *
  * 为什么需要这个：Compose Desktop 没有跨平台的深色标题栏开关，标题栏是操作系统画的。
  * 深色主题（自然原色，深潭青 #1A2B2C）配一条系统默认的浅灰白标题栏，
- * 接缝处非常扎眼 —— 这也是 docs/42 里写明「还没做到」的那一条。
+ * 接缝处非常扎眼 —— 这是已知没做到的那一条。
  *
  * Windows 上唯一的入口是 DWM 的 `DwmSetWindowAttribute`，JDK 没有对等 API，
  * 所以这里借 JNA 直接调（只在 app-desktop 里用，core / ui 不该知道宿主是什么系统）。

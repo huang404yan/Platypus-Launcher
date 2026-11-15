@@ -34,7 +34,7 @@ data class LauncherSettings(
      *
      * 刻意不内置一个随包发出去的 ID：那等于让所有使用者共用一份别人的应用注册，
      * 出了限流或被微软收紧，拿到安装包的人无从处理。填一次就行，存在本机这个
-     * settings.json 里，不进仓库也不进安装包。申请步骤见 docs/41。
+     * settings.json 里，不进仓库也不进安装包。申请步骤写在设置页的账号那一栏里。
      */
     val microsoftClientId: String = "",
     /**

@@ -67,7 +67,7 @@ import java.io.File
  * （桌面端踩过：切到资源包页后，列表里躺着三个光影包）。
  *
  * 光影要先用 Iris 或 OptiFine 才能加载 —— 手机端目前还没有应用内启动游戏的能力
- * （runtime-android 未开始，见 docs/03-luxian-yu-youxianji.md 第 3 节），
+ * （安卓端的启动还在补，这一层先不做），
  * 所以这一页现在的用处是：在手机上把包装好，等启动能力接上后直接可用。
  */
 @Composable

@@ -30,7 +30,7 @@ data class AndroidLaunchConfig(
  * 一次安卓启动的准备结果。
  *
  * [fullCommand] 只在这一层验证得通的时候才有内容：它已经是可以交给应用内 JVM 的参数表
- * （`JVM_CreateJavaVM` 的 args）。**这一层不负责真正把 JVM 起起来** —— 那要 JNI，见 docs/45。
+ * （`JVM_CreateJavaVM` 的 args）。**这一层不负责真正把 JVM 起起来** —— 那要 JNI。
  */
 data class AndroidLaunchPreparation(
     val env: AndroidLaunchEnv,
@@ -71,7 +71,7 @@ data class AndroidLaunchPreparation(
  *
  * ## 它不做什么
  *
- * - 不起进程、不加载 libjvm.so（那要 JNI，见 docs/45 第 1 层）。
+ * - 不起进程、不加载 libjvm.so（那要 JNI）。
  * - 不解压 natives（[prepare] 是纯读盘函数，解压交给调用方拿 [AndroidLaunchPreparation.plan] 去做）。
  * - 不下载图形后端（那几份 .so 现在还没随包分发，所以「渲染库文件」这条自检会挡住启动）。
  */

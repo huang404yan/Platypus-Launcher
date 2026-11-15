@@ -16,7 +16,7 @@ import kotlin.test.assertTrue
 /**
  * [AndroidLaunchPlanner] 的测试：验算「安卓这一层拼出来的东西对不对」。
  *
- * 真机能不能起来是另一回事（要 JNI 与图形后端，见 docs/45），但
+ * 真机能不能起来是另一回事（要 JNI 与图形后端），但
  * 「参数少了哪一条」「-Xmx 有没有被漏过去」「按哪个平台挑库」全都能在这里验完。
  */
 class AndroidLaunchPlannerTest {

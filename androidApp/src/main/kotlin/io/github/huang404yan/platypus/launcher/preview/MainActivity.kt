@@ -189,7 +189,7 @@ private fun AppRoot(theme: LauncherTheme, onThemeChange: (LauncherTheme) -> Unit
                     Tab.DIAGNOSTIC -> DiagnosticPage()
                     Tab.ABOUT -> AboutPage()
                     // 启动页做到「进游戏之前的全部准备」：挑运行时与后端、六条自检、
-                    // 拼出应用内 JVM 要的完整参数表。最后那一步（JNI 起 JVM）见 docs/45。
+                    // 拼出应用内 JVM 要的完整参数表。最后那一步是 JNI 起 JVM，还没在真机上跑通。
                     Tab.LAUNCH -> LaunchPage()
                 }
             }
