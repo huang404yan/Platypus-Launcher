@@ -85,9 +85,10 @@ internal fun InstanceDetailPanel(
     var pendingDirs by remember(instance.directory) { mutableStateOf<List<String>>(emptyList()) }
     var merging by remember(instance.directory) { mutableStateOf(false) }
 
-    // 导出整合包是详情页的一个「子页」：点进去、导出、返回。
-    // 不做成独立导航项 —— 导出永远是从某个具体实例出发的，脱离实例没有意义。
+    // 导出整合包与存档管理都是详情页的「子页」：点进去、做完、返回。
+    // 不做成独立导航项 —— 这两件事永远是从某个具体实例出发的，脱离实例没有意义。
     var exporting by remember(instance.directory) { mutableStateOf(false) }
+    var browsingSaves by remember(instance.directory) { mutableStateOf(false) }
 
     val scope = rememberCoroutineScope()
 
@@ -219,6 +220,11 @@ internal fun InstanceDetailPanel(
         return
     }
 
+    if (browsingSaves) {
+        SavesPanel(instance = instance, onBack = { browsingSaves = false })
+        return
+    }
+
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             TextButton(onClick = onBack) { Text("← 返回实例列表") }
@@ -250,6 +256,7 @@ internal fun InstanceDetailPanel(
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 OutlinedButton(onClick = { openFolder(d.versionDir) }) { Text("打开实例目录") }
                 OutlinedButton(onClick = { openFolder(d.gameDir) }) { Text("打开存档目录") }
+                OutlinedButton(onClick = { browsingSaves = true }) { Text("存档与备份") }
                 OutlinedButton(onClick = {
                     exporting = true
                 }) { Text("导出整合包") }

@@ -37,6 +37,29 @@ internal fun chooseSaveFile(
     }
 }
 
+/**
+ * 选一个已存在的文件（导入存档 zip、导入整合包这类）。
+ *
+ * 与 [chooseSaveFile] 分开而不是加个布尔参数：两者在中文系统上的默认按钮不一样
+ * （「打开」vs「保存」），用一个函数内部判断会让调用点很难看出点下去会发生什么。
+ */
+internal fun chooseOpenFile(
+    title: String,
+    extension: String,
+    startDir: File?,
+): File? {
+    runCatching { UIManager.setLookAndFeel(UIManager.getSystemLookAndFeelClassName()) }
+    val chooser = JFileChooser()
+    chooser.dialogTitle = title
+    chooser.fileSelectionMode = JFileChooser.FILES_ONLY
+    chooser.isAcceptAllFileFilterUsed = true
+    if (extension.isNotBlank()) {
+        chooser.fileFilter = FileNameExtensionFilter(extension.uppercase() + " 文件 (*." + extension + ")", extension)
+    }
+    if (startDir != null && startDir.isDirectory) chooser.currentDirectory = startDir
+    return if (chooser.showOpenDialog(null) == JFileChooser.APPROVE_OPTION) chooser.selectedFile else null
+}
+
 /** 在系统文件管理器里定位到某个文件（或打开某个目录）；失败不抛。 */
 internal fun openInExplorer(path: File?): Boolean = runCatching {
     val target = path ?: return false
