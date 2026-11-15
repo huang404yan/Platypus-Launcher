@@ -84,6 +84,10 @@ fun runtimePlatform(os: OsFamily = OsFamily.current(), arch: String = OsFamily.c
         }
         OsFamily.MACOS -> if (normalized == "aarch64" || normalized == "arm64") "mac-os-arm64" else "mac-os"
         OsFamily.LINUX -> if (normalized == "x86" || normalized == "i386" || normalized == "i686") "linux-i386" else "linux"
+        // Mojang 没有安卓版的运行时索引：手机上的 JRE 是自家 catalog（AndroidJavaCatalog）
+        // 下的 tar.xz，不走这条路径。给个 linux 只是让这个穷尽 when 有落点，
+        // 真按它去官方索引里查会查不到任何东西 —— 调用方在安卓上根本不该调这里。
+        OsFamily.ANDROID -> "linux"
         OsFamily.UNKNOWN -> "linux"
     }
 }

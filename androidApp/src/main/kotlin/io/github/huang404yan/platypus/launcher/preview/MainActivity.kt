@@ -188,9 +188,9 @@ private fun AppRoot(theme: LauncherTheme, onThemeChange: (LauncherTheme) -> Unit
                     Tab.JAVA -> JavaPage()
                     Tab.DIAGNOSTIC -> DiagnosticPage()
                     Tab.ABOUT -> AboutPage()
-                    // 启动是唯一还没做的：它要的应用内 JVM 与图形转译属于 runtime-android，
-                    // 现在整个模块还不存在（见 docs/03-luxian-yu-youxianji.md 第 3 节的 S1 spike）。
-                    Tab.LAUNCH -> LaunchPlaceholder()
+                    // 启动页做到「进游戏之前的全部准备」：挑运行时与后端、六条自检、
+                    // 拼出应用内 JVM 要的完整参数表。最后那一步（JNI 起 JVM）见 docs/45。
+                    Tab.LAUNCH -> LaunchPage()
                 }
             }
         }
@@ -588,30 +588,6 @@ private fun InfoRow(label: String, value: String) {
     }
 }
 
-/**
- * 启动页的占位，但不是一句「还没做」。
- *
- * 手机上进游戏需要「应用内起 JVM + OpenGL 转译」，那是 runtime-android 模块的全部内容，
- * 与桌面端起 java 进程完全是两件事（见 docs/03-luxian-yu-youxianji.md 第 3 节）。
- * 把它讲清楚，比放一个哑按钮有用：用户能知道现在能干什么、缺的是什么。
- */
-@Composable
-private fun LaunchPlaceholder() {
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text("启动", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
-        Text(
-            "手机上进游戏要先在应用内起 JVM，再把 OpenGL 转译成手机的图形接口——" +
-                "这是独立的 runtime-android 模块，现在还不存在。",
-            style = MaterialTheme.typography.bodyMedium,
-        )
-        Text(
-            "这一版能做的：把游戏文件下全（下载页）、认出已有的实例（实例页）、装模组（模组页）、" +
-                "装光影 / 资源包 / 数据包（那一页）、下一个能开的服务端（服务端页）、找局域网世界（联机页）。",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-    }
-}
 
 @Composable
 private fun Warning(text: String) {

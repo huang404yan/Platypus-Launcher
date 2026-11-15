@@ -131,11 +131,16 @@ data class Library(
         features: Map<String, Boolean> = emptyMap(),
     ): Boolean = RuleEvaluator.isAllowed(rules, os, arch, features)
 
-    /** natives 里当前平台对应的 classifier，例如 windows → natives-windows。 */
+    /**
+     * natives 里当前平台对应的 classifier，例如 windows → natives-windows。
+     *
+     * 按 [OsFamily.ruleName] 查而不是 [OsFamily.id]：安卓的 id 是 `android`，但
+     * version json 的 natives 只有 linux / windows / osx 三个键（见 [OsFamily.ANDROID]）。
+     */
     fun nativeClassifier(os: OsFamily = OsFamily.current()): String? {
         val element = natives ?: return null
         val obj = element as? kotlinx.serialization.json.JsonObject ?: return null
-        return obj[os.id]?.let { (it as? kotlinx.serialization.json.JsonPrimitive)?.content }
+        return obj[os.ruleName]?.let { (it as? kotlinx.serialization.json.JsonPrimitive)?.content }
     }
 }
 
@@ -201,10 +206,31 @@ data class LibraryName(
     }
 }
 
-enum class OsFamily(val id: String) {
+/**
+ * 目标平台。
+ *
+ * [id] 是给启动器自己看的名字（日志、诊断页、界面），[ruleName] 是写进 version json
+ * 的 rules 里的那个名字。这两个平时相等，只有安卓不是 —— 见 [ANDROID]。
+ */
+enum class OsFamily(val id: String, val ruleName: String = id) {
     WINDOWS("windows"),
     MACOS("osx"),
     LINUX("linux"),
+
+    /**
+     * 安卓。
+     *
+     * 规则匹配一律按 [ruleName] = `linux` 走：version json 的 rules 里从来只有
+     * windows / osx / linux 三种，[id] 用 `android` 只是为了让日志与诊断页说得准。
+     * 要是拿 `android` 去比规则，每一条 `natives-linux` 都会被判成不匹配，
+     * classpath 里一份 natives 都凑不出来 —— 那是最典型的「改了名字什么都不能用」。
+     *
+     * 但「吃 Linux 的规则」不等于「安卓能直接跑」：natives 是 .so 且要额外挂图形转译层、
+     * `-Djava.library.path` 指的位置、十几条必须手补的 -D 参数，都不是 rules 能表达的。
+     * 那些在 [io.github.huang404yan.platypus.core.launch.AndroidLaunchArgs] 里。
+     */
+    ANDROID("android", ruleName = "linux"),
+
     UNKNOWN("unknown"),
     ;
 
@@ -249,7 +275,8 @@ object RuleEvaluator {
     private fun matches(rule: Rule, os: OsFamily, arch: String, features: Map<String, Boolean>): Boolean {
         rule.os?.let { osRule ->
             val osName = osRule.name
-            if (!osName.isNullOrBlank() && osName != os.id) return false
+            // 按 ruleName 比而不是 id：安卓吃的是 Linux 那一条（见 OsFamily.ANDROID）。
+            if (!osName.isNullOrBlank() && osName != os.ruleName) return false
             val ruleArch = osRule.arch
             if (!ruleArch.isNullOrBlank() && !archMatches(ruleArch, arch)) return false
         }

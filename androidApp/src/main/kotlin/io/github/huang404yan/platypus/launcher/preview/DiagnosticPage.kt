@@ -41,6 +41,17 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import io.github.huang404yan.platypus.core.Brand
+import io.github.huang404yan.platypus.core.auth.OfflineProfile
+import io.github.huang404yan.platypus.core.instance.InstanceScanner
+import io.github.huang404yan.platypus.core.launch.AndroidLaunchArgs
+import io.github.huang404yan.platypus.core.launch.AndroidLaunchConfig
+import io.github.huang404yan.platypus.core.launch.AndroidLaunchPlanner
+import io.github.huang404yan.platypus.core.launch.AndroidRenderer
+import io.github.huang404yan.platypus.core.launch.LaunchRequest
+import io.github.huang404yan.platypus.core.runtime.AndroidJavaCatalog
+import io.github.huang404yan.platypus.core.runtime.AndroidJavaRuntimeService
+import io.github.huang404yan.platypus.core.runtime.GameJavaRules
+import io.github.huang404yan.platypus.core.runtime.JavaRuntime
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -188,6 +199,7 @@ internal object Diagnostics {
         sections += memory(context)
         sections += network()
         sections += graphics()
+        sections += launchPreparation(context)
         sections += gameDirectories()
         sections.toList()
     }
@@ -464,6 +476,81 @@ internal object Diagnostics {
     }
 
     private fun nullSafe(value: String?): String = if (value.isNullOrBlank()) "(null)" else value
+
+    /**
+     * 安卓启动准备占哪几条。
+     *
+     * 诊断页的价值在于「出问题时能回传的文字」：用户点启动失败时，最常缺的恰好是
+     * 「他到底按哪套运行时、哪个后端、哪个 ABI 算的参数」这些没法靠一句「闪退了」说清的东西。
+     * 所以这里把当前目录里第一个实例整套跑一遍 [AndroidLaunchPlanner.prepare]，
+     * 自检结果逐条报出来，并把最终参数表的**条数**报出来（不贴全表：太长，页面也放不下）。
+     *
+     * 没有实例、没有 Java、没有 ABI 都当成一条说明，不算崩溃 —— 提示页不能自己先崩。
+     */
+    private fun launchPreparation(context: Context): DiagnosticSection {
+        val rows = mutableListOf<DiagnosticRow>()
+        val abi = AndroidJavaCatalog.supportedAbi(Build.SUPPORTED_ABIS?.toList().orEmpty())
+        rows += DiagnosticRow("主 ABI", abi ?: "不认识（已支持：" + AndroidJavaCatalog.ABIS.joinToString("、") + "）", abi != null)
+        rows += DiagnosticRow("系统版本", Build.VERSION.RELEASE.orEmpty() + " / SDK " + Build.VERSION.SDK_INT)
+
+        val javaRoot = File(context.filesDir, "java")
+        val runtimes = runCatching { AndroidJavaRuntimeService(javaRoot, abi).installedRuntimes() }
+            .getOrElse { emptyList() }
+        rows += DiagnosticRow(
+            "可用运行时",
+            if (runtimes.isEmpty()) "没有（去「Java」页装一个）" else runtimes.joinToString("、") { "Java " + it.majorVersion },
+            runtimes.isNotEmpty(),
+        )
+
+        val root = runCatching { File(defaultGameRoot()) }.getOrNull()
+        val instances = runCatching { InstanceScanner.scan(root!!).instances }.getOrElse { emptyList() }
+        rows += DiagnosticRow(
+            "启动页能用的实例",
+            if (instances.isEmpty()) "没有（" + (root?.absolutePath ?: "目录读不到") + "）" else instances.joinToString("、") { it.name },
+            instances.isNotEmpty(),
+        )
+
+        val instance = instances.firstOrNull()
+        val runtime = runtimes.firstOrNull()
+        if (instance == null || runtime == null || abi == null) {
+            rows += DiagnosticRow("启动准备", "上面缺一项，算不出自检 —— 这不代表启动器坏了。", null)
+            return DiagnosticSection("启动准备（安卓）", rows)
+        }
+
+        val renderer = AndroidRenderer.supportedOn(abi).firstOrNull() ?: AndroidRenderer.DEFAULT
+        val nativeDir = File(File(context.filesDir, "natives"), instance.directory.trim().trim('"').replace('\\', '/').trimEnd('/').substringAfterLast('/').ifBlank { "default" })
+        val attempt = runCatching {
+            AndroidLaunchPlanner.prepare(
+                request = LaunchRequest(
+                    instance = instance,
+                    java = JavaRuntime(
+                        path = File(File(runtime.path), "bin/java").absolutePath,
+                        majorVersion = GameJavaRules.requiredMajor(instance.gameVersion),
+                    ),
+                    session = OfflineProfile.session("Dev"),
+                ),
+                config = AndroidLaunchConfig(
+                    abi = abi,
+                    androidRelease = Build.VERSION.RELEASE.orEmpty(),
+                    renderer = renderer,
+                    tmpDir = context.cacheDir,
+                    nativeDir = nativeDir,
+                ),
+            )
+        }
+        attempt.fold(
+            onSuccess = { prep ->
+                rows += DiagnosticRow("自检对象", instance.name + " · " + instance.gameVersion + " · " + renderer.id)
+                prep.checks.forEach { check ->
+                    rows += DiagnosticRow(check.label, if (check.ok) "通过" else check.detail, check.ok)
+                }
+                rows += DiagnosticRow("参数表条数", prep.fullCommand.size.toString(), prep.ready)
+                rows += DiagnosticRow("结论", prep.summary, prep.ready)
+            },
+            onFailure = { rows += DiagnosticRow("自检异常", describe(it), false) },
+        )
+        return DiagnosticSection("启动准备（安卓）", rows)
+    }
 
     private fun gameDirectories(): DiagnosticSection {
         val rows = mutableListOf<DiagnosticRow>()
