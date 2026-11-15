@@ -68,6 +68,8 @@ core/            纯 Kotlin，不依赖界面，也不依赖 Android
   auth/          离线 / 微软 / 外置登录
   launch/        启动计划、参数翻译、命令拼装
   modpack/       整合包导入导出
+  loader/        加载器元数据（Quilt 的版本列表与 profile 跟别家不一样）
+  install/       一键安装流程与四种加载器的安装器
   server/        服务端安装与控制台
 ui/              Compose Multiplatform，桌面与安卓共用
 app-desktop/     桌面端入口
