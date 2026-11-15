@@ -31,6 +31,14 @@
 > 正版登录要用自己注册的一个，见 `docs/41-zishen-client-id.md`）、发布时标 Pre-release。
 > 规则写在 `releases/README.md`。
 
+> **这个仓库里发出去的东西，永远是开源版的产物。** 正式版只发编好的应用，源码不随包走；
+> 仓库主干、tag、每一个能下载到的包，都对应孵化版（开源版）。换言之：你在这里看到的就是全部的代码，
+> 没有任何一行留在仓库外面。
+>
+> 这也决定了两条线的首次启动规矩：**正式版要求先登录一个正版账号**（它发的是应用，改不了里面的判断）；
+> **孵化版只弹一次窗**讲清「想用正版账号得先自己申请一个应用 ID」，然后放行（源码是公开的，
+> 对着能随手改的代码设卡没有意义，只会挡住想先看看界面的人）。见 `docs/57-liangtiao-tongdao.md`。
+
 > 不是 PCL / HMCL / Prism 的分支。这些项目只作为产品设计参考，代码一行不抄（见 `CONTRIBUTING.md`）。
 
 ## 技术栈
@@ -124,6 +132,7 @@ Windows 下也可以用 `gradlew.bat`。首次构建会下载约 300 MB 依赖�
 - `docs/54-bangzhu-shouce.md`：**面向玩家的帮助手册**（和 docs 下的开发记录分工在哪、为什么是一级页、章节为什么按「要做的事」切、为什么每章底下有个「去这里」）
 - `docs/55-android-qidong-zhunbei.md`：**安卓启动准备**（为什么先做参数表而不是先啃 JNI、`OsFamily.ANDROID` 为什么规则名是 linux、十五个 `-D` 参数漏了各会怎样、为什么要主动丢用户的 `-Xmx`、自检六条为什么不只是「装没装 Java」、渲染库为什么让用户自己放 `.so`）
 - `docs/56-android-jni-ceng.md`：**安卓的 JNI 层**（为什么参数表必须在建 JVM 之前抄出来、为什么 `dlopen` 要用 `RTLD_GLOBAL`、参数认不出来为什么宁可失败、Android 10 的可写目录 dlopen 限制与三条绕法、为什么这一层**大概率在真机上起不来**）
+- `docs/57-liangtiao-tongdao.md`：**正式版与开源版**（哪条线强制正版登录、为什么开源版反而不能强制、通道为什么只有一个判据、为什么「账号还没读出来」不拦、首次启动为什么记时间戳而不是布尔）
 
 ## 下载
 
@@ -166,7 +175,7 @@ M0（骨架）+ M1（实例扫描）+ M2（下载器）+ M3（**Windows 一键�
 
 **下载断点续传**：先写 `<文件>.part`，校验通过才转正；`.part` 有内容就发 `Range` 接着下，断网不清半成品，下次自动接上。进度条会额外显示「其中 N 个接着上次下（省了 M MB）」（`docs/14`）。
 
-单测 **937 例全过**（76 个测试类，`./gradlew :core:test :ui:jvmTest`；`ui` 从这一版起有 `jvmTest` 源集，格式化函数与导航常量也进单测了）。另有十二个无头冒烟任务（`e2eInstall` / `settingsSmoke` / `instanceFlowSmoke` / `resumeSmoke` / `deleteSmoke` / `fabricE2e` / `modpackE2e` / `forgeE2e` / `neoForgeE2e` / `modsE2e` / `modUpdateE2e` / `isolationSmoke`），走的是界面按钮同一批函数；`resumeSmoke` / `fabricE2e` / `modpackE2e` / `forgeE2e` / `neoForgeE2e` / `modsE2e` 需要联网，分别在空目录真装 Fabric、真跑 Forge 与 NeoForge 官方安装器、真从 Modrinth 下模组、真把一个 `.mrpack` 从解析装到进主菜单；`deleteSmoke` 在 `dist/_delete-smoke` 里全程造假数据，不碰真实 `.minecraft`。
+单测 **952 例全过**（77 个测试类，`./gradlew :core:test :ui:jvmTest`；`ui` 从这一版起有 `jvmTest` 源集，格式化函数与导航常量也进单测了）。另有十二个无头冒烟任务（`e2eInstall` / `settingsSmoke` / `instanceFlowSmoke` / `resumeSmoke` / `deleteSmoke` / `fabricE2e` / `modpackE2e` / `forgeE2e` / `neoForgeE2e` / `modsE2e` / `modUpdateE2e` / `isolationSmoke`），走的是界面按钮同一批函数；`resumeSmoke` / `fabricE2e` / `modpackE2e` / `forgeE2e` / `neoForgeE2e` / `modsE2e` 需要联网，分别在空目录真装 Fabric、真跑 Forge 与 NeoForge 官方安装器、真从 Modrinth 下模组、真把一个 `.mrpack` 从解析装到进主菜单；`deleteSmoke` 在 `dist/_delete-smoke` 里全程造假数据，不碰真实 `.minecraft`。
 
 **能装 Fabric 了**：下载页勾「顺带装 Fabric」→ 拉 meta.fabricmc.net 的 loader 列表（默认落在最新 stable）→ 装 profile json（只改 `id`，保留 `inheritsFrom`）→ 按 maven 坐标补全 8 个库的地址并下载 → 登记成 `1.20.1-fabric-0.20.1` 这样的实例。实测空目录全流程 4 分 29 秒进主菜单，日志首行 `Loading Minecraft 1.20.1 with Fabric Loader 0.20.1`（`docs/15`）。
 
