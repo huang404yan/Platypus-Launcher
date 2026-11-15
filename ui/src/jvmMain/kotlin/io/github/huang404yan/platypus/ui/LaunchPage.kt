@@ -20,9 +20,11 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -98,6 +100,15 @@ fun LaunchPage(
     focusKey: String? = null,
     /** 从联机页点「直接进」时带过来的服务器地址；非空就启动后直达那个世界。 */
     quickPlayServer: String = "",
+    /**
+     * 打开「版本选择」副页面（照 PCL 的 PageLaunchLeft 里那个「版本选择」按钮）。
+     *
+     * 实例列表已经不在这一页上了 —— 它挪去了 App 层的副页面，因为「这一版怎么启动」
+     * 和「我盘上有哪些版本」是两件事，挤在同一栏里谁都不够用。
+     */
+    onOpenSelect: () -> Unit = {},
+    /** 打开「版本设置」副页面：对当前选中的实例做精细设置。 */
+    onOpenSetup: (Instance) -> Unit = {},
 ) {
     if (backend == null) {
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -123,6 +134,14 @@ fun LaunchPage(
 
     var memoryText by remember { mutableStateOf(Instance.DEFAULT_MEMORY_MB.toString()) }
     var memoryNotice by remember { mutableStateOf("") }
+    // 内存三态，照用户定的口径（2026-11-15）：
+    // 自动分配默认开着，手动填数只在关掉自动之后才有意义；
+    // 内存优化是另一个独立勾选，它改的是 JVM 参数，所以第一次勾要给一次说明。
+    var memoryAuto by remember { mutableStateOf(true) }
+    var memoryOptimize by remember { mutableStateOf(false) }
+    var memoryAskSkipped by remember { mutableStateOf(false) }
+    // 勾内存优化时先问一句，问完才真勾上。「以后都这样」把询问偏好写进设置。
+    var askMemoryOptimize by remember { mutableStateOf(false) }
     // 输入框里的数与实例上存着的数不一致 → 还没写盘。与实例详情页同一口径：
     // 详情页在「保存」按钮旁边说「有改动没保存」，启动页这里则说明「点启动会一起保存」。
     // 之前这一页只有输入框和一个「存」字按钮，改了不点存就点启动其实也会存（launchGame 第一行就是
@@ -257,6 +276,42 @@ fun LaunchPage(
                 withContext(Dispatchers.IO) {
                     repository.save(stored.copy(activeAccountUuid = value))
                 }
+            }
+        }
+    }
+
+    /**
+     * 把「自动分配」这个开关记下来。写盘只动一个字：用 copy 而不是 new，
+     * 免得把别处刚改过的离线用户名、账号、配色一起冲掉。
+     */
+    fun rememberMemoryAuto(on: Boolean) {
+        val repository = backend.settings ?: return
+        scope.launch {
+            runCatching {
+                val stored = withContext(Dispatchers.IO) { repository.load() }
+                withContext(Dispatchers.IO) { repository.save(stored.copy(memoryAuto = on)) }
+            }
+        }
+    }
+
+    /** 说过「以后都这样」就记下来，以后勾内存优化不再弹窗。 */
+    fun rememberMemoryAskSkipped() {
+        val repository = backend.settings ?: return
+        scope.launch {
+            runCatching {
+                val stored = withContext(Dispatchers.IO) { repository.load() }
+                withContext(Dispatchers.IO) { repository.save(stored.copy(memoryAskSkipped = true)) }
+            }
+        }
+    }
+
+    /** 同上，记「内存优化」开了没有。它改的是 JVM 堆参数，所以单独记一个字段。 */
+    fun rememberMemoryOptimize(on: Boolean) {
+        val repository = backend.settings ?: return
+        scope.launch {
+            runCatching {
+                val stored = withContext(Dispatchers.IO) { repository.load() }
+                withContext(Dispatchers.IO) { repository.save(stored.copy(memoryOptimize = on)) }
             }
         }
     }
@@ -498,6 +553,9 @@ fun LaunchPage(
                     rootText = stored.defaultGameRoot
                 }
                 if (selected == null) memoryText = stored.defaultMemoryMb.toString()
+                memoryAuto = stored.memoryAuto
+                memoryOptimize = stored.memoryOptimize
+                memoryAskSkipped = stored.memoryAskSkipped
                 val wanted = stored.activeAccountUuid
                 val repositoryOfAccounts = backend.accounts
                 if (repositoryOfAccounts != null) {
@@ -537,7 +595,6 @@ fun LaunchPage(
     Box(Modifier.fillMaxSize()) {
     Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
         LaunchSidePanel(
-            merged = merged,
             selected = selected,
             busy = busy,
             running = phase is LaunchPhase.Running,
@@ -551,15 +608,30 @@ fun LaunchPage(
             onMemoryChange = { memoryText = it },
             memoryNotice = memoryNotice,
             memoryDirty = memoryDirty,
-            canLaunch = selected != null && selectedJava != null,
-            onSelect = { instance ->
-                selected = instance
-                memoryText = instance.memoryMb.toString()
-                memoryNotice = ""
+            memoryAuto = memoryAuto,
+            onMemoryAutoChange = { want ->
+                memoryAuto = want
+                memoryNotice =
+                    if (want) "已改回自动分配：启动时按版本与已装内容算，不用管这个数。"
+                    else "已改成手动：下面这个数就是本次要给多少内存。"
+                rememberMemoryAuto(want)
             },
+            memoryOptimize = memoryOptimize,
+            onMemoryOptimizeChange = { want ->
+                // 勾上（而不是取消）才问一句：取消是「别改我的参数」，不用解释。
+                if (want && !memoryAskSkipped) {
+                    askMemoryOptimize = true
+                } else {
+                    memoryOptimize = want
+                    rememberMemoryOptimize(want)
+                }
+            },
+            canLaunch = selected != null && selectedJava != null,
             onSaveMemory = { saveMemory() },
             onLaunch = { launchGame() },
             onStop = { stopGame() },
+            onOpenSelect = onOpenSelect,
+            onOpenSetup = { selected?.let { instance -> onOpenSetup(instance) } },
         )
         Column(
             Modifier.weight(1f).fillMaxHeight().verticalScroll(rememberScrollState()),
@@ -789,6 +861,45 @@ fun LaunchPage(
             }
         }
     }
+        // 内存优化改的是 JVM 参数（堆比例、GC），不是「多给点内存」那么简单，
+        // 所以第一次勾上要问一句。两个答案的差别只在下次还问不问：
+        // 「就这一次」= 这次开，下次再勾还问；「以后都这样」= 记住，不再问。
+        if (askMemoryOptimize) {
+            AlertDialog(
+                onDismissRequest = { askMemoryOptimize = false },
+                title = { Text("开启内存优化？") },
+                text = {
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text("它会给这个版本加几条 JVM 参数（堆与新生代的初始占比、G1 的停顿目标），让内存用得更紧凑一些。")
+                        Text(
+                            "改动只影响启动参数，不动实例里的任何文件；关掉就恢复原样。",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                },
+                confirmButton = {
+                    TextButton(
+                        onClick = {
+                            memoryOptimize = true
+                            memoryAskSkipped = true
+                            rememberMemoryOptimize(true)
+                            rememberMemoryAskSkipped()
+                            askMemoryOptimize = false
+                        },
+                    ) { Text("以后都这样") }
+                },
+                dismissButton = {
+                    TextButton(
+                        onClick = {
+                            memoryOptimize = true
+                            rememberMemoryOptimize(true)
+                            askMemoryOptimize = false
+                        },
+                    ) { Text("就这一次") }
+                },
+            )
+        }
         if (phase is LaunchPhase.Starting) {
             LaunchOverlay(
                 instanceName = selected?.name.orEmpty(),
@@ -1099,7 +1210,7 @@ private fun StatusLine(phase: LaunchPhase, stageText: String, menuReached: Boole
  */
 @Composable
 private fun LaunchSidePanel(
-    merged: List<Instance>,
+    /** 当前选中的实例；null = 还没选（这一栏只剩「版本选择」可用）。 */
     selected: Instance?,
     busy: Boolean,
     running: Boolean,
@@ -1117,11 +1228,18 @@ private fun LaunchSidePanel(
     memoryNotice: String,
     /** 输入框里的数还没写进实例。为空说明「填的数与实例上存着的一样」。 */
     memoryDirty: Boolean,
+    /** 内存自动分配开关；关掉才用 [memoryText] 里手填的数。 */
+    memoryAuto: Boolean,
+    onMemoryAutoChange: (Boolean) -> Unit,
+    /** 内存优化勾选；勾之前会先弹一次说明。 */
+    memoryOptimize: Boolean,
+    onMemoryOptimizeChange: (Boolean) -> Unit,
     canLaunch: Boolean,
-    onSelect: (Instance) -> Unit,
     onSaveMemory: () -> Unit,
     onLaunch: () -> Unit,
     onStop: () -> Unit,
+    onOpenSelect: () -> Unit,
+    onOpenSetup: () -> Unit,
 ) {
     val compact = LocalWindowInfo.current.containerSize.width < 1100
     Surface(
@@ -1133,43 +1251,28 @@ private fun LaunchSidePanel(
             Modifier.fillMaxHeight().padding(12.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    "实例",
-                    Modifier.weight(1f),
-                    style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.SemiBold,
-                )
-                Text(
-                    merged.size.toString() + " 个",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            if (merged.isEmpty()) {
-                Text(
-                    "这个目录里还没有可启动的版本。先去「下载」装一个。",
-                    Modifier.weight(1f),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            } else {
-                LazyColumn(
-                    Modifier.fillMaxWidth().weight(1f),
-                    verticalArrangement = Arrangement.spacedBy(6.dp),
-                ) {
-                    items(merged, key = { instanceKey(it) }) { instance ->
-                        InstanceRow(
-                            instance = instance,
-                            selected = instanceKey(instance) == selected?.let { instanceKey(it) },
-                            enabled = !busy,
-                            onClick = { onSelect(instance) },
-                        )
-                    }
-                }
-            }
-            // 身份就在启动栏里选，不让人跑去设置页翻二级。名单位于账号文件，
-            // 这里只是把「今天用谁」摆到启动按钮旁边 —— 用错号进服务器是要等被踢才发现的。
+            // 当前玩的是哪一版：这一栏不再列全部实例（那是「版本选择」副页面的事），
+            // 只显示手上这一个，点「版本选择」才展开整张清单。
+            Text(
+                if (selected == null) "还没选版本" else selected.name,
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+            )
+            Text(
+                if (selected == null) {
+                    "点下面的「版本选择」挑一个。"
+                } else {
+                    "游戏 " + selected.gameVersion + " · " + selected.loader.name +
+                        (selected.loaderVersion?.takeIf { it.isNotBlank() }?.let { " " + it } ?: "") +
+                        " · " + selected.memoryMb + " MB"
+                },
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            // 身份三格照 PCL 的 PageLaunchLeft.xaml:43-60（正版 / 离线 / 第三方 三个 MyRadioButton）。
+            // 格子上只留三个词，解释放到下面账号行里 —— 三格回答「用哪一类身份」，
+            // 具体用哪个号在下面选，不让用户在格子上先读一遍说明书。
             IdentityPicker(
                 accountList = accountList,
                 active = activeAccount,
@@ -1187,24 +1290,59 @@ private fun LaunchSidePanel(
                     supportingText = { Text("点「启动」会记住这个名字。") },
                 )
             }
+            Spacer(Modifier.height(2.dp))
+            // 内存三态：自动分配是开关，关掉才用手填的数；内存优化是独立勾选，
+            // 它改的是 JVM 参数，所以第一次勾要先问一句（见 askMemoryOptimize）。
             Row(
                 Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                OutlinedTextField(
-                    value = memoryText,
-                    onValueChange = onMemoryChange,
-                    modifier = Modifier.weight(1f),
-                    label = { Text("内存 MB") },
-                    singleLine = true,
+                Column(Modifier.weight(1f)) {
+                    Text("内存", style = MaterialTheme.typography.bodyMedium)
+                    Text(
+                        if (memoryAuto) "自动分配 · 按版本与已装内容算" else "手动 · " + memoryText + " MB",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                TextButton(onClick = { onMemoryAutoChange(!memoryAuto) }, enabled = !busy && selected != null) {
+                    Text(if (memoryAuto) "改成手动" else "改回自动")
+                }
+            }
+            Row(
+                Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                Checkbox(
+                    checked = memoryOptimize,
+                    onCheckedChange = { onMemoryOptimizeChange(it) },
                     enabled = !busy && selected != null,
                 )
-                OutlinedButton(onClick = onSaveMemory, enabled = !busy && selected != null) { Text("存") }
+                Text("内存优化（会改 JVM 参数）", style = MaterialTheme.typography.bodySmall)
+            }
+            if (!memoryAuto) {
+                Row(
+                    Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    OutlinedTextField(
+                        value = memoryText,
+                        onValueChange = onMemoryChange,
+                        modifier = Modifier.weight(1f),
+                        label = { Text("内存 MB") },
+                        singleLine = true,
+                        enabled = !busy && selected != null,
+                    )
+                    OutlinedButton(onClick = onSaveMemory, enabled = !busy && selected != null) { Text("存") }
+                }
             }
             when {
                 memoryNotice.isNotBlank() -> SectionHint(memoryNotice)
-                memoryDirty -> SectionHint("这个数还没写进实例：点「启动」会一起保存，或者点旁边的「存」。")
+                memoryDirty && !memoryAuto ->
+                    SectionHint("这个数还没写进实例：点「启动」会一起保存，或者点旁边的「存」。")
             }
             // 大号按钮照 PCL 的 54 高：它是这一页唯一的主要动作，不该和旁边的次要按钮一样大。
             Button(
@@ -1212,7 +1350,7 @@ private fun LaunchSidePanel(
                 modifier = Modifier.fillMaxWidth().height(54.dp),
                 enabled = !busy && canLaunch,
             ) {
-                Text(if (busy) "启动中…" else "启动", style = MaterialTheme.typography.titleMedium)
+                Text(if (busy) "启动中…" else "启动游戏", style = MaterialTheme.typography.titleMedium)
             }
             if (running || busy) {
                 OutlinedButton(onClick = onStop, modifier = Modifier.fillMaxWidth(), enabled = running) {
@@ -1220,6 +1358,20 @@ private fun LaunchSidePanel(
                 }
             } else if (stageText.isNotBlank()) {
                 SectionHint(stageText)
+            }
+            // 两个副页面入口照 PCL 的 PageLaunchLeft.xaml:27-28（版本选择 / 版本设置）。
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                OutlinedButton(onClick = onOpenSelect, modifier = Modifier.weight(1f), enabled = !busy) {
+                    Text("版本选择")
+                }
+                OutlinedButton(
+                    onClick = onOpenSetup,
+                    modifier = Modifier.weight(1f),
+                    enabled = !busy && selected != null,
+                ) { Text("版本设置") }
             }
         }
     }

@@ -1,6 +1,12 @@
 package io.github.huang404yan.platypus.ui
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.width
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -56,6 +62,30 @@ import java.io.File
  * 这里不新建页面路由：详情是实例列表里的一次「钻进一个」，用返回按钮回去，
  * 左侧导航的高亮仍然是「实例」，不会出现「详情」这种一次性入口占一格导航。
  */
+/**
+ * 版本设置左栏的七个分区。
+ *
+ * 照 PCL 的 PageSetup（总览 / 启动 / 界面 / 其他）拆，但拆的依据是「玩家会为了改这件事而来找这个版本」：装模组、给模组分配内存、换 Java、解决存档找不到。
+ */
+internal const val SETUP_OVERALL = "overall"
+internal const val SETUP_LAUNCH = "launch"
+internal const val SETUP_MODS = "mods"
+internal const val SETUP_PACKS = "packs"
+internal const val SETUP_SAVES = "saves"
+internal const val SETUP_ADV = "adv"
+internal const val SETUP_EXPORT = "export"
+
+/** 左栏顺序即展示顺序。 */
+internal val SETUP_SECTIONS = listOf(
+    SETUP_OVERALL to "总览",
+    SETUP_LAUNCH to "启动与 Java",
+    SETUP_MODS to "Mod",
+    SETUP_PACKS to "资源包与光影",
+    SETUP_SAVES to "存档与备份",
+    SETUP_ADV to "高级",
+    SETUP_EXPORT to "导出整合包",
+)
+
 @Composable
 internal fun InstanceDetailPanel(
     instance: Instance,
@@ -89,6 +119,13 @@ internal fun InstanceDetailPanel(
     // 不做成独立导航项 —— 这两件事永远是从某个具体实例出发的，脱离实例没有意义。
     var exporting by remember(instance.directory) { mutableStateOf(false) }
     var browsingSaves by remember(instance.directory) { mutableStateOf(false) }
+    // 左栏当前分区。默认「总览」：用户从启动页点「版本设置」进来，先要看的是「这是个什么版本」。
+    var section by remember(instance.directory) { mutableStateOf(SETUP_OVERALL) }
+
+    // 这个版本目录里真实存在的模组 / 资源包 / 光影文件名。
+    var modFiles by remember(instance.directory) { mutableStateOf<List<File>>(emptyList()) }
+    var packFiles by remember(instance.directory) { mutableStateOf<List<File>>(emptyList()) }
+    var shaderFiles by remember(instance.directory) { mutableStateOf<List<File>>(emptyList()) }
 
     val scope = rememberCoroutineScope()
 
@@ -98,6 +135,12 @@ internal fun InstanceDetailPanel(
             details = withContext(Dispatchers.IO) { InstanceDetailsLoader.load(instance) }
             runtimes = withContext(Dispatchers.IO) {
                 runCatching { backend?.javaRuntimes?.detect() }.getOrNull().orEmpty()
+            }
+            val baseDir = details?.gameDir
+            if (baseDir != null) {
+                modFiles = withContext(Dispatchers.IO) { jarsIn(File(baseDir, "mods")) }
+                packFiles = withContext(Dispatchers.IO) { jarsIn(File(baseDir, "resourcepacks")) }
+                shaderFiles = withContext(Dispatchers.IO) { jarsIn(File(baseDir, "shaderpacks")) }
             }
         } finally {
             loading = false
@@ -225,9 +268,13 @@ internal fun InstanceDetailPanel(
         return
     }
 
-    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            TextButton(onClick = onBack) { Text("← 返回实例列表") }
+    Column(Modifier.fillMaxSize()) {
+        Row(
+            Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            TextButton(onClick = onBack) { Text("← 返回启动页") }
             Text(instance.name, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
             Text(
                 "游戏 " + instance.gameVersion + (instance.loaderVersion?.let { " · 加载器 " + it } ?: ""),
@@ -242,214 +289,354 @@ internal fun InstanceDetailPanel(
             return@Column
         }
 
-        DetailCard("这个实例在哪") {
-            DetailLine("版本目录", d.versionDir.absolutePath)
-            DetailLine("游戏根目录", d.gameRoot.absolutePath)
-            DetailLine(
-                "存档与模组在",
-                d.gameDir.absolutePath + if (d.isolated) "" else "（与同目录其他版本共用）",
-            )
-            DetailLine(
-                "共享目录",
-                "libraries/ 与 assets/ 由所有实例共用（放不下第二份）。",
-            )
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                OutlinedButton(onClick = { openFolder(d.versionDir) }) { Text("打开实例目录") }
-                OutlinedButton(onClick = { openFolder(d.gameDir) }) { Text("打开存档目录") }
-                OutlinedButton(onClick = { browsingSaves = true }) { Text("存档与备份") }
-                OutlinedButton(onClick = {
-                    exporting = true
-                }) { Text("导出整合包") }
+        Row(Modifier.weight(1f).fillMaxWidth()) {
+            SetupNav(current = section, enabled = !saving) { picked ->
+                section = picked
+                // 存档与导出原本就是整页子页（返回键回列表），这里保持那个形状：
+                // 它们要做的事太多，塞进右栏的一列里会挤成一小条。
+                if (picked == SETUP_SAVES) browsingSaves = true
+                if (picked == SETUP_EXPORT) exporting = true
             }
-        }
-
-        DetailCard("版本隔离") {
-            Row(
-                Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            Column(
+                Modifier.weight(1f).fillMaxHeight()
+                    .verticalScroll(rememberScrollState())
+                    .padding(start = 14.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
-                Column(Modifier.fillMaxWidth(0.78f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                    Text(
-                        if (isolated) "开：这个实例自己一份存档、模组、配置" else "关：与同目录下的其他版本共用一份",
-                        style = MaterialTheme.typography.bodyMedium,
-                    )
-                    Text(
-                        if (canToggleIsolation) {
-                            if (isolated) {
-                                "装模组、存档、改配置都只影响这一个实例。整合包把 mods/ 平铺在游戏根目录时，要关掉才看得见那些模组。"
-                            } else {
-                                "游戏读写 " + d.gameRoot.absolutePath + " 下的 mods/、saves/、options.txt。" +
-                                    "别的版本改了配置、换了模组，这边也会跟着变。"
-                            }
-                        } else {
-                            "这个目录不是 versions/<id> 的形状，开不开隔离都落在同一处，所以不给开关。"
-                        },
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-                Switch(
-                    checked = isolated,
-                    onCheckedChange = { isolated = it },
-                    enabled = canToggleIsolation && !saving,
-                )
-            }
-            if (canToggleIsolation && isolated != instance.isolated) {
-                Text(
-                    "改完要点下面的「保存」才生效，下次启动游戏才用新目录。",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.primary,
-                )
-            }
-            //
-            // 关掉隔离之后，游戏改读游戏根目录那一份 —— 实例目录里的存档它就不再看了。
-            // 只提示「现在读写游戏根目录」是不够的：对用户来说体验就是「我的存档没了」。
-            if (!isolated && pendingDirs.isNotEmpty()) {
-                Text(
-                    "这个实例目录里还有 " + pendingDirs.joinToString("、") + "，关掉隔离后游戏就读不到它们了（它会去游戏根目录找）。",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.error,
-                )
-                Row(
-                    Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    OutlinedButton(onClick = { mergeToRoot() }, enabled = !merging && !saving) {
-                        Text(if (merging) "正在合并…" else "复制到游戏根目录")
-                    }
-                    Text(
-                        "复制而不是移动：原件留在实例目录里，想开回隔离随时能开。同名文件不会覆盖。",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-            }
-            if (notice.isNotBlank()) {
-                Text(
-                    notice,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-        }
-
-        DetailCard("版本文件") {
-            DetailLine("版本 json", if (d.versionJsonExists) "有" else "缺（这个实例起不来）")
-            DetailLine(
-                "client jar",
-                if (d.clientJarExists) "有，" + formatBytes(d.clientJarBytes) else "缺（启动会报缺少客户端 jar）",
-            )
-            if (d.mainClass.isNotBlank()) DetailLine("mainClass", d.mainClass)
-            d.inheritsFrom?.let { DetailLine("继承自", it) }
-            DetailLine("库条目", d.libraryCount.toString() + " 个")
-            DetailLine(
-                "需要的 Java",
-                (d.requiredJavaMajor?.let { "Java " + it } ?: "版本 json 没写，按规则推断 Java " +
-                    GameJavaRules.requiredMajor(instance.gameVersion)) +
-                    (d.javaComponent?.let { "（" + it + "）" } ?: ""),
-            )
-        }
-
-        DetailCard("Java") {
-            val required = d.requiredJavaMajor ?: GameJavaRules.requiredMajor(instance.gameVersion)
-            DetailLine("当前设置", javaPath.ifBlank { "没设，启动时按版本要求自动找" })
-            OutlinedTextField(
-                value = javaPath,
-                onValueChange = { javaPath = it },
-                modifier = Modifier.fillMaxWidth(),
-                label = { Text("Java 可执行文件路径（留空 = 自动找）") },
-                singleLine = true,
-            )
-            if (runtimes.isEmpty()) {
-                Text(
-                    "本机没探测到 Java。去「启动」页点「自动补 Java」现装一个。",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            } else {
-                Text(
-                    "本机探测到 " + runtimes.size + " 个，点一下填进上面的框：",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    runtimes.sortedBy { it.majorVersion }.forEach { runtime ->
-                        val exact = runtime.majorVersion == required
-                        OutlinedButton(
-                            onClick = { javaPath = runtime.path },
-                            modifier = Modifier.fillMaxWidth(),
-                        ) {
+                when (section) {
+                    SETUP_MODS -> {
+                        DetailCard("这个版本的 Mod") {
+                            DetailLine("模组目录", File(d.gameDir, "mods").absolutePath)
+                            DetailLine("已装", modFiles.size.toString() + " 个 jar")
                             Text(
-                                "Java " + runtime.majorVersion +
-                                    (runtime.vendor?.takeIf { it.isNotBlank() }?.let { " · " + it } ?: "") +
-                                    (if (exact) "  ← 这个版本要求的" else "") +
-                                    "   " + runtime.path,
-                                style = MaterialTheme.typography.labelSmall,
-                                maxLines = 1,
+                                "放进来就生效，删掉就没了 —— 这一页只做清点，装新模组去「下载 → Mod」（那里的筛选会读这个版本的加载器与游戏版本）。",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                                OutlinedButton(onClick = { openFolder(File(d.gameDir, "mods")) }) { Text("打开模组目录") }
+                            }
+                            if (modFiles.isEmpty()) {
+                                Text(
+                                    "mods 目录还是空的。",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            } else {
+                                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                    modFiles.take(40).forEach { file ->
+                                        Text(file.name, style = MaterialTheme.typography.labelSmall, maxLines = 1)
+                                    }
+                                }
+                                if (modFiles.size > 40) {
+                                    Text(
+                                        "还有 " + (modFiles.size - 40) + " 个没列出来，去目录里看。",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
+                            }
+                        }
+                    }
+                    SETUP_PACKS -> {
+                        DetailCard("资源包与光影") {
+                            DetailLine("资源包目录", File(d.gameDir, "resourcepacks").absolutePath)
+                            DetailLine("已装资源包", packFiles.size.toString() + " 个")
+                            DetailLine("光影目录", File(d.gameDir, "shaderpacks").absolutePath)
+                            DetailLine("已装光影", shaderFiles.size.toString() + " 个")
+                            Text(
+                                "先后顺序要在游戏的「选项 → 资源包」里调，启动器改不了那个顺序。",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                                OutlinedButton(onClick = { openFolder(File(d.gameDir, "resourcepacks")) }) { Text("打开资源包目录") }
+                                OutlinedButton(onClick = { openFolder(File(d.gameDir, "shaderpacks")) }) { Text("打开光影目录") }
+                            }
+                            for (file in (packFiles + shaderFiles).take(20)) {
+                                Text(file.name, style = MaterialTheme.typography.labelSmall, maxLines = 1)
+                            }
+                        }
+                    }
+                    SETUP_LAUNCH -> {
+                        DetailCard("内存与启动参数") {
+                            OutlinedTextField(
+                                value = memoryText,
+                                onValueChange = { memoryText = it },
+                                modifier = Modifier.fillMaxWidth(),
+                                label = { Text("最大内存（MB，范围 " + Instance.MIN_MEMORY_MB + "–" + Instance.MAX_MEMORY_MB + "）") },
+                                singleLine = true,
+                            )
+                            OutlinedTextField(
+                                value = jvmArgsText,
+                                onValueChange = { jvmArgsText = it },
+                                modifier = Modifier.fillMaxWidth(),
+                                label = { Text("额外 JVM 参数（一行一个，如 -XX:+UseG1GC）") },
+                                minLines = 3,
+                            )
+                            Text(
+                                "内存默认按版本与已装内容自动算；在启动页勾掉「自动分配」才用这里填的数。",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        JavaCard(
+                            required = d.requiredJavaMajor ?: GameJavaRules.requiredMajor(instance.gameVersion),
+                            javaPath = javaPath,
+                            onJavaPathChange = { javaPath = it },
+                            runtimes = runtimes,
+                        )
+                    }
+                    SETUP_ADV -> {
+                        DetailCard("版本隔离") {
+                            IsolationBody(
+                                isolated = isolated,
+                                onIsolatedChange = { isolated = it },
+                                canToggleIsolation = canToggleIsolation,
+                                saving = saving,
+                                changed = isolated != instance.isolated,
+                                gameRootPath = d.gameRoot.absolutePath,
+                                pendingDirs = pendingDirs,
+                                merging = merging,
+                                onMerge = { mergeToRoot() },
+                            )
+                        }
+                        DetailCard("这个实例在哪") {
+                            DetailLine("版本目录", d.versionDir.absolutePath)
+                            DetailLine("游戏根目录", d.gameRoot.absolutePath)
+                            DetailLine(
+                                "存档与模组在",
+                                d.gameDir.absolutePath + if (d.isolated) "" else "（与同目录其他版本共用）",
+                            )
+                            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                                OutlinedButton(onClick = { openFolder(d.versionDir) }) { Text("打开实例目录") }
+                                OutlinedButton(onClick = { openFolder(d.gameDir) }) { Text("打开存档目录") }
+                            }
+                        }
+                    }
+                    else -> {
+                        DetailCard("这个实例在哪") {
+                            DetailLine("版本目录", d.versionDir.absolutePath)
+                            DetailLine("游戏根目录", d.gameRoot.absolutePath)
+                            DetailLine(
+                                "存档与模组在",
+                                d.gameDir.absolutePath + if (d.isolated) "" else "（与同目录其他版本共用）",
+                            )
+                            DetailLine("共享目录", "libraries/ 与 assets/ 由所有实例共用（放不下第二份）。")
+                            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                                OutlinedButton(onClick = { openFolder(d.versionDir) }) { Text("打开实例目录") }
+                                OutlinedButton(onClick = { openFolder(d.gameDir) }) { Text("打开存档目录") }
+                                OutlinedButton(onClick = { browsingSaves = true }) { Text("存档与备份") }
+                                OutlinedButton(onClick = { exporting = true }) { Text("导出整合包") }
+                            }
+                        }
+                        DetailCard("版本文件") {
+                            DetailLine("版本 json", if (d.versionJsonExists) "有" else "缺（这个实例起不来）")
+                            DetailLine(
+                                "client jar",
+                                if (d.clientJarExists) "有，" + formatBytes(d.clientJarBytes) else "缺（启动会报缺少客户端 jar）",
+                            )
+                            if (d.mainClass.isNotBlank()) DetailLine("mainClass", d.mainClass)
+                            d.inheritsFrom?.let { DetailLine("继承自", it) }
+                            DetailLine("库条目", d.libraryCount.toString() + " 个")
+                            DetailLine(
+                                "需要的 Java",
+                                (d.requiredJavaMajor?.let { "Java " + it } ?: "版本 json 没写，按规则推断 Java " +
+                                    GameJavaRules.requiredMajor(instance.gameVersion)) +
+                                    (d.javaComponent?.let { "（" + it + "）" } ?: ""),
+                            )
+                        }
+                        DetailCard("占了多少地方") {
+                            d.dirs.forEach { DirLine(it) }
+                            Text(
+                                "合计 " + formatBytes(d.totalBytes) + "（只算上面这些目录，不含共享的 libraries/ 与 assets/）",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        if (d.warnings.isNotEmpty()) {
+                            DetailCard("注意") {
+                                d.warnings.forEach {
+                                    Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if (section == SETUP_LAUNCH || section == SETUP_ADV) {
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Button(onClick = { save() }, enabled = !saving) { Text(if (saving) "保存中…" else "保存") }
+                        if (notice.isNotBlank()) {
+                            Text(
+                                notice,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                         }
                     }
                 }
-                val hit = runtimes.findExactMajor(required)
-                if (hit == null) {
-                    Text(
-                        "注意：没有正好是 Java " + required + " 的运行时。本启动器不做高版本顶替，启动会失败。",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.error,
-                    )
-                }
             }
         }
+    }
+}
 
-        DetailCard("内存与启动参数") {
-            OutlinedTextField(
-                value = memoryText,
-                onValueChange = { memoryText = it },
-                modifier = Modifier.fillMaxWidth(),
-                label = { Text("最大内存（MB，范围 " + Instance.MIN_MEMORY_MB + "–" + Instance.MAX_MEMORY_MB + "）") },
-                singleLine = true,
-            )
-            OutlinedTextField(
-                value = jvmArgsText,
-                onValueChange = { jvmArgsText = it },
-                modifier = Modifier.fillMaxWidth(),
-                label = { Text("额外 JVM 参数（一行一个，如 -XX:+UseG1GC）") },
-                minLines = 3,
-            )
-        }
-
-        DetailCard("占了多少地方") {
-            d.dirs.forEach { DirLine(it) }
-            Text(
-                "合计 " + formatBytes(d.totalBytes) + "（只算上面这些目录，不含共享的 libraries/ 与 assets/）",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-
-        if (d.warnings.isNotEmpty()) {
-            DetailCard("注意") {
-                d.warnings.forEach {
-                    Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
-                }
-            }
-        }
-
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
-            Button(onClick = { save() }, enabled = !saving) { Text(if (saving) "保存中…" else "保存") }
-            if (notice.isNotBlank()) {
+@Composable
+private fun SetupNav(current: String, enabled: Boolean, onPick: (String) -> Unit) {
+    Column(Modifier.width(176.dp).fillMaxHeight(), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+        SETUP_SECTIONS.forEach { (id, label) ->
+            val selected = id == current
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .clip(MaterialTheme.shapes.small)
+                    .background(if (selected) MaterialTheme.colorScheme.primary.copy(alpha = 0.13f) else Color.Transparent)
+                    .clickable(enabled = enabled) { onPick(id) }
+                    .padding(horizontal = 10.dp, vertical = 9.dp),
+            ) {
                 Text(
-                    notice,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    label,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
                 )
             }
         }
     }
 }
 
+/** 读一个目录下的 jar（模组 / 资源包 / 光影都用这一个）。目录不存在就给空表。 */
+private fun jarsIn(dir: File): List<File> =
+    runCatching {
+        (dir.listFiles() ?: emptyArray())
+            .filter { it.isFile && (it.name.endsWith(".jar", true) || it.name.endsWith(".zip", true)) }
+            .sortedBy { it.name.lowercase() }
+    }.getOrDefault(emptyList())
+
+@Composable
+private fun JavaCard(
+    required: Int,
+    javaPath: String,
+    onJavaPathChange: (String) -> Unit,
+    runtimes: List<JavaRuntime>,
+) {
+    DetailCard("Java") {
+        DetailLine("当前设置", javaPath.ifBlank { "没设，启动时按版本要求自动找" })
+        OutlinedTextField(
+            value = javaPath,
+            onValueChange = onJavaPathChange,
+            modifier = Modifier.fillMaxWidth(),
+            label = { Text("Java 可执行文件路径（留空 = 自动找）") },
+            singleLine = true,
+        )
+        if (runtimes.isEmpty()) {
+            Text(
+                "本机没探测到 Java。去「设置 → 启动」那张卡里点「下载 Java」。",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        } else {
+            Text(
+                "本机探测到 " + runtimes.size + " 个，点一下填进上面的框：",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                runtimes.sortedBy { it.majorVersion }.forEach { runtime ->
+                    val exact = runtime.majorVersion == required
+                    OutlinedButton(onClick = { onJavaPathChange(runtime.path) }, modifier = Modifier.fillMaxWidth()) {
+                        Text(
+                            "Java " + runtime.majorVersion +
+                                (runtime.vendor?.takeIf { it.isNotBlank() }?.let { " · " + it } ?: "") +
+                                (if (exact) "  ← 这个版本要求的" else "") +
+                                "   " + runtime.path,
+                            style = MaterialTheme.typography.labelSmall,
+                            maxLines = 1,
+                        )
+                    }
+                }
+            }
+            if (runtimes.findExactMajor(required) == null) {
+                Text(
+                    "注意：没有正好是 Java " + required + " 的运行时。本启动器不做高版本顶替，启动会失败。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun IsolationBody(
+    isolated: Boolean,
+    onIsolatedChange: (Boolean) -> Unit,
+    canToggleIsolation: Boolean,
+    saving: Boolean,
+    changed: Boolean,
+    gameRootPath: String,
+    pendingDirs: List<String>,
+    merging: Boolean,
+    onMerge: () -> Unit,
+) {
+    Row(
+        Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Column(Modifier.fillMaxWidth(0.78f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text(
+                if (isolated) "开：这个实例自己一份存档、模组、配置" else "关：与同目录下的其他版本共用一份",
+                style = MaterialTheme.typography.bodyMedium,
+            )
+            Text(
+                if (canToggleIsolation) {
+                    if (isolated) {
+                        "装模组、存档、改配置都只影响这一个实例。整合包把 mods/ 平铺在游戏根目录时，要关掉才看得见那些模组。"
+                    } else {
+                        "游戏读写 " + gameRootPath + " 下的 mods/、saves/、options.txt。别的版本改了配置、换了模组，这边也会跟着变。"
+                    }
+                } else {
+                    "这个目录不是 versions/<id> 的形状，开不开隔离都落在同一处，所以不给开关。"
+                },
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        Switch(checked = isolated, onCheckedChange = onIsolatedChange, enabled = canToggleIsolation && !saving)
+    }
+    if (changed) {
+        Text(
+            "改完要点下面的「保存」才生效，下次启动游戏才用新目录。",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.primary,
+        )
+    }
+    if (!isolated && pendingDirs.isNotEmpty()) {
+        Text(
+            "这个实例目录里还有 " + pendingDirs.joinToString("、") + "，关掉隔离后游戏就读不到它们了（它会去游戏根目录找）。",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.error,
+        )
+        Row(
+            Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            OutlinedButton(onClick = onMerge, enabled = !merging && !saving) {
+                Text(if (merging) "正在合并…" else "复制到游戏根目录")
+            }
+            Text(
+                "复制而不是移动：原件留在实例目录里，想开回隔离随时能开。同名文件不会覆盖。",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
 @Composable
 private fun DetailCard(title: String, content: @Composable () -> Unit) {
     Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {

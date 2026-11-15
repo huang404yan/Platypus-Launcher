@@ -3,6 +3,9 @@ package io.github.huang404yan.platypus.ui
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -92,11 +95,14 @@ private sealed interface NewPhase {
  * - **仅扫描到**：目录里有 `versions/<id>/<id>.json`，但本启动器没记过，只读；
  * - **新建**：选一个版本走「下载 → 补 Java → 登记」，与下载页「一键安装」是同一条实现。
  */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun InstancePage(
     backend: LauncherBackend?,
     initialGameRoot: String?,
+    onBack: () -> Unit = {},
     onLaunch: (Instance) -> Unit = {},
+    onOpenSetup: (Instance) -> Unit = {},
 ) {
     var rootText by remember { mutableStateOf(initialGameRoot ?: defaultGameRoot()) }
     var result by remember { mutableStateOf<ScanResult?>(null) }
@@ -108,9 +114,6 @@ fun InstancePage(
 
     var editingKey by remember { mutableStateOf<String?>(null) }
     var editNotice by remember { mutableStateOf("") }
-
-    /** 正在看详情的实例（按 instanceKey 记，切目录后能对上）。null = 列表视图。 */
-    var detailKey by remember { mutableStateOf<String?>(null) }
 
     /** 正在确认删除的实例（null = 没有弹窗）。 */
     var deleteTarget by remember { mutableStateOf<Instance?>(null) }
@@ -403,17 +406,6 @@ fun InstancePage(
     val merged = mergeInstances(registered, result?.instances.orEmpty())
     val scannedOnly = merged.count { !it.registered }
 
-    val detailInstance = detailKey?.let { key -> merged.firstOrNull { instanceKey(it) == key } }
-    if (detailInstance != null) {
-        InstanceDetailPanel(
-            instance = detailInstance,
-            backend = backend,
-            onBack = { detailKey = null },
-            onNotice = { detailKey = null; message = it; scope.launch { rescan() } },
-        )
-        return
-    }
-
     // 整页滚动：默认窗口里卡片一多，下面几张就被切在窗口外，用户得先最大化才看得全。
     // 这里不用「固定头 + weight(1f) 列表」是因为顶部那几行（目录、新建卡片、提示）
     // 在窄窗口下自己就会占掉大半屏，权重分完列表只剩几十像素，滚轮落在列表外就没反应。
@@ -421,9 +413,18 @@ fun InstancePage(
         Modifier.fillMaxSize().verticalScroll(rememberScrollState()),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        Text("实例", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
+        // 这个页面现在是启动页压上来的副页面（PCL 的「版本选择」），
+        // 所以第一行是返回而不是标题 —— 用户是从哪儿进来的要能原路回去。
+        Row(
+            Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            OutlinedButton(onClick = onBack, enabled = !busy) { Text("← 返回") }
+            Text("版本选择", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
+        }
         Text(
-            "扫描目录里已有的版本，或新建一个（下载 → 补 Java → 登记）。扫描只读；登记的实例才能改内存。",
+            "挑一个版本回启动页。扫描目录里已有的版本，或新建一个（下载 → 补 Java → 登记）；扫描只读，登记的实例才能改内存。",
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -511,6 +512,14 @@ fun InstancePage(
                     if (editNotice.isNotBlank()) Hint(editNotice)
                     // 实例是个位数到十几的量级：整段铺开、交给外层滚动，
                     // 比 LazyColumn 再套一层滚动更可预期（滚轮只作用在一个方向上）。
+                    // 卡片网格：版本是“我盘上有几个”的东西，一屏看得到比一条条往下读快。
+                    // 用 FlowRow 而不是 LazyVerticalGrid：外层已经是整页滚动，
+                    // 嵌一个自带滚动的网格会出现两层滚轮。
+                    FlowRow(
+                        Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp),
+                    ) {
                     merged.forEach { instance ->
                         key(instanceKey(instance)) {
                             InstanceCard(
@@ -529,10 +538,11 @@ fun InstancePage(
                                 onLaunch = { onLaunch(instance) },
                                 onRemove = { removeRegistration(instance) },
                                 onDelete = { prepareDelete(instance) },
-                                onDetails = { detailKey = instanceKey(instance) },
+                                onDetails = { onOpenSetup(instance) },
                                 enabled = !busy && !deleting,
                             )
                         }
+                    }
                     }
                 }
             }
@@ -735,6 +745,7 @@ private fun NewInstanceCard(
 /** 单个实例卡片：左半边是信息，右半边是动作；编辑态把动作行换成内存输入框。 */
 @Composable
 private fun InstanceCard(
+    modifier: Modifier = Modifier,
     instance: Instance,
     editing: Boolean,
     onStartEdit: () -> Unit,
@@ -750,7 +761,7 @@ private fun InstanceCard(
     var memoryText by remember(instance.memoryMb, editing) { mutableStateOf(instance.memoryMb.toString()) }
 
     Card(
-        Modifier.fillMaxWidth(),
+        modifier.width(336.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
     ) {
         Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {

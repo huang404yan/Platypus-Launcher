@@ -1,6 +1,41 @@
 package io.github.huang404yan.platypus.ui
 
 /**
+ * 一级导航。照 PCL 的顶部横排五项做（custom/FormMain.xaml:123-131 的五个 MyRadioButton：
+ * 启动 / 下载 / 联机 / 设置 / 更多），不再用左侧竖排。
+ *
+ * 为什么放弃竖排：竖排把「实例」也算成一级项，于是启动页、实例页、下载页各有一份
+ * 「这一版怎么启动」的入口，用户得记「改内存去哪、换身份去哪、看 Java 去哪」。
+ * 顶部横排五项是 PCL 十年迭代下来的答案 —— 玩家心里只有五件事：
+ * 今天玩哪个（启动）、装个什么（下载）、跟人一起玩（联机）、改我的设置（设置）、
+ * 其余杂项（更多）。
+ *
+ * [MORE] 里收的是「帮助 / 关于 / 诊断」：三件事都是「出了问题或想了解」时才去，
+ * 平时不占视线；但它们又必须能一眼找到，所以不做成二级里再套一层。
+ */
+enum class Page(val label: String) {
+    LAUNCH("启动"),
+    DOWNLOAD("下载"),
+    LINK("联机"),
+    SETTINGS("设置"),
+    MORE("更多"),
+}
+
+/**
+ * 副页面：压在主界面上、右上角带返回的那种（PCL 的 InstanceSelect / InstanceSetup）。
+ *
+ * 不占顶部五格：它们永远是从某个具体对象出发的（「这个版本」的设置、
+ * 「选哪个版本」的选择），脱离那个对象就没有意义，做成一级项会变成空页面。
+ */
+sealed interface Overlay {
+    /** 版本选择：启动页点「版本选择」进来，选一个就压栈回去。 */
+    data object InstanceSelect : Overlay
+
+    /** 版本设置：对某一个实例做精细设置（Java / 内存 / Mod / 资源包 / 存档 / 导出）。 */
+    data class InstanceSetup(val instanceKey: String) : Overlay
+}
+
+/**
  * 一级导航项下面的一个二级项。
  *
  * id 不用下标：页面里存的是「上次选的是哪个二级」，用 Index 存的话，
@@ -12,8 +47,8 @@ data class SubTab(
     /**
      * 这一项旁边要不要挂一个「刷新」按钮。
      *
-     * 挂在这里而不是页面内容区顶行，是照 PCL 的做法（`PageDownloadLeft.xaml` 的
-     * `MyListItem.Buttons`）：刷新是「对这份清单的重新读取」，属于导航项的属性，
+     * 挂在这里而不是页面内容区顶行，是照 PCL 的做法（PageDownloadLeft.xaml 的
+     * MyListItem.Buttons）：刷新是「对这份清单的重新读取」，属于导航项的属性，
      * 放在左栏和清单挨着，用户不用进内容区找。点下去只发一个信号，具体刷什么由页面决定。
      */
     val refreshable: Boolean = false,
@@ -23,30 +58,27 @@ data class SubTab(
  * 每个一级页面自己有几个二级项。
  *
  * 表放在这里而不是各页面里，是因为左侧栏要拿它渲染第二层 —— 页面自己知道
- * 有什么二级项，但侧边栏看不见页面内部。代价是加一个二级项要改两处（这里和页面），
- * 换来的是导航结构只有一份定义，不会出现「侧边栏有这一项、页面里没有」。
+ * 有什么二级项，但左边那一列看不见页面内部。代价是加一个二级项要改两处（这里和页面），
+ * 换来的是导航结构只有一份定义，不会出现「左栏有这一项、页面里没有」。
  *
- * 空表 = 这个一级页面暂时还是单页，侧边栏不展开第二层。
+ * 空表 = 这个一级页面没有二级项，左栏不展开第二层（启动页与联机页就是这种：
+ * 启动页的东西全在左栏那张卡里，联机页用页面内的分段切换）。
  *
- * 「下载」下面挂七件事，是照 PCL 的信息架构重排的（`PageDownloadLeft.xaml`）：
+ * 「下载」下面挂七件事，是照 PCL 的信息架构重排的（PageDownloadLeft.xaml）：
  * 装原版、装 Mod、装整合包、装数据包、装资源包、装光影、下服务端，都是「从网上下东西」，
  * 只是产物落点不同。以前 Mod 与光影资源包是两个一级页，和人「我想装点什么」的心智
  * 对不上 —— 用户得先知道那东西叫「模组」，才找得到装它的入口。
  *
- * PCL 那一列还有「服务器」与「插件」两项。服务端这里做了（原版 server.jar + eula.txt +
- * 开服脚本）；插件不做：Modrinth 的 `project_type:plugin` facet 实测会退化成全站模组搜索
- * （返回的 hits 全是 project_type=mod），而且插件要落在服务端的 `plugins/` 目录里，
- * 这一版还没有「服务端实例」这个概念，硬塞一个入口只会让人装到客户端目录里。
+ * 「设置」下的 Java 并进了「启动」：它不属于「往盘上装一份运行时」这种独立动作，
+ * 而是「这个实例用哪个 Java」，和内存、窗口一样是启动参数的一部分。
  */
 val PAGE_SUB_TABS: Map<Page, List<SubTab>> = mapOf(
     Page.DOWNLOAD to listOf(
         SubTab("vanilla", "原版游戏", refreshable = true),
         SubTab("mods", "Mod", refreshable = true),
         // 整合包页没有「已经拉下来的清单」可刷新：搜到的结果随搜随出，导入进度也自带重试。
-        // PCL 那一项挂刷新是因为它会缓存整合包列表，这里不缓存，就不放一个点了没反应的按钮。
         SubTab("modpack", "整合包"),
-        // 数据包与资源包的位置照 PCL 的 PageDownloadLeft.xaml：数据包挨着整合包（都是「改世界」），
-        // 资源包与光影包挨在一起（都是「改观感」）。
+        // 数据包挨着整合包（都是「改世界」），资源包与光影包挨在一起（都是「改观感」）。
         SubTab("datapacks", "数据包", refreshable = true),
         SubTab("resourcepacks", "资源包", refreshable = true),
         SubTab("shaders", "光影包", refreshable = true),
@@ -54,25 +86,23 @@ val PAGE_SUB_TABS: Map<Page, List<SubTab>> = mapOf(
         SubTab("server", "服务端"),
     ),
     Page.SETTINGS to listOf(
-        SubTab("launch", "启动"),
+        // 标可刷新：这一页里要读本机 Java 清单，用户重装 / 换目录后需要手动重读。
+        SubTab(SETTINGS_TAB_LAUNCH, "启动", refreshable = true),
         // 账号紧跟「启动」：它决定「以谁的身份进游戏」，比目录和内存更靠前。
-        SubTab("account", "账号"),
-        // Java 单独一项：它不属于「启动参数」，而是「往盘上装一份运行时」，
-        // 和下载页那几项是同一类动作，只是入口挂在设置里（PCL 也是这么分的）。
-        SubTab("java", "Java", refreshable = true),
-        // 下载源排在「界面」前面：它和 Java 一样属于「装东西的那条路怎么走」，
-        // 而不是外观。放这里也让它离「界面」这种纯观感项远一点。
-        SubTab("download", "下载"),
-        // 存档自动备份排在「下载」之后、「界面」之前：它属于「数据怎么留住」，
-        // 与外观无关，但也不像「其他」那样纯属杂项 —— 存档是玩家唯一下不回来的东西。
-        SubTab("saves", "存档"),
-        SubTab("ui", "界面"),
-        SubTab("other", "其他"),
+        SubTab(SETTINGS_TAB_ACCOUNT, "账号"),
+        // 下载源属于「装东西的那条路怎么走」，和外观无关，放中间。
+        SubTab(SETTINGS_TAB_DOWNLOAD, "下载"),
+        // 存档自动备份：它是玩家唯一下不回来的东西，单独一项。
+        SubTab(SETTINGS_TAB_SAVES, "存档"),
+        SubTab(SETTINGS_TAB_UI, "界面"),
+        SubTab(SETTINGS_TAB_OTHER, "其他"),
     ),
-    // 「帮助」放在「关于」之前：它是一级页而不是设置下的一项 —— 玩家遇到问题时
-    // 不会想到先去「设置」里翻。章节列表直接取自 HelpPage.kt 的 HELP_CHAPTERS，
-    // 免得侧栏与正文各写一份、加一章忘改一处。
-    Page.HELP to HELP_CHAPTERS.map { SubTab(it.id, it.label) },
+    // 「更多」三项：帮助在最前（遇到问题第一站），关于与诊断在后。
+    Page.MORE to listOf(
+        SubTab(MORE_TAB_HELP, "帮助"),
+        SubTab(MORE_TAB_ABOUT, "关于与鸣谢"),
+        SubTab(MORE_TAB_DIAG, "诊断"),
+    ),
 )
 
 /** 「下载」下的七个二级项 id。页面按下标判断自己该渲染哪一块。 */
@@ -84,5 +114,25 @@ const val DOWNLOAD_TAB_RESOURCEPACKS = "resourcepacks"
 const val DOWNLOAD_TAB_SHADERS = "shaders"
 const val DOWNLOAD_TAB_SERVER = "server"
 
+/** 「更多」下的三个二级项 id。 */
+const val MORE_TAB_HELP = "help"
+const val MORE_TAB_ABOUT = "about"
+const val MORE_TAB_DIAG = "diag"
+
 /** 某个一级页面的默认二级项：没配就返回空串。 */
 fun defaultSubTab(page: Page): String = PAGE_SUB_TABS[page]?.firstOrNull()?.id.orEmpty()
+
+/**
+ * 帮助页「去这里」按钮的目标。
+ *
+ * 不能只写 [Page]：帮助里有一章讲「存档怎么备」，它的目标是某个具体实例的
+ * 版本设置（副页面），而不是某个顶部一级项。把两种情况收进一个类型，
+ * 帮助页就不用知道主界面是用什么方式摆页面的。
+ */
+sealed interface NavTarget {
+    /** 切到某个一级项，并可指定它的二级项；sub 为 null 表示用默认二级项。 */
+    data class Tab(val page: Page, val sub: String? = null) : NavTarget
+
+    /** 打开「版本选择」副页面。 */
+    data object InstanceSelect : NavTarget
+}

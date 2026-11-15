@@ -9,7 +9,6 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -39,26 +38,6 @@ import io.github.huang404yan.platypus.core.packs.PackKind
 import io.github.huang404yan.platypus.core.theme.LauncherTheme
 import io.github.huang404yan.platypus.core.theme.launcherThemeOf
 import java.io.File
-
-/**
- * 一级导航。
- *
- * 六个入口：PCL 那边「装点什么」全在「下载」一个入口下面分层，我们照搬这个分法 ——
- * 用户想装东西时心里想的是「装个光影」，不是「去光影资源包页」。删掉的 MODS / PACKS
- * 两个一级页没有丢功能，只是降级成「下载」下的五个二级项（见 [PAGE_SUB_TABS]）。
- * 启动与实例留在一级：这两件事天天用，藏进二级只会多一次点击。
- */
-enum class Page(val label: String) {
-    LAUNCH("启动"),
-    INSTANCE("实例"),
-    DOWNLOAD("下载"),
-    LINK("联机"),
-    // 帮助放在设置之前：它不是一个「配置」动作，而是遇到问题时的第一站；
-    // 摆得离关于近一点也符合直觉（版本号、致谢、求助，通常在同一段视线里）。
-    HELP("帮助"),
-    SETTINGS("设置"),
-    ABOUT("关于"),
-}
 
 /** 桌面默认的 .minecraft 位置：优先用 %APPDATA%\\.minecraft。 */
 fun defaultGameRoot(): String {
@@ -93,11 +72,10 @@ fun App(
     LaunchedEffect(theme) { onThemeChanged(theme) }
 
     PlatypusTheme(theme) {
-        // 默认落在「启动」：开启动器的第一件事是「今天玩哪个版本、用谁的身份」，
-        // 实例页是管理用的（改内存、删实例、导出整合包），不该是每天第一眼看到的东西。
+        // 默认落在「启动」：开启动器的第一件事是「今天玩哪个版本、用谁的身份」。
         var page by remember { mutableStateOf(Page.LAUNCH) }
 
-        // 实例页点「去启动」时带上这个实例：只交一个 key，不把整个对象塞给启动页当长期状态。
+        // 启动页点「版本选择 / 版本设置」时，只交一个 key，不把整个对象长期挂在这里。
         var focusKey by remember { mutableStateOf<String?>(null) }
 
         // 联机页点「直接进」时把地址交给启动页。存在这一层而不是启动页里：
@@ -110,86 +88,150 @@ fun App(
         fun subTabOf(target: Page): String =
             subSelection[target.name] ?: defaultSubTab(target)
 
-        // 左栏「刷新」按钮的信号：每次点加一，页面拿它当 LaunchedEffect 的 key。
-        // 只传一个计数而不是传回调进侧边栏，是因为刷新要做的事在页面里（要读哪些状态、
-        // 是重扫磁盘还是重拉网络列表），侧边栏既看不见也不该知道。
+        // 左列「刷新」按钮的信号：每次点加一，页面拿它当 LaunchedEffect 的 key。
+        // 只传一个计数而不是传回调进左列，是因为刷新要做的事在页面里
+        // （要读哪些状态、是重扫磁盘还是重拉网络列表），左列既看不见也不该知道。
         var refreshTick by remember { mutableStateOf(0) }
 
-        LaunchedEffect(Unit) { println("[ui] initial page=$page") }
-        Row(Modifier.fillMaxSize()) {
-            SideBar(
+        // 副页面（压在主界面上的，带返回键）。存对象引用而不是只存 key：
+        // 版本设置要的就是「当时点的那个实例」，重扫一次磁盘反而可能把它扫没了。
+        var overlay by remember { mutableStateOf<Overlay?>(null) }
+        var overlayInstance by remember { mutableStateOf<Instance?>(null) }
+
+        fun openSetup(instance: Instance) {
+            overlayInstance = instance
+            overlay = Overlay.InstanceSetup(instanceKey(instance))
+        }
+
+        LaunchedEffect(Unit) { println("[ui] initial page=" + page) }
+
+        Column(Modifier.fillMaxSize()) {
+            TopBar(
                 current = page,
-                currentSub = subTabOf(page),
                 onSelect = { target ->
-                    // 点的是另一个一级项才重置它自己的二级项：从「下载/光影包」切到「设置」，
+                    // 点的是另一个一级项才重置它自己的二级项：从「下载 / 光影包」切到「设置」，
                     // 再点「下载」回来，应该回到「原版游戏」；而点当前这个一级项本身
                     // （常见于想回内容区顶部）不该把二级项踢回默认。
                     if (target != page) subSelection.remove(target.name)
                     page = target
-                },
-                onSelectSub = { sub -> subSelection[page.name] = sub },
-                onRefreshSub = { sub ->
-                    if (sub == subTabOf(page)) refreshTick++
+                    overlay = null
                 },
             )
-            // 留白与小窗口有关：1280 宽时 24dp 只是呼吸感，1024 宽时它和侧栏一起
-            // 把表单挤得只剩一半。窄窗口收到 16dp，给内容让出位置。
-            val compact = LocalWindowInfo.current.containerSize.width < 1100
-            Box(
-                Modifier.weight(1f).fillMaxHeight().padding(if (compact) 16.dp else 24.dp),
-            ) {
-                val sub = subTabOf(page)
-                // tick 只在「下载」页有意义；别的页面忽略它，免得切页时误触发。
-                // tick 只在「下载」页与「设置 → Java」有意义（两处都有需要重读的清单）；
-                // 别的页面忽略它，免得切页时误触发。
-                val tick = if (page == Page.DOWNLOAD || page == Page.SETTINGS) refreshTick else 0
-                when (page) {
-                    Page.LAUNCH -> LaunchPage(backend, initialGameRoot, focusKey, quickPlay)
-                    Page.INSTANCE -> InstancePage(backend, initialGameRoot) { instance: Instance ->
-                        focusKey = instanceKey(instance)
-                        page = Page.LAUNCH
-                    }
-                    Page.DOWNLOAD -> when (sub) {
-                        DOWNLOAD_TAB_MODS -> ModsPage(initialGameRoot, backend, tick)
-                        // 整合包页没有可刷新的清单（见 Navigation.kt 里那一项的说明），不传 tick
-                        DOWNLOAD_TAB_MODPACK -> ModpackPage(initialGameRoot, backend) { page = Page.LAUNCH }
-                        DOWNLOAD_TAB_DATAPACKS ->
-                            PacksPage(initialGameRoot, backend, PackKind.DATAPACK, tick)
-                        DOWNLOAD_TAB_RESOURCEPACKS ->
-                            PacksPage(initialGameRoot, backend, PackKind.RESOURCE_PACK, tick)
-                        DOWNLOAD_TAB_SHADERS ->
-                            PacksPage(initialGameRoot, backend, PackKind.SHADER, tick)
-                        // 服务端不登记实例，所以没有「装完去启动」的回调
-                        DOWNLOAD_TAB_SERVER -> ServerPage(initialGameRoot, backend)
-                        else -> DownloadsPage(initialGameRoot, backend, tick) { page = Page.LAUNCH }
-                    }
-                    Page.LINK -> LinkPage(initialGameRoot = initialGameRoot) { address ->
-                        quickPlay = address
-                        page = Page.LAUNCH
-                    }
-                    // 设置页的「Java」二级项要刷新信号（重读官方清单），其它二级项不用
-                    Page.SETTINGS -> SettingsPage(
-                        backend = backend,
-                        subTab = subTabOf(Page.SETTINGS),
-                        refreshTick = tick,
-                        theme = theme,
-                        // 只改这一层的皮。标题栏由 LaunchedEffect(theme) 回调出去，
-                        // 那边会等内容帧提交之后再重画（见 Main.kt 的两个 withFrameNanos），
-                        // 所以这里不能提前同步调用，否则标题栏又会抢在内容前面变。
-                        onThemeChange = { theme = it },
+            Row(Modifier.weight(1f).fillMaxWidth()) {
+                // 左列二级：只有「下载 / 设置 / 更多」有，启动与联机没有 —— 那两页的东西全在一屏里。
+                val subs = PAGE_SUB_TABS[page].orEmpty()
+                if (subs.isNotEmpty()) {
+                    SubColumn(
+                        subs = subs,
+                        currentSub = subTabOf(page),
+                        onSelectSub = { sub -> subSelection[page.name] = sub },
+                        onRefreshSub = { sub -> if (sub == subTabOf(page)) refreshTick++ },
                     )
-                    // 「去这里」要既切页又选中那一页的二级项：只切页的话，
-                    // 用户会落在默认的二级项上，还是找不到说明里说的那个入口。
-                    Page.HELP -> HelpPage(subTab = subTabOf(Page.HELP)) { target: Page, targetSub: String? ->
-                        if (targetSub != null) subSelection[target.name] = targetSub
-                        page = target
+                }
+                // 留白与小窗口有关：1280 宽时 24dp 只是呼吸感，1024 宽时它和左列一起
+                // 把表单挤得只剩一半。窄窗口收到 16dp，给内容让出位置。
+                val compact = LocalWindowInfo.current.containerSize.width < 1100
+                Box(
+                    Modifier.weight(1f).fillMaxHeight().padding(if (compact) 16.dp else 24.dp),
+                ) {
+                    val sub = subTabOf(page)
+                    // tick 只在「下载」页与「设置」页有意义（两处都有需要重读的清单）；
+                    // 别的页面忽略它，免得切页时误触发。
+                    val tick = if (page == Page.DOWNLOAD || page == Page.SETTINGS) refreshTick else 0
+                    when (page) {
+                        Page.LAUNCH -> LaunchPage(
+                            backend = backend,
+                            initialGameRoot = initialGameRoot,
+                            focusKey = focusKey,
+                            quickPlayServer = quickPlay,
+                            onOpenSelect = { overlay = Overlay.InstanceSelect },
+                            onOpenSetup = { instance -> openSetup(instance) },
+                        )
+                        Page.DOWNLOAD -> when (sub) {
+                            DOWNLOAD_TAB_MODS -> ModsPage(initialGameRoot, backend, tick)
+                            // 整合包页没有可刷新的清单（见 Navigation.kt 里那一项的说明），不传 tick
+                            DOWNLOAD_TAB_MODPACK -> ModpackPage(initialGameRoot, backend) { page = Page.LAUNCH }
+                            DOWNLOAD_TAB_DATAPACKS ->
+                                PacksPage(initialGameRoot, backend, PackKind.DATAPACK, tick)
+                            DOWNLOAD_TAB_RESOURCEPACKS ->
+                                PacksPage(initialGameRoot, backend, PackKind.RESOURCE_PACK, tick)
+                            DOWNLOAD_TAB_SHADERS ->
+                                PacksPage(initialGameRoot, backend, PackKind.SHADER, tick)
+                            // 服务端不登记实例，所以没有「装完去启动」的回调
+                            DOWNLOAD_TAB_SERVER -> ServerPage(initialGameRoot, backend)
+                            else -> DownloadsPage(initialGameRoot, backend, tick) { page = Page.LAUNCH }
+                        }
+                        Page.LINK -> LinkPage(initialGameRoot = initialGameRoot, backend = backend) { address ->
+                            quickPlay = address
+                            page = Page.LAUNCH
+                        }
+                        // 设置页的「启动」二级项要刷新信号（重读本机 Java 清单），其它二级项不用
+                        Page.SETTINGS -> SettingsPage(
+                            backend = backend,
+                            subTab = subTabOf(Page.SETTINGS),
+                            refreshTick = tick,
+                            theme = theme,
+                            // 只改这一层的皮。标题栏由 LaunchedEffect(theme) 回调出去，
+                            // 那边会等内容帧提交之后再重画（见 Main.kt 的两个 withFrameNanos），
+                            // 所以这里不能提前同步调用，否则标题栏又会抢在内容前面变。
+                            onThemeChange = { theme = it },
+                        )
+                        Page.MORE -> when (sub) {
+                            MORE_TAB_ABOUT -> AboutPage()
+                            MORE_TAB_DIAG -> DiagnosticPage(backend = backend, initialGameRoot = initialGameRoot)
+                            else -> HelpPage { target ->
+                                // 「去这里」要既切页又选中那一页的二级项：只切页的话，
+                                // 用户会落在默认的二级项上，还是找不到说明里说的那个入口。
+                                when (target) {
+                                    is NavTarget.Tab -> {
+                                        if (target.sub != null) {
+                                            subSelection[target.page.name] = target.sub
+                                        }
+                                        page = target.page
+                                    }
+                                    NavTarget.InstanceSelect -> {
+                                        page = Page.LAUNCH
+                                        overlay = Overlay.InstanceSelect
+                                    }
+                                }
+                            }
+                        }
                     }
-                    Page.ABOUT -> AboutPage()
                 }
             }
         }
 
-        // 首次启动挡在最前面。放在 Row 之后而不是之前：它是覆盖式的弹窗，
+        // 副页面盖在最上面。不放 when(page) 里：副页面是「从某个页面出发的」，
+        // 它自己的返回键负责把它摘掉，底下那一页还留着，回来时状态都在。
+        when (val current = overlay) {
+            null -> Unit
+            Overlay.InstanceSelect -> InstancePage(
+                backend = backend,
+                initialGameRoot = initialGameRoot,
+                onBack = { overlay = null },
+                onLaunch = { instance ->
+                    focusKey = instanceKey(instance)
+                    page = Page.LAUNCH
+                    overlay = null
+                },
+                onOpenSetup = { instance -> openSetup(instance) },
+            )
+            is Overlay.InstanceSetup -> {
+                val instance = overlayInstance
+                if (instance == null) {
+                    overlay = null
+                } else {
+                    InstanceDetailPanel(
+                        instance = instance,
+                        backend = backend,
+                        onBack = { overlay = null },
+                        onNotice = { println("[setup] " + it) },
+                    )
+                }
+            }
+        }
+
+        // 首次启动挡在最前面。放在主体之后而不是之前：它是覆盖式的弹窗，
         // 底下的页面照常创建，用户在弹窗里犹豫时背景不是一片空白。
         // 「去登录」只切一级页不够 —— 不选二级项的话用户会落在「设置 → 启动」上，
         // 找不到填应用 ID 的那张卡（这个问题在帮助页那儿已经踩过一次）。
@@ -201,100 +243,63 @@ fun App(
 }
 
 /**
- * 左侧导航。
+ * 顶部横排五个一级项（照 PCL 的 FormMain.xaml:123-131 那一排 MyRadioButton）。
  *
- * 两级：一级项常驻，选中的那个下面展开它自己的二级项（PCL 的 PageSetupLeft 那种）。
- * 只有选中项展开而不是全部展开，是因为五个一级项 + 下载下的五项已经占掉大半屏高；
- * 全部展开会把「设置」和「关于」挤到看不见的地方。
- *
- * 二级项右侧的刷新按钮照 PCL 的 `MyListItem.Buttons` 做：刷新是这一项的属性，
- * 不是内容区顶部的一个控件。
+ * 为什么顶栏而不是侧栏：横排五项在 16:9 的窗口里只占一行，横着排一眼全看见；
+ * 竖排侧栏要吃掉 180"220dp 的宽度，还把「同一件事的入口」摊成好几个一级项。
+ * PCL 右上是浮动的任务管理 / 关闭游戏，我们这儿放版本号，把右上角留给窗口按钮。
  */
 @Composable
-private fun SideBar(
-    current: Page,
-    currentSub: String,
-    onSelect: (Page) -> Unit,
-    onSelectSub: (String) -> Unit,
-    onRefreshSub: (String) -> Unit,
-) {
-    // 窄窗口把侧栏收到 180dp：1024 宽下 220dp 侧栏 + 24dp 边距会吃掉四分之一屏，
-    // 剩下的宽度放不下一行「目录输入框 + 选择 + 扫描 + 新建」四个控件。
+private fun TopBar(current: Page, onSelect: (Page) -> Unit) {
     val compact = LocalWindowInfo.current.containerSize.width < 1100
-    Surface(
-        modifier = Modifier.width(if (compact) 180.dp else 220.dp).fillMaxHeight(),
-        color = MaterialTheme.colorScheme.surfaceVariant,
-    ) {
-        Column(Modifier.fillMaxHeight().padding(if (compact) 12.dp else 16.dp)) {
-            Text(
-                if (Brand.isPreview) Brand.PREVIEW_NAME_ZH else Brand.NAME_ZH,
-                style = MaterialTheme.typography.titleLarge,
-            )
-            Text(
-                if (Brand.isPreview) Brand.PREVIEW_NAME_EN else Brand.NAME_EN,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Spacer(Modifier.height(16.dp))
+    Surface(color = MaterialTheme.colorScheme.surfaceVariant) {
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .padding(horizontal = if (compact) 12.dp else 18.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column {
+                Text(
+                    if (Brand.isPreview) Brand.PREVIEW_NAME_ZH else Brand.NAME_ZH,
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                if (!compact) {
+                    Text(
+                        if (Brand.isPreview) Brand.PREVIEW_NAME_EN else Brand.NAME_EN,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+            Spacer(Modifier.width(if (compact) 14.dp else 28.dp))
             Page.entries.forEach { item ->
                 val selected = item == current
-                Row(
+                Box(
                     Modifier
-                        .fillMaxWidth()
-                        .padding(vertical = 2.dp)
+                        .padding(horizontal = 1.dp)
                         .background(
-                            if (selected) MaterialTheme.colorScheme.primary.copy(alpha = 0.14f) else Color.Transparent,
+                            if (selected) {
+                                MaterialTheme.colorScheme.primary.copy(alpha = 0.14f)
+                            } else {
+                                Color.Transparent
+                            },
                             MaterialTheme.shapes.small,
                         )
                         .clickable { onSelect(item) }
-                        .padding(horizontal = 10.dp, vertical = 10.dp),
-                    verticalAlignment = Alignment.CenterVertically,
+                        .padding(horizontal = if (compact) 10.dp else 16.dp, vertical = 8.dp),
                 ) {
                     Text(
                         text = item.label,
                         style = MaterialTheme.typography.titleSmall,
                         fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
-                        color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                        color = if (selected) {
+                            MaterialTheme.colorScheme.primary
+                        } else {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        },
                     )
-                }
-                if (selected) {
-                    PAGE_SUB_TABS[item].orEmpty().forEach { sub ->
-                        val active = sub.id == currentSub
-                        Row(
-                            Modifier
-                                .fillMaxWidth()
-                                .padding(start = 10.dp, top = 1.dp, bottom = 1.dp)
-                                .clickable { onSelectSub(sub.id) }
-                                .padding(horizontal = 10.dp, vertical = 7.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Text(
-                                "· " + sub.label,
-                                Modifier.weight(1f),
-                                style = MaterialTheme.typography.bodySmall,
-                                fontWeight = if (active) FontWeight.SemiBold else FontWeight.Normal,
-                                color = if (active) {
-                                    MaterialTheme.colorScheme.primary
-                                } else {
-                                    MaterialTheme.colorScheme.onSurfaceVariant
-                                },
-                            )
-                            if (sub.refreshable) {
-                                // 用「↻」字符而不是 material-icons：ui 模块没有 icons 依赖，
-                                // 为一个按钮引一整个图标库不划算。
-                                IconButton(
-                                    onClick = { onRefreshSub(sub.id) },
-                                    modifier = Modifier.size(24.dp),
-                                ) {
-                                    Text(
-                                        "↻",
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    )
-                                }
-                            }
-                        }
-                    }
                 }
             }
             Spacer(Modifier.weight(1f))
@@ -303,6 +308,83 @@ private fun SideBar(
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+        }
+    }
+}
+
+/**
+ * 左列二级项（PCL 的 PageDownloadLeft / PageSetupLeft 那种）。
+ *
+ * 只有当前一级项配了二级表才画这一列：启动页和联机页没有，内容区就自己铺满
+ * —— 少一列空槽比留一条留白条纹好。
+ *
+ * 二级项右侧的刷新按钮照 PCL 的 MyListItem.Buttons 做：刷新是这一项的属性，
+ * 不是内容区顶部的一个控件。
+ */
+@Composable
+private fun SubColumn(
+    subs: List<SubTab>,
+    currentSub: String,
+    onSelectSub: (String) -> Unit,
+    onRefreshSub: (String) -> Unit,
+) {
+    // 窄窗口收到 150dp：这一列只放中文短标签，不需要更宽。
+    val compact = LocalWindowInfo.current.containerSize.width < 1100
+    Surface(
+        modifier = Modifier.width(if (compact) 150.dp else 176.dp).fillMaxHeight(),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f),
+    ) {
+        Column(
+            Modifier
+                .fillMaxHeight()
+                .padding(horizontal = if (compact) 8.dp else 12.dp, vertical = 12.dp),
+        ) {
+            subs.forEach { sub ->
+                val active = sub.id == currentSub
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 1.dp)
+                        .background(
+                            if (active) {
+                                MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
+                            } else {
+                                Color.Transparent
+                            },
+                            MaterialTheme.shapes.small,
+                        )
+                        .clickable { onSelectSub(sub.id) }
+                        .padding(start = 10.dp, end = 4.dp, top = 8.dp, bottom = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        sub.label,
+                        Modifier.weight(1f),
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = if (active) FontWeight.SemiBold else FontWeight.Normal,
+                        color = if (active) {
+                            MaterialTheme.colorScheme.primary
+                        } else {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        },
+                    )
+                    if (sub.refreshable) {
+                        // 用「↻」字符而不是 material-icons：ui 模块没有 icons 依赖，
+                        // 为一个按钮引一整个图标库不划算。
+                        IconButton(
+                            onClick = { onRefreshSub(sub.id) },
+                            modifier = Modifier.size(24.dp),
+                        ) {
+                            Text(
+                                "↻",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                }
+            }
+            Spacer(Modifier.weight(1f));
             Text(
                 Brand.DISCLAIMER_SHORT,
                 style = MaterialTheme.typography.labelSmall,

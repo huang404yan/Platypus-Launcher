@@ -9,9 +9,12 @@ import kotlin.test.assertTrue
  * 帮助页的结构检查。
  *
  * 这些断言看着琐碎，但它们拦的是手册最容易出的三类问题：
- * ① 章节目录与正文对不上（侧栏有一章、点进去是空白/退回第一章）；
+ * ① 章节目录与正文对不上（有一章、点进去是空白/退回第一章）；
  * ② 「去这里」跳到一个不存在的二级项（跳过去落在默认项上，用户还是找不到）；
  * ③ 某章正文空着（结构对了但没内容，比没这一章更误导）。
+ *
+ * 2026-11-15 起「帮助」不再是顶部一级项，它是「更多」下面的第一项；
+ * 章节切换也从左侧栏改成了页内横排 chips。
  */
 class HelpPageTest {
 
@@ -23,19 +26,10 @@ class HelpPageTest {
     }
 
     @Test
-    fun `侧栏里的帮助章节与正文一一对应`() {
-        val subs = PAGE_SUB_TABS.getValue(Page.HELP)
-        assertEquals(HELP_CHAPTERS.size, subs.size)
-        HELP_CHAPTERS.zip(subs).forEach { (chapter, sub) ->
-            assertEquals(chapter.id, sub.id)
-            assertEquals(chapter.label, sub.label)
-        }
-    }
-
-    @Test
-    fun `默认章节是第一章`() {
-        assertEquals(HELP_TAB_START, defaultSubTab(Page.HELP))
+    fun `章节顺序就是页内 chips 的顺序`() {
+        // 页面直接遍历 HELP_CHAPTERS 画 chips，所以顺序即定义；这里钉住入口是第一篇。
         assertEquals(HELP_TAB_START, HELP_CHAPTERS.first().id)
+        assertEquals(HELP_CHAPTERS.size, HELP_CHAPTERS.map { it.id }.distinct().size)
     }
 
     @Test
@@ -47,7 +41,7 @@ class HelpPageTest {
 
     @Test
     fun `id 认不出来时退回第一章而不是抛`() {
-        // 二级项 id 可能来自本地存下来的旧选择（用户升级前选过一章，之后被删了）
+        // 章节 id 可能来自本地存下来的旧选择（用户升级前选过一章，之后被删了）
         assertEquals(HELP_CHAPTERS.first().id, helpChapterOf("不存在的章节").id)
         assertEquals(HELP_CHAPTERS.first().id, helpChapterOf("").id)
     }
@@ -71,14 +65,16 @@ class HelpPageTest {
     @Test
     fun `跳转目标必须是真实存在的页面与二级项`() {
         HELP_CHAPTERS.forEach { chapter ->
-            val target = chapter.page ?: return@forEach
-            assertTrue(target in Page.entries, chapter.id + " 跳到了一个不存在的页面")
-            val sub = chapter.sub ?: return@forEach
-            val ids = PAGE_SUB_TABS[target].orEmpty().map { it.id }
-            assertTrue(
-                sub in ids,
-                chapter.id + " 想跳到「" + target.label + "」下的 " + sub + "，但那里只有：" + ids.joinToString(","),
-            )
+            val target = chapter.target ?: return@forEach
+            if (target is NavTarget.Tab) {
+                assertTrue(target.page in Page.entries, chapter.id + " 跳到了一个不存在的页面")
+                val sub = target.sub ?: return@forEach
+                val ids = PAGE_SUB_TABS[target.page].orEmpty().map { it.id }
+                assertTrue(
+                    sub in ids,
+                    chapter.id + " 想跳到「" + target.page.label + "」下的 " + sub + "，但那里只有：" + ids.joinToString(","),
+                )
+            }
         }
     }
 
@@ -86,16 +82,38 @@ class HelpPageTest {
     fun `帮助页自己不能被某一章指过去`() {
         // 指回自己等于这个按钮点了没反应。
         HELP_CHAPTERS.forEach { chapter ->
-            assertTrue(chapter.page != Page.HELP, chapter.id + " 指向了帮助页自己")
+            val target = chapter.target
+            if (target is NavTarget.Tab) {
+                assertTrue(
+                    !(target.page == Page.MORE && target.sub == MORE_TAB_HELP),
+                    chapter.id + " 指向了帮助页自己",
+                )
+            }
         }
     }
 
     @Test
-    fun `帮助是一级页且排在关于之前`() {
-        val pages = Page.entries.map { it.name }
-        assertTrue("HELP" in pages)
-        assertTrue(pages.indexOf("HELP") < pages.indexOf("ABOUT"), "帮助应排在关于之前")
-        assertEquals("帮助", Page.HELP.label)
+    fun `帮助是「更多」下面的第一项`() {
+        val subs = PAGE_SUB_TABS.getValue(Page.MORE)
+        assertEquals(MORE_TAB_HELP, subs.first().id)
+        assertEquals("帮助", subs.first().label)
+        // 顶部五项里没有「帮助」自己
+        assertTrue(Page.entries.none { it.name == "HELP" })
+    }
+
+    @Test
+    fun `存档那一章指向版本选择副页面`() {
+        // 存档不在某个顶部页里，它是「版本选择 → 版本设置 → 存档」这条路上的东西。
+        val chapter = helpChapterOf(HELP_TAB_SAVES)
+        assertEquals(NavTarget.InstanceSelect, chapter.target)
+    }
+
+    @Test
+    fun `每章的去处都能说成一句话`() {
+        HELP_CHAPTERS.forEach { chapter ->
+            val target = chapter.target ?: return@forEach
+            assertTrue(goLabelOf(target).isNotBlank(), chapter.id + " 的去处没有文案")
+        }
     }
 
     @Test

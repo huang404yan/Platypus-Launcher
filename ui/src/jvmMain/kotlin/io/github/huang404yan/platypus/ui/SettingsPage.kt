@@ -21,6 +21,7 @@ import androidx.compose.material3.Checkbox
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -59,7 +60,11 @@ const val SETTINGS_TAB_UI = "ui"
 /** 「账号」二级项的 id。 */
 const val SETTINGS_TAB_ACCOUNT = "account"
 
-/** 「Java」二级项的 id。 */
+/**
+ * 「Java」的 id。
+ *
+ * 2026-11-15 起它不再是一个二级项（JavaTab 直接跟在「启动」卡片后面），但常量留着：帮助页与旧深链还得能指到它，且它作为「启动」页里那一块的锚点。
+ */
 const val SETTINGS_TAB_JAVA = "java"
 
 /** 「下载」二级项的 id：下载源偏好。 */
@@ -153,6 +158,11 @@ fun SettingsPage(
     var autoBackupKeep by remember { mutableStateOf(AutoBackupPolicy.DEFAULT.keep.toString()) }
     var curseForgeKey by remember { mutableStateOf("") }
 
+    // 内存三态里的前两态：自动分配（默认开）、内存优化（默认关）。
+    // 第三态是「问过一次就不再问」，只在启动页那个弹窗里写，这一页只读不写。
+    var memoryAuto by remember { mutableStateOf(true) }
+    var memoryOptimize by remember { mutableStateOf(false) }
+
     LaunchedEffect(Unit) {
         val settings = withContext(Dispatchers.IO) {
             runCatching { repository.load() }.getOrDefault(LauncherSettings())
@@ -167,6 +177,8 @@ fun SettingsPage(
         autoBackupHours = settings.autoBackupHours.toString()
         autoBackupKeep = settings.autoBackupKeep.toString()
         curseForgeKey = settings.curseForgeApiKey
+        memoryAuto = settings.memoryAuto
+        memoryOptimize = settings.memoryOptimize
         loaded = true
         loadedFrom = (repository as? JsonSettingsRepository)?.path.orEmpty()
     }
@@ -213,6 +225,8 @@ fun SettingsPage(
                         autoBackupHours = clampedHours,
                         autoBackupKeep = clampedKeep,
                         curseForgeApiKey = curseForgeKey,
+                        memoryAuto = memoryAuto,
+                        memoryOptimize = memoryOptimize,
                     ),
                 )
             }
@@ -287,6 +301,8 @@ fun SettingsPage(
                         autoBackupHours = backupPolicyNow().intervalHours,
                         autoBackupKeep = backupPolicyNow().keep,
                         curseForgeApiKey = curseForgeKey,
+                        memoryAuto = memoryAuto,
+                        memoryOptimize = memoryOptimize,
                     ),
                 )
             }
@@ -331,6 +347,8 @@ fun SettingsPage(
                         autoBackupHours = backupPolicyNow().intervalHours,
                         autoBackupKeep = backupPolicyNow().keep,
                         curseForgeApiKey = curseForgeKey,
+                        memoryAuto = memoryAuto,
+                        memoryOptimize = memoryOptimize,
                     ),
                 )
             }
@@ -368,6 +386,8 @@ fun SettingsPage(
                         autoBackupHours = backupPolicyNow().intervalHours,
                         autoBackupKeep = backupPolicyNow().keep,
                         curseForgeApiKey = curseForgeKey,
+                        memoryAuto = memoryAuto,
+                        memoryOptimize = memoryOptimize,
                     ),
                 )
             }.onSuccess { stored ->
@@ -392,6 +412,8 @@ fun SettingsPage(
         autoBackupEnabled = AutoBackupPolicy.DEFAULT.enabled
         autoBackupHours = AutoBackupPolicy.DEFAULT.intervalHours.toString()
         autoBackupKeep = AutoBackupPolicy.DEFAULT.keep.toString()
+        memoryAuto = true
+        memoryOptimize = false
         noticeIsError = false
         notice = "已填回默认值，点「保存」才生效。"
     }
@@ -425,6 +447,8 @@ fun SettingsPage(
                         autoBackupHours = backupPolicyNow().intervalHours,
                         autoBackupKeep = backupPolicyNow().keep,
                         curseForgeApiKey = cleaned,
+                        memoryAuto = memoryAuto,
+                        memoryOptimize = memoryOptimize,
                     ),
                 )
             }.onSuccess {
@@ -461,6 +485,8 @@ fun SettingsPage(
                         autoBackupHours = backupPolicyNow().intervalHours,
                         autoBackupKeep = backupPolicyNow().keep,
                         curseForgeApiKey = curseForgeKey,
+                        memoryAuto = memoryAuto,
+                        memoryOptimize = memoryOptimize,
                     ),
                 )
             }.onSuccess {
@@ -474,7 +500,6 @@ fun SettingsPage(
         }
     }
 
-    val nameProblem = usernameProblem(username)
 
     Column(
         Modifier.fillMaxSize().verticalScroll(rememberScrollState()),
@@ -498,7 +523,6 @@ fun SettingsPage(
                 onUseOffline = { useAccount("") },
                 onSaveClientId = { saveClientId(it) },
             )
-            SETTINGS_TAB_JAVA -> JavaTab(backend, gameRoot, refreshTick)
             SETTINGS_TAB_DOWNLOAD -> DownloadTab(
                 current = DownloadSource.of(downloadSource),
                 onPick = { pickDownloadSource(it) },
@@ -527,22 +551,28 @@ fun SettingsPage(
                 loaded = loaded,
                 onResetDefaults = { resetDefaults() },
             )
-            else -> LaunchTab(
-                username = username,
-                onUsernameChange = { username = it },
-                nameProblem = nameProblem,
-                gameRoot = gameRoot,
-                onGameRootChange = { gameRoot = it },
-                memoryText = memoryText,
-                onMemoryChange = { memoryText = it },
-                loaded = loaded,
-            )
+            else -> {
+                LaunchTab(
+                    gameRoot = gameRoot,
+                    onGameRootChange = { gameRoot = it },
+                    memoryText = memoryText,
+                    onMemoryChange = { memoryText = it },
+                    memoryAuto = memoryAuto,
+                    onMemoryAutoChange = { memoryAuto = it },
+                    memoryOptimize = memoryOptimize,
+                    onMemoryOptimizeChange = { memoryOptimize = it },
+                    loaded = loaded,
+                )
+                // Java 运行时就跟着启动项放：“这个版本要用哪个 Java”与
+                // “本机装了哪些 Java”是同一件事，拆到两个二级项里反而要来回切。
+                JavaTab(backend, gameRoot, refreshTick)
+            }
         }
 
         // 「界面」只改配色，点一下就已经落盘了，底部那排「保存 / 填回默认值」
         // 对它没有意义 —— 留着反而让人以为不点保存不生效。
-        if (subTab != SETTINGS_TAB_JAVA && subTab != SETTINGS_TAB_ACCOUNT &&
-            subTab != SETTINGS_TAB_UI && subTab != SETTINGS_TAB_DOWNLOAD
+        if (subTab != SETTINGS_TAB_ACCOUNT && subTab != SETTINGS_TAB_UI &&
+            subTab != SETTINGS_TAB_DOWNLOAD
         ) {
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 Button(onClick = { save() }, enabled = loaded) { Text("保存") }
@@ -560,44 +590,33 @@ fun SettingsPage(
     }
 }
 
-/** 「启动」：进游戏时会用到的那几项。 */
+/**
+ * 「启动」：进游戏前要定下来的那几件事 —— 目录、内存、Java。
+ *
+ * 离线用户名那张卡删掉了（2026-11-15）：名字是**每一次启动**才确定的东西，
+ * 跟「这一局用谁的身份」是同一件事，所以挪到启动页左栏那三格底下填。
+ * 留在设置页只会让人以为得先去注册一个名字才能玩。
+ *
+ * 内存这一块是三态：自动分配（开关）、手动指定（关掉开关才出现输入框）、
+ * 内存优化（勾选，会往 JVM 参数里加几条）。三态的取舍写在
+ * [io.github.huang404yan.platypus.core.settings.LauncherSettings] 的 KDoc 里。
+ */
 @Composable
 private fun LaunchTab(
-    username: String,
-    onUsernameChange: (String) -> Unit,
-    nameProblem: String?,
     gameRoot: String,
     onGameRootChange: (String) -> Unit,
     memoryText: String,
     onMemoryChange: (String) -> Unit,
+    memoryAuto: Boolean,
+    onMemoryAutoChange: (Boolean) -> Unit,
+    memoryOptimize: Boolean,
+    onMemoryOptimizeChange: (Boolean) -> Unit,
     loaded: Boolean,
 ) {
     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        SettingCard("离线用户名", "进游戏时显示的名字。离线 UUID 由名字算出来，换名字等于换一个玩家身份。") {
-            OutlinedTextField(
-                value = username,
-                onValueChange = onUsernameChange,
-                modifier = Modifier.fillMaxWidth(),
-                label = { Text("离线用户名") },
-                singleLine = true,
-                enabled = loaded,
-                isError = nameProblem != null,
-                supportingText = {
-                    Text(
-                        nameProblem ?: "3–16 位，英文字母、数字或下划线。",
-                        color = if (nameProblem != null) {
-                            MaterialTheme.colorScheme.error
-                        } else {
-                            MaterialTheme.colorScheme.onSurfaceVariant
-                        },
-                    )
-                },
-            )
-        }
-
         SettingCard(
             "默认游戏目录",
-            "启动页与实例页会用它做初值；下载页也默认往这里装。留空表示每次按系统默认位置猜。",
+            "启动页与版本选择会用它做初值；下载页也默认往这里装。留空表示每次按系统默认位置猜。",
         ) {
             Row(
                 Modifier.fillMaxWidth(),
@@ -621,29 +640,65 @@ private fun LaunchTab(
         }
 
         SettingCard(
-            "新实例默认内存",
-            "在下载页一键装完时会按这个值登记新实例。之后可以在这个实例的「详情」里单独改 —— " +
-                "这里只是初值，改这里不会动已经建好的实例。",
+            "内存",
+            "自动分配按版本与已装内容估算，不用每次改数字；关掉开关就按你填的那个数走。",
         ) {
-            OutlinedTextField(
-                value = memoryText,
-                onValueChange = onMemoryChange,
-                modifier = Modifier.fillMaxWidth(),
-                label = { Text("内存（MB）") },
-                singleLine = true,
-                enabled = loaded,
-                isError = memoryText.trim().toIntOrNull() == null,
-                supportingText = {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("自动分配", style = MaterialTheme.typography.bodyLarge)
                     Text(
-                        "允许范围 " + Instance.MIN_MEMORY_MB + "–" + Instance.MAX_MEMORY_MB + " MB，默认 " +
-                            Instance.DEFAULT_MEMORY_MB + " MB。",
+                        if (memoryAuto) {
+                            "按版本与已装内容算，启动页左栏会显示实际给了多少。"
+                        } else {
+                            "关掉了，按下面你填的那个数走。"
+                        },
+                        style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
-                },
-            )
+                }
+                Switch(checked = memoryAuto, onCheckedChange = onMemoryAutoChange, enabled = loaded)
+            }
+
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
+                Checkbox(checked = memoryOptimize, onCheckedChange = onMemoryOptimizeChange, enabled = loaded)
+                Column(Modifier.weight(1f).padding(top = 12.dp)) {
+                    Text("内存优化", style = MaterialTheme.typography.bodyLarge)
+                    Text(
+                        "往 JVM 参数里加几条（堆与新生代的初始占比、G1 的停顿目标）。只影响启动参数，不动实例文件。",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+
+            if (!memoryAuto) {
+                OutlinedTextField(
+                    value = memoryText,
+                    onValueChange = onMemoryChange,
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("内存（MB）") },
+                    singleLine = true,
+                    enabled = loaded,
+                    isError = memoryText.trim().toIntOrNull() == null,
+                    supportingText = {
+                        Text(
+                            "允许范围 " + Instance.MIN_MEMORY_MB + "–" + Instance.MAX_MEMORY_MB + " MB，默认 " +
+                                Instance.DEFAULT_MEMORY_MB + " MB。",
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    },
+                )
+            } else {
+                Text(
+                    "现在是自动分配，这里填的数只在新建实例时当上限参考：" + memoryText + " MB。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
         }
     }
 }
+
 
 /**
  * 「下载」：同一个文件先走哪条路。
