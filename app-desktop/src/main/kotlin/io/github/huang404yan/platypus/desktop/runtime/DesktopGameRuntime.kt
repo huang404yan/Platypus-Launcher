@@ -1,22 +1,14 @@
 package io.github.huang404yan.platypus.desktop.runtime
 
 import io.github.huang404yan.platypus.core.Brand
-import io.github.huang404yan.platypus.core.auth.Session
-import io.github.huang404yan.platypus.core.instance.Instance
-import io.github.huang404yan.platypus.core.instance.InstanceLayout
-import io.github.huang404yan.platypus.core.instance.InstanceLayouts
 import io.github.huang404yan.platypus.core.launch.GameHandle
 import io.github.huang404yan.platypus.core.launch.GameRuntime
-import io.github.huang404yan.platypus.core.launch.DirectConnectMode
-import io.github.huang404yan.platypus.core.launch.LaunchArguments
-import io.github.huang404yan.platypus.core.launch.LaunchContext
 import io.github.huang404yan.platypus.core.launch.LaunchDiagnosis
 import io.github.huang404yan.platypus.core.launch.LaunchEvent
+import io.github.huang404yan.platypus.core.launch.LaunchPlanner
 import io.github.huang404yan.platypus.core.launch.LaunchRequest
 import io.github.huang404yan.platypus.core.launch.LogLineReader
 import io.github.huang404yan.platypus.core.launch.NativesExtractor
-import io.github.huang404yan.platypus.core.launch.VersionResolver
-import io.github.huang404yan.platypus.core.version.VersionJson
 import java.io.File
 import java.util.Collections
 import java.util.concurrent.TimeUnit
@@ -29,8 +21,8 @@ import kotlinx.coroutines.withContext
 /**
  * 桌面侧的游戏启动：把版本 json 拼成命令行，起一个 java 进程，把日志逐行喂给调用方。
  *
- * 分工与 t3 的 [DesktopJavaRuntimeService] 一致——core 里只放纯计算
- * （[LaunchArguments] 拼参数、[NativesExtractor] 解压、[LaunchDiagnosis] 归因），
+ * 分工：**「怎么把一次启动翻译成命令行」在 core 的 [LaunchPlanner] 里**——读 json、
+ * 合继承链、挑当前平台的库、拼参数、算要解压哪些 natives，全是纯计算，安卓以后能原样复用。
  * 这里只做 core 不许做的那件事：起进程（D5）。
  *
  * 线程模型：launch() 返回时进程已经起来了，读日志在单独的 IO 协程里跑，
@@ -54,31 +46,21 @@ class DesktopGameRuntime(
         onEvent: (LaunchEvent) -> Unit,
     ): GameHandle = withContext(Dispatchers.IO) {
         onEvent(LaunchEvent.Stage("准备版本文件", 0.05f))
-        val layout = InstanceLayouts.of(request.instance)
-        // 版本 json 永远在 <gameRoot>/versions/<id>/ 下；layout.gameDir 是实例自己的游戏目录（隔离后等于版本目录），
-        // 不能拿它当 gameRoot 传进来，否则会去找 <实例目录>/versions/<id>。
-        val resolved = VersionResolver.load(layout.gameRoot, layout.versionDir.name)
-            ?: throw IllegalStateException(
-                "版本文件不存在：" + File(layout.versionDir, layout.versionDir.name + ".json").path,
-            )
-        resolved.warnings.forEach { onEvent(LaunchEvent.LogLine(it)) }
-        val version = resolved.version
+        // 版本 json 在哪、继承链怎么合、classpath 里放什么，全由 planner 决定 ——
+        // 这一段以前只住在这个类里，安卓要用还得再抄一遍。
+        val plan = LaunchPlanner.plan(request, launcherName = launcherName, launcherVersion = launcherVersion)
+        plan.notes.forEach { onEvent(LaunchEvent.LogLine(it)) }
 
         onEvent(LaunchEvent.Stage("整理 classpath", 0.1f))
-        val context = buildContext(request, layout, version, resolved.clientJar)
-        // 降级要说一声：用户点的是「直接进」，命令行里却没有 quickPlay，不解释会以为没生效。
-        if (LaunchArguments.directConnectMode(version, request.quickPlayServer) == DirectConnectMode.SERVER_ARG) {
-            onEvent(
-                LaunchEvent.LogLine(
-                    "这个版本（" + version.id + "）的版本文件里没有 --quickPlayMultiplayer，改用 --server/--port 直连。",
-                ),
-            )
-        }
+        val context = plan.context
 
         onEvent(LaunchEvent.Stage("解压原生库", 0.15f))
-        extractNatives(version, context) { message -> onEvent(LaunchEvent.LogLine(message)) }
+        if (plan.nativeArchives.isNotEmpty()) {
+            NativesExtractor.extract(plan.nativeArchives, context.nativesDir).warnings
+                .forEach { message -> onEvent(LaunchEvent.LogLine(message)) }
+        }
 
-        val command = LaunchArguments.build(version, context)
+        val command = plan.command
         onEvent(LaunchEvent.Stage("启动游戏", 0.2f))
 
         val java = File(request.java.path)
@@ -91,9 +73,8 @@ class DesktopGameRuntime(
 
         // 把完整命令行落盘：加载器（Forge 之类）启动失败时，缺的参数就在这一行里，
         // 用户把日志发过来就能复现，不必再让他手工拼。accessToken 必须脱敏。
-        dumpCommandLine(layout.gameDir, layout.versionDir.name, arguments, request.session)?.let { file ->
-            onEvent(LaunchEvent.LogLine("命令行已写入 " + file.path))
-        }
+        LaunchPlanner.dumpCommandLine(plan.layout.gameDir, plan.layout.versionDir.name, arguments, request.session)
+            ?.let { file -> onEvent(LaunchEvent.LogLine("命令行已写入 " + file.path)) }
 
         val builder = ProcessBuilder(arguments)
             .directory(context.gameDir)
@@ -123,26 +104,6 @@ class DesktopGameRuntime(
     }
 
     /**
-     * 把实际执行的命令行写到 logs/platypus-launch-<版本>.txt，一行一个参数。
-     *
-     * 只读落盘，失败不影响启动（返回 null 就算了）。accessToken 一律替换成 ***，
-     * 这份文件会被用户随手发到群里。
-     */
-    private fun dumpCommandLine(
-        gameDir: File,
-        versionName: String,
-        arguments: List<String>,
-        session: Session,
-    ): File? = runCatching {
-        val dir = File(gameDir, "logs").apply { mkdirs() }
-        val file = File(dir, "platypus-launch-" + versionName + ".txt")
-        val token = session.accessToken
-        val masked = if (token.isNotBlank()) arguments.map { it.replace(token, "***") } else arguments
-        file.writeText(masked.joinToString(System.lineSeparator()) + System.lineSeparator(), Charsets.UTF_8)
-        file
-    }.getOrNull()
-
-    /**
      * 逐行读日志，同时留在环形缓冲里供退出归因使用。
      *
      * 走 [LogLineReader] 而不是 `BufferedReader(reader(Charsets.UTF_8))`：游戏在中文 Windows 上
@@ -165,72 +126,6 @@ class DesktopGameRuntime(
         }
     }
 
-    private fun buildContext(
-        request: LaunchRequest,
-        layout: InstanceLayout,
-        version: VersionJson,
-        resolvedJar: File?,
-    ): LaunchContext {
-        val nativesDir = layout.nativesDir
-        // 「直接连接」：1.20+ 走版本 json 里的 quickPlay（要同时打开 feature 开关），
-        // 1.19 及更早没有那条规则，由 LaunchArguments 改拼 --server/--port，这里不用区别对待。
-        val address = request.quickPlayServer.trim()
-        val direct = LaunchArguments.directConnectMode(version, address)
-        val placeholder = LaunchContext(
-            gameDir = layout.gameDir,
-            assetsDir = layout.assetsDir,
-            librariesDir = layout.librariesDir,
-            nativesDir = nativesDir,
-            classpath = emptyList(),
-            session = request.session,
-            versionName = layout.versionDir.name,
-            memoryMb = request.instance.memoryMb,
-            features = if (direct == DirectConnectMode.QUICK_PLAY) LaunchArguments.quickPlayFeatures() else emptyMap(),
-            quickPlayMultiplayer = address,
-            launcherName = launcherName,
-            launcherVersion = launcherVersion,
-            extraJvmArgs = request.instance.extraJvmArgs + request.jvmArgs,
-            extraGameArgs = request.gameArgs,
-        )
-        val classpath = buildList {
-            addAll(LaunchArguments.classpathLibraries(version, placeholder))
-            (resolvedJar ?: clientJar(version, layout))?.let { add(it) }
-        }
-        return placeholder.copy(classpath = classpath)
-    }
-
-    /**
-     * 客户端 jar：先看 json 里的 downloads.client.path，再退回 versions/<id>/<id>.jar。
-     *
-     * Forge 的继承型 json 自己不写 client，需要用父版本的 id 去找 —— 这里按「继承链最底层的 id」兜底。
-     */
-    private fun clientJar(version: VersionJson, layout: InstanceLayout): File? {
-        val declared = version.downloads?.client?.path
-        if (!declared.isNullOrBlank()) {
-            val file = File(layout.librariesDir, declared)
-            if (file.isFile) return file
-        }
-        // 合并后 id 是子版本，client jar 却常常在父版本目录下，逐个试。
-        val candidates = layout.gameRoot.resolve("versions").listFiles()
-            ?.filter { it.isDirectory }
-            ?.map { File(it, it.name + ".jar") }
-            ?.filter { it.isFile }
-            ?.sortedBy { it.path }
-            .orEmpty()
-        return candidates.firstOrNull { it.parentFile?.name == version.id }
-            ?: candidates.firstOrNull()
-    }
-
-    private fun extractNatives(
-        version: VersionJson,
-        context: LaunchContext,
-        log: (String) -> Unit,
-    ) {
-        val archives = LaunchArguments.nativeArchives(version, context)
-        if (archives.isEmpty()) return
-        val result = NativesExtractor.extract(archives, context.nativesDir)
-        result.warnings.forEach(log)
-    }
 }
 
 /**
