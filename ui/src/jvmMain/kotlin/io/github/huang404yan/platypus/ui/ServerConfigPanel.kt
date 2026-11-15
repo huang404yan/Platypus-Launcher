@@ -266,18 +266,29 @@ internal fun ServerConfigPanel(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
-                ServerProperties.FIELDS.forEach { field ->
-                    PropertyRow(
-                        field = field,
-                        value = fields[field.key] ?: field.default,
-                        problem = problems[field.key].orEmpty(),
-                        enabled = true,
-                        onChange = { raw ->
-                            fields = fields + (field.key to raw)
-                            problems = problems + (field.key to ServerProperties.problemOf(field, raw).orEmpty())
-                            dirty = true
-                        },
-                    )
+                ServerProperties.groupedFields().forEach { (group, groupFields) ->
+                    if (group.isNotBlank()) {
+                        Text(
+                            group,
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.secondary,
+                            modifier = Modifier.padding(top = 6.dp),
+                        )
+                    }
+                    groupFields.forEach { field ->
+                        PropertyRow(
+                            field = field,
+                            value = fields[field.key] ?: field.default,
+                            problem = problems[field.key].orEmpty(),
+                            enabled = true,
+                            onChange = { raw ->
+                                fields = fields + (field.key to raw)
+                                problems = problems + (field.key to ServerProperties.problemOf(field, raw).orEmpty())
+                                dirty = true
+                            },
+                        )
+                    }
                 }
             }
         }
@@ -423,13 +434,24 @@ private fun PropertyRow(
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
                     field.options.forEach { (raw, label) ->
-                        val selected = raw.equals(value, ignoreCase = true)
+                        val selected = ServerProperties.sameChoice(raw, value)
                         if (selected) {
                             Button(onClick = { }, enabled = false) { Text(label) }
                         } else {
                             OutlinedButton(onClick = { onChange(raw) }, enabled = enabled) { Text(label) }
                         }
                     }
+                }
+                // 磁盘上写着一个不在选项里的值（老版本服务端的 FLAT、装了模组之后的自定义类型）。
+                // 这时五个按钮全是未选中，用户看不出现在是哪个 —— 把原始值写出来，
+                // 并说明「不动它就是原来那个」：我们不替他改设置，只是没法用按钮表达。
+                if (field.options.none { ServerProperties.sameChoice(it.first, value) }) {
+                    Text(
+                        "现在写的是「" + value + "」，不在上面的选项里（多半是老版本或模组写的）。" +
+                            "不改它就不会被动；点上面任何一个都会换成新值。",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.tertiary,
+                    )
                 }
             }
             PropertyKind.NUMBER -> {

@@ -78,6 +78,24 @@ data class PropertyLine(val raw: String, val key: String? = null, val value: Str
  */
 enum class PropertyKind { NUMBER, SWITCH, CHOICE, TEXT }
 
+/**
+ * 字段分组，只为界面分节用。
+ *
+ * [BASIC] 是空串：最早那批字段（端口、难度、视距…）都属于它，界面上不加小标题、
+ * 顺序也不动 —— 用户已经认熟了那一段，为了加分组把它打散是净损失。
+ * 后来补的按主题分组，多一层小标题，免得表单变成一条三十多行的长龙。
+ */
+object PropertyGroups {
+    const val BASIC = ""
+    const val PLAYERS = "玩家"
+    const val WORLD = "世界生成"
+    const val VISIBILITY = "谁能看见、能不能进"
+    const val PERFORMANCE = "性能与超时"
+
+    /** 渲染顺序；[BASIC] 永远在最前。 */
+    val ORDER = listOf(BASIC, PLAYERS, WORLD, VISIBILITY, PERFORMANCE)
+}
+
 data class PropertyField(
     val key: String,
     val label: String,
@@ -88,6 +106,15 @@ data class PropertyField(
     val range: IntRange? = null,
     /** CHOICE 用：值 → 界面上的字。 */
     val options: List<Pair<String, String>> = emptyList(),
+    /** 界面分节用；见 [PropertyGroups]。 */
+    val group: String = PropertyGroups.BASIC,
+    /**
+     * TEXT 类型是否允许留空。
+     *
+     * 大多数文本项留空是没有意义的（世界文件夹名叫空串服务端直接起不来），
+     * 但 level-seed 恰恰相反：空串的语义是「随机一个种子」，这是最常见的选择。
+     */
+    val allowEmpty: Boolean = false,
 )
 
 object ServerProperties {
@@ -175,6 +202,15 @@ object ServerProperties {
             kind = PropertyKind.NUMBER,
             default = "20",
             range = 1..1000,
+        ),
+        PropertyField(
+            key = "player-idle-timeout",
+            label = "挂机多久踢下线（分钟）",
+            kind = PropertyKind.NUMBER,
+            default = "0",
+            range = 0..1440,
+            note = "0 表示不踢。开着小服又不想让人长期占位置时有用。",
+            group = PropertyGroups.PLAYERS,
         ),
         PropertyField(
             key = "difficulty",
@@ -292,7 +328,123 @@ object ServerProperties {
             default = "world",
             note = "改这里等于换一张地图。名字就是服务端目录下的文件夹名。",
         ),
+        PropertyField(
+            key = "level-seed",
+            label = "世界种子",
+            kind = PropertyKind.TEXT,
+            default = "",
+            allowEmpty = true,
+            note = "留空就是随机一个。已经有世界的服务器改这里没有任何效果 —— 种子只在生成时用一次。",
+            group = PropertyGroups.WORLD,
+        ),
+        PropertyField(
+            key = "level-type",
+            label = "世界类型",
+            kind = PropertyKind.CHOICE,
+            default = "minecraft:normal",
+            options = listOf(
+                "minecraft:normal" to "默认",
+                "minecraft:flat" to "超平坦",
+                "minecraft:large_biomes" to "巨型生物群系",
+                "minecraft:amplified" to "放大化",
+                "minecraft:single_biome_surface" to "单一生物群系",
+            ),
+            note = "只在生成新世界时生效。1.19 之前的服务端把它写成 DEFAULT / FLAT 这种大写形式，也认。",
+            group = PropertyGroups.WORLD,
+        ),
+        PropertyField(
+            key = "generate-structures",
+            label = "生成结构",
+            kind = PropertyKind.SWITCH,
+            default = "true",
+            note = "关掉之后村庄、神庙、要塞都不会生成。已经在跑的世界改它没用。",
+            group = PropertyGroups.WORLD,
+        ),
+        PropertyField(
+            key = "max-world-size",
+            label = "世界边界半径",
+            kind = PropertyKind.NUMBER,
+            default = "29999984",
+            range = 1..29999984,
+            note = "方块数。默认值就是世界边界的理论上限，调小能把世界圈起来。",
+            group = PropertyGroups.WORLD,
+        ),
+        PropertyField(
+            key = "enable-status",
+            label = "在多人列表里显示在线状态",
+            kind = PropertyKind.SWITCH,
+            default = "true",
+            note = "关掉之后别人的多人列表里这个服务器会显示成「无法连接」，但仍然进得去。",
+            group = PropertyGroups.VISIBILITY,
+        ),
+        PropertyField(
+            key = "hide-online-players",
+            label = "隐藏在线玩家名单",
+            kind = PropertyKind.SWITCH,
+            default = "false",
+            note = "开了之后查询服务器状态的人看不到有谁在线（只能看到人数）。",
+            group = PropertyGroups.VISIBILITY,
+        ),
+        PropertyField(
+            key = "prevent-proxy-connections",
+            label = "拒绝通过代理连进来",
+            kind = PropertyKind.SWITCH,
+            default = "false",
+            note = "开了会挡掉一部分用代理的玩家（包括一些加速器）。不是防作弊，别指望它。",
+            group = PropertyGroups.VISIBILITY,
+        ),
+        PropertyField(
+            key = "network-compression-threshold",
+            label = "压缩阈值（字节）",
+            kind = PropertyKind.NUMBER,
+            default = "256",
+            range = -1..65535,
+            note = "小于这个大小的包不压缩。-1 是完全不压缩（吃带宽省 CPU）。局域网内调大或关掉会更快。",
+            group = PropertyGroups.PERFORMANCE,
+        ),
+        PropertyField(
+            key = "max-tick-time",
+            label = "单次卡顿多久算崩（毫秒）",
+            kind = PropertyKind.NUMBER,
+            default = "60000",
+            range = -1..60000,
+            note = "一次 tick 超过这个时间服务端会自己停掉。-1 表示永不因卡顿退出。",
+            group = PropertyGroups.PERFORMANCE,
+        ),
+        PropertyField(
+            key = "entity-broadcast-range-percentage",
+            label = "实体同步范围（百分比）",
+            kind = PropertyKind.NUMBER,
+            default = "100",
+            range = 10..1000,
+            note = "调小能显著减带宽，代价是远处的怪和玩家会突然出现。100 是原版行为。",
+            group = PropertyGroups.PERFORMANCE,
+        ),
+        PropertyField(
+            key = "sync-chunk-writes",
+            label = "区块写入同步落盘",
+            kind = PropertyKind.SWITCH,
+            default = "true",
+            note = "关掉能快一点，但断电时更容易丢最近的方块改动。宁可慢也别关。",
+            group = PropertyGroups.PERFORMANCE,
+        ),
     )
+
+    /**
+     * 按 [PropertyGroups.ORDER] 分好的字段，界面照着渲染。
+     *
+     * 认不出的分组追加在末尾而不是丢掉：以后有人加了字段却忘了登记到 ORDER 里，
+     * 结果应该是「位置靠后」而不是「这个设置在界面上消失」—— 后者是个很难发现的 bug。
+     */
+    fun groupedFields(): List<Pair<String, List<PropertyField>>> {
+        val byGroup = FIELDS.groupBy { it.group }
+        val ordered = PropertyGroups.ORDER.mapNotNull { name ->
+            byGroup[name]?.let { name to it }
+        }
+        val known = PropertyGroups.ORDER.toSet()
+        val extra = byGroup.filterKeys { it !in known }.toSortedMap()
+        return ordered + extra.toList()
+    }
 
     /** 桌面端 / 安卓端都用的默认视图（空文件 + 内置默认）。 */
     fun defaults(): Map<String, String> = FIELDS.associate { it.key to it.default }
@@ -316,7 +468,7 @@ object ServerProperties {
             }
             PropertyKind.CHOICE -> {
                 val allowed = field.options.map { it.first }
-                if (allowed.any { it.equals(value, true) }) null
+                if (allowed.any { sameChoice(it, value) }) null
                 else "只能选 " + allowed.joinToString("、") + " 之一。"
             }
             PropertyKind.NUMBER -> {
@@ -329,13 +481,25 @@ object ServerProperties {
                 }
             }
             PropertyKind.TEXT -> when {
-                value.isEmpty() && field.key != "motd" -> "不能为空。"
+                value.isEmpty() && field.key != "motd" && !field.allowEmpty -> "不能为空。"
                 field.key == "level-name" && !isSafeWorldName(value) ->
                     "世界文件夹名不能带 / \\\\ : * ? \" < > | 这些字符。"
                 else -> null
             }
         }
     }
+
+    /**
+     * 比较 CHOICE 的取值时用的规范化形式。
+     *
+     * 为什么要这一步：原版写 level-type 时会把冒号转义成 `minecraft\\:normal`（java.util.Properties
+     * 的老习惯），而人手工填、教程里抄的又普遍是不带反斜杠的 `minecraft:normal`。两种写法
+     * 服务端都认，但直接字符串比较会把磁盘上那份判成「不在选项里」，界面上明明选着却报错。
+     */
+    fun choiceKeyOf(raw: String): String = raw.trim().replace("\\:", ":").replace("\\\\", "\\").lowercase()
+
+    /** 两个值是不是同一个 CHOICE 选项。 */
+    fun sameChoice(left: String, right: String): Boolean = choiceKeyOf(left) == choiceKeyOf(right)
 
     /** 世界文件夹名：服务端会把它当目录名用，所以挡掉路径分隔符与 Windows 非法字符。 */
     fun isSafeWorldName(raw: String): Boolean {

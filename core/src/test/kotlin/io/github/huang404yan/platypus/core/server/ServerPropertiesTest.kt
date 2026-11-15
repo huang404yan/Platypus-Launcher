@@ -146,6 +146,66 @@ class ServerPropertiesTest {
     }
 
     @Test
+    fun `字段按分组排好，基础组在最前`() {
+        val groups = ServerProperties.groupedFields()
+        assertEquals(PropertyGroups.BASIC, groups.first().first)
+        val names = groups.map { it.first }
+        // 顺序固定：基础 → 玩家 → 世界生成 → 可见性 → 性能
+        assertEquals(listOf(PropertyGroups.BASIC, PropertyGroups.PLAYERS, PropertyGroups.WORLD, PropertyGroups.VISIBILITY, PropertyGroups.PERFORMANCE), names)
+        val all = groups.flatMap { it.second }
+        assertEquals(ServerProperties.FIELDS.size, all.size)
+    }
+
+    @Test
+    fun `新加的键都有默认值且能落盘`() {
+        val pairs = mapOf(
+            "generate-structures" to "true",
+            "hide-online-players" to "false",
+            "network-compression-threshold" to "256",
+            "max-tick-time" to "60000",
+            "entity-broadcast-range-percentage" to "100",
+            "player-idle-timeout" to "0",
+            "max-world-size" to "29999984",
+        )
+        pairs.forEach { (key, expected) ->
+            assertEquals(expected, ServerProperties.defaults()[key], key)
+        }
+        val view = ServerProperties.read(dir).withValues(pairs)
+        ServerProperties.write(dir, view)
+        val back = ServerProperties.read(dir)
+        pairs.forEach { (key, expected) -> assertEquals(expected, back.string(key), key) }
+    }
+
+    @Test
+    fun `世界种子允许留空`() {
+        val seed = ServerProperties.FIELDS.first { it.key == "level-seed" }
+        assertNull(ServerProperties.problemOf(seed, ""))
+        assertNull(ServerProperties.problemOf(seed, "12345"))
+        // 别的文本项照旧不能空
+        val levelName = ServerProperties.FIELDS.first { it.key == "level-name" }
+        assertNotNull(ServerProperties.problemOf(levelName, ""))
+    }
+
+    @Test
+    fun `老版本写的转义冒号也认得出是同一个选项`() {
+        val levelType = ServerProperties.FIELDS.first { it.key == "level-type" }
+        assertNull(ServerProperties.problemOf(levelType, "minecraft:normal"))
+        // 原版 Properties 会写出 minecraft\:normal
+        assertNull(ServerProperties.problemOf(levelType, "minecraft\\:normal"))
+        assertTrue(ServerProperties.sameChoice("minecraft:flat", "minecraft\\:FLAT"))
+        assertFalse(ServerProperties.sameChoice("minecraft:flat", "minecraft:normal"))
+    }
+
+    @Test
+    fun `性能类字段的负数默认值不被范围校验挡住`() {
+        val threshold = ServerProperties.FIELDS.first { it.key == "network-compression-threshold" }
+        assertNull(ServerProperties.problemOf(threshold, "-1"))
+        val tick = ServerProperties.FIELDS.first { it.key == "max-tick-time" }
+        assertNull(ServerProperties.problemOf(tick, "-1"))
+        assertNotNull(ServerProperties.problemOf(tick, "60001"))
+    }
+
+    @Test
     fun `读不动或坏文件不抛异常`() {
         // 目录放在该放文件的位置上：读取一定失败。
         File(dir, ServerProperties.FILE_NAME).mkdirs()
