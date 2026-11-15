@@ -65,7 +65,7 @@ object LaunchPlanner {
         val context = buildContext(request, layout, version, resolved.clientJar, launcherName, launcherVersion, os, arch, notes)
         // 降级要说一声：用户点的是「直接进」，命令行里却没有 quickPlay，不解释会以为没生效。
         if (LaunchArguments.directConnectMode(version, request.quickPlayServer) == DirectConnectMode.SERVER_ARG) {
-            notes += this@LaunchPlanner.degradeNote(version.id)
+            notes += degradeNote(version.id)
         }
         return LaunchPlan(
             layout = layout,

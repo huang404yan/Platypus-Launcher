@@ -112,6 +112,7 @@ Windows 下也可以用 `gradlew.bat`。首次构建会下载约 300 MB 依赖�
 - `docs/41-zishen-client-id.md`：**自己申请一个 Azure 应用 ID**（为什么不再内置：配额共享、随时被收紧、仓库公开就能被抄走；门户四步与每步为什么；`XboxLive.signin offline_access` 之外什么都不要；四条报错对照；这个 ID 不是密钥；测试版的发布约定）
 - `docs/42-liangtao-peise.md`：**两套配色**（为什么是两套而不是调色盘、60/30/10 的四色对照、正文为什么不用纯白与强调色上的字为什么用深色、默认值按版本给且选过就记住、色值为什么打包成 `Long` 放进 core、换主题只要换一个 `ColorScheme`、对比度是怎么算出来的）
 - `docs/44-duankou-yujian-yu-geli-qianyi.md`：**服务端端口预检、关隔离后搬文件、Forge 的 jar 藏在哪**（`SO_REUSEADDR` 在 Windows 上会让「预检永远通过」这个坑、`pinned` 提示为什么不能走普通 notice、合并为什么是复制不是移动且默认不覆盖、`libraries/` 兜底与 installer jar 的排除、Paper 的 `server:mojang` 为什么是伪问题）
+- `docs/45-android-yunxingshi.md`：**安卓端的 Java 运行时这一层**（为什么安卓不能跑 `java -version` 只能读 `release` 文件、`isInstalled` 与 `canLaunch` 为什么是两条判据、`component` 里的 ABI 约定、把「启动翻译成命令行」抽到 `core/launch/LaunchPlanner.kt` 的理由与它承诺不写盘、`OsFamily` 里为什么还没有 `ANDROID`）
 
 ## 下载
 
@@ -154,7 +155,7 @@ M0（骨架）+ M1（实例扫描）+ M2（下载器）+ M3（**Windows 一键�
 
 **下载断点续传**：先写 `<文件>.part`，校验通过才转正；`.part` 有内容就发 `Range` 接着下，断网不清半成品，下次自动接上。进度条会额外显示「其中 N 个接着上次下（省了 M MB）」（`docs/14`）。
 
-单测 **675 例全过**（58 个测试类，`./gradlew :core:test :ui:jvmTest`；`ui` 从这一版起有 `jvmTest` 源集，格式化函数与导航常量也进单测了）。另有十二个无头冒烟任务（`e2eInstall` / `settingsSmoke` / `instanceFlowSmoke` / `resumeSmoke` / `deleteSmoke` / `fabricE2e` / `modpackE2e` / `forgeE2e` / `neoForgeE2e` / `modsE2e` / `modUpdateE2e` / `isolationSmoke`），走的是界面按钮同一批函数；`resumeSmoke` / `fabricE2e` / `modpackE2e` / `forgeE2e` / `neoForgeE2e` / `modsE2e` 需要联网，分别在空目录真装 Fabric、真跑 Forge 与 NeoForge 官方安装器、真从 Modrinth 下模组、真把一个 `.mrpack` 从解析装到进主菜单；`deleteSmoke` 在 `dist/_delete-smoke` 里全程造假数据，不碰真实 `.minecraft`。
+单测 **702 例全过**（60 个测试类，`./gradlew :core:test :ui:jvmTest`；`ui` 从这一版起有 `jvmTest` 源集，格式化函数与导航常量也进单测了）。另有十二个无头冒烟任务（`e2eInstall` / `settingsSmoke` / `instanceFlowSmoke` / `resumeSmoke` / `deleteSmoke` / `fabricE2e` / `modpackE2e` / `forgeE2e` / `neoForgeE2e` / `modsE2e` / `modUpdateE2e` / `isolationSmoke`），走的是界面按钮同一批函数；`resumeSmoke` / `fabricE2e` / `modpackE2e` / `forgeE2e` / `neoForgeE2e` / `modsE2e` 需要联网，分别在空目录真装 Fabric、真跑 Forge 与 NeoForge 官方安装器、真从 Modrinth 下模组、真把一个 `.mrpack` 从解析装到进主菜单；`deleteSmoke` 在 `dist/_delete-smoke` 里全程造假数据，不碰真实 `.minecraft`。
 
 **能装 Fabric 了**：下载页勾「顺带装 Fabric」→ 拉 meta.fabricmc.net 的 loader 列表（默认落在最新 stable）→ 装 profile json（只改 `id`，保留 `inheritsFrom`）→ 按 maven 坐标补全 8 个库的地址并下载 → 登记成 `1.20.1-fabric-0.20.1` 这样的实例。实测空目录全流程 4 分 29 秒进主菜单，日志首行 `Loading Minecraft 1.20.1 with Fabric Loader 0.20.1`（`docs/15`）。
 
@@ -218,6 +219,8 @@ M0（骨架）+ M1（实例扫描）+ M2（下载器）+ M3（**Windows 一键�
 
 **安卓端跟上了这一轮**：桌面这边补的「数据包 / 服务端 / 关于页开源致谢」，安卓也补了。侧边栏在「光影资源包」与「联机」之间多一项「服务端」，页内同样能选原版 / Paper / Fabric 三种加载器（Forge 与 NeoForge 要起 java 子进程跑官方 installer，安卓上没有这条路，所以不列）。关于页跟桌面一样有「开源致谢」四组，且从 `core/Credits.kt` 读同一份数据。**启动页浮层与左栏没有搬**：安卓还没有应用内启动游戏的能力（`runtime-android` 未开始），没有启动流程就无从谈启动浮层。
 
+**安卓端认得出自己下的 Java 了**：`runtime-android` 里不需要碰原生的那一层已经落地。① 桌面端靠跑一次 `<java> -XshowSettings:properties -version` 认版本，安卓上两条路都断（应用内 JVM 只允许建一个，拿它去跑 `-version` 等于探测一次废掉进程；Android 10 起共享存储不可执行），改成解析 JRE 自带的 `release` 文件（`core/runtime/JavaReleaseFile.kt`）。② 「装完了」与「能起 JVM」原来是一条判据（`bin/java` 与 `release` 在就算装了），但真起 JVM 还要 `libjvm.so`，解包中断完全可能两个标志文件都在、`libjvm.so` 没了 —— 那时界面显示已安装，用户点启动只能在 `JNI_CreateJavaVM` 那一刻拿到一个闪退。所以另立 `canLaunch = isInstalled && hasLibJvm`，界面与 `detect()` 用它，安装流程判要不要重下仍用 `isInstalled`。③ `AndroidJavaRuntimeService` 把 `JavaRuntimeService` 那个接口实现了，三处语义与桌面刻意一致：只认完全相等的主版本（不拿 21 顶 17，1.16.5 在 Java 16+ 直接崩）、`download` 不先探测、没有可用 ABI 时给可读的错而不是空表。④ 顺带把「一次启动翻译成命令行」从桌面实现里抽到 `core/launch/LaunchPlanner.kt`（读版本 json、合继承链、拼 classpath、算 nativeArchives），`os` 与 `arch` 参数化、承诺纯读盘不写盘，`DesktopGameRuntime` 因此少了 100 多行 —— 安卓以后接上 JNI 只要「拿计划、建 JVM、塞参数」，不必再复制一遍 classpath 逻辑（`docs/45`）。
+
 **启动页也变成左栏了**：照 PCL 的 `PageLaunchLeft.xaml`，左栏放实例列表（吃掉剩余高度、自己滚）+ 离线用户名 + 内存 + **54 高的大号启动按钮**，右栏放游戏目录、Java、直连、崩溃报告与日志。目录行留在右栏是因为「一处目录决定左栏能选到哪些实例」，它属于范围而不是动作（`docs/37`）。
 
 **版本隔离能关了**：`Instance` 新增 `isolated: Boolean = true`（默认值就是旧行为，旧 `instances.json` 不用迁移），实例详情页多一张「版本隔离」卡。关掉之后 `--gameDir` 指回游戏根目录，所有版本共用一份 `mods/`、`saves/`、`options.txt` —— 整合包把模组平铺在根目录时才有得选。不是 `versions/<id>` 形状的目录不给这个开关（关不关都落在同一处），详情页会直说。界面层的游戏目录推导同时统一走 `InstanceLayouts.of(...).gameDir`，模组页、光影页、详情统计跟着一起变（`docs/37`）。
@@ -229,4 +232,4 @@ M0（骨架）+ M1（实例扫描）+ M2（下载器）+ M3（**Windows 一键�
 **关掉版本隔离时能把存档搬过去**：版本隔离期间游戏读写的是 `versions/<id>/`，一关掉就换成游戏根目录，实例目录里那份存档游戏当它不存在 —— 用户看到的是「我两个月前建的世界没了」。现在实例详情页的「版本隔离」卡会先告诉你还有哪些目录有东西（`mods`、`saves`……），给一个「复制到游戏根目录」按钮。**复制而不是移动**：用户可能只是关隔离试两天，原件留着才能无损失地开回去；**默认不覆盖同名文件**：根目录里可能已有别的实例写的同名档，跳过并计数，由用户挑留哪个（`core/instance/InstanceMigration.kt`）。
 
 **Forge 的服务端 jar 认出来了**：`findInstalledServerJar()` 的老注释写着「新版本在 `libraries/` 下」，代码却只查根目录。1.17 起 Forge installer 装完根目录只有 `run.bat`，jar 埋在 `libraries/net/minecraftforge/forge/<mc>-<ver>/`，于是装成功但卡片说找不到 jar。现在先查根目录、再 `walkTopDown()` 查 `libraries/`，并显式排除名字含 `installer` 的 jar（那个也在同一棵树里，认错等于把安装器当服务端开）。顺带核了一条候选：Paper 的 `server:mojang` 构建是伪问题 —— `fill.papermc.io/v3` 对 1.8.8 / 1.16.5 / 1.17.1 / 1.21.1 **只有 `server:default`**，只认它的策略是对的，加了分支反而会把原版服务端当 Paper 装下去（`docs/44`）。
-尚未实现：安卓端没有登录页（那边还不能启动游戏，登录了也没有消费方）、Yggdrasil 外置登录仍是空壳（`core/auth/Account.kt` 只有接口）、安卓端下好的 Java 暂时没有消费方（`runtime-android` 还没开始，下完只能先存着）、Modrinth 上的插件（`project_type:plugin` facet 实测不可用，见上）、NAT 穿透与公网中转（「直接进」+ 本机地址枚举已能把局域网与公网 IPv6 的场景走通）、中文搜索的完整词库（只有常用对照表，冷门模组仍需用户给英文名）。模组依赖的 `required` / `optional` / `incompatible` 三类声明都已解析：`required` 自动装齐，`optional` 在依赖树卡片里单独列出「作者建议一起装」但**不替你装**，`incompatible` 由模组页的「查冲突」提示。
+尚未实现：安卓端没有登录页（那边还不能启动游戏，登录了也没有消费方）、Yggdrasil 外置登录仍是空壳（`core/auth/Account.kt` 只有接口）、安卓端下好的 Java 仍然没有消费方（`runtime-android` 的运行时服务与启动翻译这一层已经有了，但起 JVM 与图形转译还没做，下完只能先存着）、Modrinth 上的插件（`project_type:plugin` facet 实测不可用，见上）、NAT 穿透与公网中转（「直接进」+ 本机地址枚举已能把局域网与公网 IPv6 的场景走通）、中文搜索的完整词库（只有常用对照表，冷门模组仍需用户给英文名）。模组依赖的 `required` / `optional` / `incompatible` 三类声明都已解析：`required` 自动装齐，`optional` 在依赖树卡片里单独列出「作者建议一起装」但**不替你装**，`incompatible` 由模组页的「查冲突」提示。
