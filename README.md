@@ -4,7 +4,7 @@
 
 # 鸭嘴兽启动器（Platypus Launcher）
 
-从零编写的 Minecraft 启动器。目标：三端（Android 优先、Windows、Linux）、开源、启动快、界面不卡。
+一个从零写的 Minecraft 启动器。桌面和安卓共用一套界面代码，目标是两端都用得顺手：安卓优先，Windows 与 Linux 跟上。
 
 > **免责声明**
 >
@@ -12,7 +12,7 @@
 >
 > Platypus Launcher is an unofficial third-party Minecraft launcher. This project is not affiliated with, endorsed by, or sponsored by Mojang Studios or Microsoft. Minecraft is a registered trademark of Mojang Studios. Please support the official game by purchasing it.
 
-## 品牌
+## 两条通道
 
 | | 正式版 | 孵化版 |
 |---|---|---|
@@ -22,262 +22,70 @@
 | Android applicationId | `io.github.huang404yan.platypus.launcher` | `io.github.huang404yan.platypus.launcher.preview` |
 | 命令行 | `platypus-launcher` | `platypus-launcher-preview` |
 
-口号：**把好东西，缝在一起。** 孵化版的关于页另可写「自然界早就缝合好了。」
+两个包名不同，所以能装在同一台手机上共存。
 
-图标：正式版用成年全身版，孵化版用幼体半壳版。仓库里只留一张总图（`docs/logo.png`），各平台成品已接进源码（Android 自适应图标、桌面窗口图标、jpackage 安装包图标）。
+**这个仓库里发出去的东西永远是孵化版，也就是开源版。** 正式版只发编译好的安装包，源码不随包走；这里的主干、tag、每一个能下载到的包，都对应孵化版 —— 你在这里看到的就是全部代码，没有一行留在仓库外面。
 
-> **孵化版 = 测试版 = 开源版。** 它不是「先发个阉割包探路」：功能集合与正式版同源同量，
-> 差别只有三处 —— 版本号带 `-preview.N`、安装包里不带任何私有凭据（含 OAuth 的 Client ID，
-> 正版登录要用自己注册的一个，见 `docs/41-zishen-client-id.md`）、发布时标 Pre-release。
-> 规则写在 `releases/README.md`。
+这也决定了两条线首次启动的规矩不一样：正式版第一次打开要求先登录一个正版账号；孵化版只弹一次说明，讲清想用正版账号得自己准备一个微软应用 ID，然后放行。对着能随手改的源码设卡没有意义，只会挡住想先看看界面的人。
 
-> **这个仓库里发出去的东西，永远是开源版的产物。** 正式版只发编好的应用，源码不随包走；
-> 仓库主干、tag、每一个能下载到的包，都对应孵化版（开源版）。换言之：你在这里看到的就是全部的代码，
-> 没有任何一行留在仓库外面。
->
-> 这也决定了两条线的首次启动规矩：**正式版要求先登录一个正版账号**（它发的是应用，改不了里面的判断）；
-> **孵化版只弹一次窗**讲清「想用正版账号得先自己申请一个应用 ID」，然后放行（源码是公开的，
-> 对着能随手改的代码设卡没有意义，只会挡住想先看看界面的人）。见 `docs/57-liangtiao-tongdao.md`。
+不是 PCL、HMCL、Prism 的分支。这几个项目只在产品形态上参考过，代码一行没抄 —— 见 `CONTRIBUTING.md`。
 
-> 不是 PCL / HMCL / Prism 的分支。这些项目只作为产品设计参考，代码一行不抄（见 `CONTRIBUTING.md`）。
-
-## 技术栈
+## 需要什么
 
 | 层 | 选型 |
 |---|---|
 | 语言 | Kotlin 2.4 |
-| UI | Compose Multiplatform 1.12 |
-| 构建 | Gradle 9.9 + Kotlin DSL |
-| JDK | 21（编译目标）/ 25（本机运行） |
-| 协议 | Apache-2.0 |
+| 界面 | Compose Multiplatform 1.12 |
+| 构建 | Gradle 9.9（wrapper 已带）+ Kotlin DSL |
+| JDK | 21 |
+| 许可 | Apache-2.0 |
 
-## 模块
-
-```
-core/            纯 Kotlin，无 UI 依赖
-  instance/      实例模型（实例 = 自包含目录）
-  download/      下载器接口（多源/测速/并发/续传/校验）
-  runtime/       Java 运行时探测、推荐与下载（桌面走 Mojang 清单，安卓走 FCL 的 jreAssets）
-  auth/          离线 / 微软 / 外置登录
-  launch/        启动请求、事件、GameRuntime 抽象
-ui/              Compose Multiplatform，Android 与桌面共享
-app-desktop/     桌面端入口
-```
-
-`GameRuntime` 是两端的分界线：桌面实现是「起一个 java 进程」，Android 实现是「应用内 JVM + 图形转译」。上层只认接口。
-
-## 构建
+**桌面端**只要 JDK 21：
 
 ```bash
 ./gradlew :app-desktop:run
 ```
 
-Windows 下也可以用 `gradlew.bat`。首次构建会下载约 300 MB 依赖。
+Windows 下用 `gradlew.bat`。首次构建会下大约 300 MB 依赖。
 
-## 文档
+**安卓端**另外要 Android SDK：编译要 Platform 37 与 Build-Tools，编 JNI 层要 NDK `28.2.13676358`。把路径写进 `local.properties` 的 `sdk.dir=`，然后：
 
-- `docs/01-youdian-shouji.md`：各启动器优点收集
-- `docs/02-jishuzhan-xuanxing.md`：技术栈选型与排除理由
-- `docs/03-luxian-yu-youxianji.md`：优先级评估与里程碑
-- `docs/04-juece-jilu.md`：决策记录
-- `docs/05-win-baseline.md`：Windows 端技术基线
-- `docs/06-win-acceptance.md`：Windows 端验收清单
-- `docs/07-qidong-lianlu.md`：启动链路设计
-- `docs/08-win-kaifa-jilu.md`：Windows 端开发记录
-- `docs/09-android-baseline.md`：**Android 运行端技术基线**（JRE 只到 17、单版本 700–900 MB、渲染三选一）
-- `docs/10-android-ceshi-buzhou.md`：**Android 预览版测试步骤**（给用户的手册）
-- `docs/11-android-s1-shiyan.md`：**S1 真机实验清单**（用户可执行，含回报表格）
-- `docs/12-win-oneclick-loop.md`：**一键装闭环**（选版本 → 下载 → 补 Java → 建实例 → 启动）
-- `docs/13-settings-persistence.md`：**启动器设置持久化**（离线用户名 / 默认游戏目录 / 默认内存）
-- `docs/14-resume-and-instance-create.md`：**下载断点续传与实例页新建入口**（`.part` + Range、本地版本直接认养、登记与移除登记）
-- `docs/15-fabric-installer.md`：**Fabric 一键安装**（meta.fabricmc.net 元数据、maven 补 url、`1.20.1-fabric-0.20.1` 版本号、真实联网 e2e 数字）
-- `docs/16-instance-delete.md`：**实例删除与版本目录清理**（改名 → 递归删 → 失败回滚，三种拒绝，存档保留）
-- `docs/17-forge-installer.md`：**Forge 一键安装**（官方 installer CLI、`launcher_profiles.json` 前置、补齐 client jar 才不撞模块）
-- `docs/18-mods-page.md`：**模组页**（本地 `mods/` 扫描、Modrinth 搜索安装、为什么不是 CurseForge）
-- `docs/20-android-pages.md`：**Android 端模组 / 联机 / 设置三页**（ModInstaller 下沉 core、MulticastLock、为什么启动页仍是占位）
-- `docs/19-neoforge-installer.md`：**NeoForge 一键安装**（官方 maven 被重置 → BMCLAPI 镜像、`--mirror` 对 client 安装无效的字节码级证据、`inheritsFrom` 是版本映射的唯一可信来源、预铺 70 个依赖库让 installer 完全不联网）
-- `docs/21-gongneng-xifen.md`：**功能细分与补全路线**（对照 PCL 自编版逐页列出差距、「有了但不好用」八条实证、补全 P1–P7 / 细分 S1–S6 / 美化 U1–U4 三阶段）
-- `docs/22-shili-geli-yu-xiangqing.md`：**实例真隔离与实例详情页**（`--gameDir` 指实例目录、libraries/assets 仍共享、旧共享 mods 复制不移动、`isolationSmoke` 的五条磁盘判据）
-- `docs/23-mods-manage.md`：**模组管理与检查更新**（启用停用改名规则、sha1 反查 Modrinth、四类更新结论、加载器跟随实例）
-- `docs/24-android-instance-detail.md`：**安卓实例详情页**（复用 `InstanceDetailsLoader` 做磁盘统计、桌面独有的探测 Java/打开目录换成复制路径、输入合并规则抽成 core 的 `InstanceEdits`）
-- `docs/25-zhenghebao-daoru.md`：**整合包导入**（`.mrpack` / MCBBS v2 先在 core 只读解析再导入、overrides 三层覆盖顺序、`safeRelativePath` 两层防越界、先装游戏再下包内文件的原因）
-- `docs/26-bengkui-baogao.md`：**崩溃报告读取与归因**（按 mtime 挑最新一份、退出码与时间两道闸、只读头部 256 KB、模组规则必须排在加载器规则之前）
-- `docs/27-rizhi-bianma.md`：**日志中文不乱码**（给 JVM 传 `-Dstdout.encoding` + `-Dfile.encoding`、读侧按字节严格试 UTF-8 再退 GBK、为什么不能靠查替换符判编码、64 KB 单行上限）
-- `docs/28-mods-yilai.md`：**模组依赖求解**（Modrinth 只给 project_id、sha1 反查已装、按层 BFS + 深度/数量封顶、失败不连坐）
-- `docs/29-guangying-ziyuanbao.md`：**光影与资源包**（光影查 `loaders=["iris","optifine"]`、资源包查 `["minecraft"]`、元数据读不出只记 problem 不吞、文件夹形态拒绝停用的原因、安卓端为什么改成页内切换）
-- `docs/30-mods-chongtu.md`：**模组冲突检测**（Modrinth 的 `dependency_type=incompatible`、为什么用 sha1 反查而不是读 modId、双向声明合成一条、`present` 为什么定义为「对面文件真在」、措辞只能写「作者声明」）
-- `docs/31-zhenghebao-yuancheng.md`：**远程整合包**（只补「取包」这一段、`project_type=modpack` 的 facet、只留 `.mrpack` 但不硬排除 server 包、缓存落 `%TEMP%` 的理由、远程与本地共用同一条导入流水线）
-- `docs/34-jie-mian-baohuo.md`：**桌面端下载 / 导入跨页保活**（切页会销毁页面、`rememberCoroutineScope` 随之取消、进程级 runner 与 `StateFlow`、幂等与速度采样两个坑、取消的三档语义）
-- `docs/33-lianji-zhilian.md`：**联机页「直接进」**（用官方 `--quickPlayMultiplayer` 而不是自己实现协议栈、特性开关不打开参数根本不会出现、地址为什么存在 App 层。**原文「版本不支持时抛错」已被 `docs/43` 推翻**）
-- `docs/43-zhilian-jiangji.md`：**直连在 1.19 及更早版本的降级**（两条路的效果等价、参照 PCL 但把判定换成「json 有没有那条规则」、五种地址形态与八种坏输入、`--server` 为什么排在用户额外参数之前）
-- `docs/32-daoru-hedui.md`：**导入后核对磁盘**（为什么要「再看一眼」而不是信下载器、先比大小必要时才算 sha1、失败不抛而是收集成清单、取消要显示 `Canceled` 而不是停在 `Running`）
-- `docs/35-jiemian-ke-yongxing.md`：**界面可用性**（窗口默认尺寸与最小尺寸、实例页为什么整页滚动而不是「固定头 + 权重列表」、用 Swing `JFileChooser` 而不是 AWT `FileDialog`、下载页状态条、中文搜索与不引外部词库的理由）
-- `docs/36-xinxi-jiagou-yu-zhixie.md`：**信息架构重排与开源致谢**（左栏收成六项、下载下五个二级项、刷新按钮挂导航项、整合包独立成页、致谢四分类与「使用了代码」为空的意义）
-- `docs/37-zuolan-shujubao-geli-yu-duanxucan.md`：**启动页左栏化、数据包与服务端、版本隔离开关、安装器中断续跑**（54 高大按钮与目录为什么留右栏、`loaders=["datapack"]` 的实测理由、插件为什么不做、`isolated` 推翻 `docs/22` 的来龙去脉、`InstallerProcess` 的杀进程时机与两个易错点）。**其中「服务端只做原版」「启动浮层没做」两条已被 `docs/38` 推翻**
-- `docs/38-qidong-fuceng-yu-fuwuduan.md`：**启动浮层、服务端加载器与服务端登记**（进度只准前进的理由、取消为什么不砍协程、Paper 老 API 410 与只给 sha256、Fabric 的 server jar 必须带 installer 版本、Forge 的 Java 为什么让用户挑、服务端为什么单开一套登记、为什么没有「启动服务端」按钮）
-- `docs/39-java-xiazai.md`：**两端下载 Java**（为什么要 `ensure` 与 `download` 两套语义、`minecraft-java-exe` 与 gamma-snapshot 为什么要丢、安卓 JRE 的 universal + bin 两包结构、gh-proxy 的实测速率、tar 自己解析时的路径穿越与可执行位、为什么安卓只能下不能启动）
-- `docs/40-zhengban-denglu.md`：**微软正版登录**（为什么用设备码而不是本地回调端口、七步链路与 v1/v2 不能混用、RpsTicket 的 `d=` 规则、`entitlements/mcstore` 为什么必须查、四个服务各说各话的报错怎么翻、只存 refresh_token 与它的轮换、换不到会话时为什么停下来报错、**preview.10 起内置 Client ID 已改成空串**）
-- `docs/41-zishen-client-id.md`：**自己申请一个 Azure 应用 ID**（为什么不再内置：配额共享、随时被收紧、仓库公开就能被抄走；门户四步与每步为什么；`XboxLive.signin offline_access` 之外什么都不要；四条报错对照；这个 ID 不是密钥；测试版的发布约定）
-- `docs/42-liangtao-peise.md`：**两套配色**（为什么是两套而不是调色盘、60/30/10 的四色对照、正文为什么不用纯白与强调色上的字为什么用深色、默认值按版本给且选过就记住、色值为什么打包成 `Long` 放进 core、换主题只要换一个 `ColorScheme`、对比度是怎么算出来的）
-- `docs/44-duankou-yujian-yu-geli-qianyi.md`：**服务端端口预检、关隔离后搬文件、Forge 的 jar 藏在哪**（`SO_REUSEADDR` 在 Windows 上会让「预检永远通过」这个坑、`pinned` 提示为什么不能走普通 notice、合并为什么是复制不是移动且默认不覆盖、`libraries/` 兜底与 installer jar 的排除、Paper 的 `server:mojang` 为什么是伪问题）
-- `docs/45-android-yunxingshi.md`：**安卓端的 Java 运行时这一层**（为什么安卓不能跑 `java -version` 只能读 `release` 文件、`isInstalled` 与 `canLaunch` 为什么是两条判据、`component` 里的 ABI 约定、把「启动翻译成命令行」抽到 `core/launch/LaunchPlanner.kt` 的理由与它承诺不写盘、`OsFamily` 里为什么还没有 `ANDROID`）
-- `docs/46-zhenghebao-daochu.md`：**整合包导出**（MCBBS v2、CurseForge、Modrinth 不是「压缩方式不同」而是「谁持有文件」、三种元数据为什么一句都不能混写、`addons` 用短名而 `modLoaders` 用短名加版本、存档默认不打、sha512 为什么自己算、`downloads` 里 Modrinth 的 CDN 排最后、纯 CurseForge 包为什么原本装不上以及怎么补的回退、`files[]` 的指纹反查为什么要自己算而 API Key 必须由用户填、对上号的文件为什么仍然打通进包里）
-- `docs/47-cundang-guanli.md`：**存档管理**（`level.dat` 的 NBT 为什么自己读、读不出来为什么不算错误、删除为什么永远先备份、备份为什么是一个 zip 而不是一份目录、还原为什么默认不覆盖且名字可改、备份与世界为什么分成两张卡、自动备份为什么用「退出后」而不是定时器、失败时为什么不删旧备份）
-- `docs/48-fuwuduan-peizhi.md`：**服务端配置页**（`server.properties` 为什么按行保留而不是读成 Map、值里的换行为什么要压平、为什么只放 33 个键而不是全表、为什么 `level-seed` 要允许留空、`level-type` 的转义冒号为什么不能直接字符串比、两个负数范围为什么是刻意的、白名单与 OP 的 UUID 从哪来且「网络不通」与「这个正版账号不存在」为什么要分开说、`[]` 为什么不是空文件、端口解析为什么只剩一份）
-- `docs/49-xiazaiyuan.md`：**下载源偏好**（为什么只有「顺序」两个选项而没有「只用官方源」、为什么做成进程级全局量而不是一路透传、两个接入点为什么就够、镜像主机名两个方向都要卡、排序为什么必须是稳定的）
-- `docs/50-gengxin-jiancha.md`：**检查更新**（为什么只查不换、通道规则「孵化版才看预发布」、版本号为什么不能按字符串比、限流与 404 各说什么、说明只显示开头）
-- `docs/51-waizhi-denglu.md`：**外置登录**（为什么拿到令牌不算成功、地址为什么只能剥一层后缀、jar 为什么不带版本号、账号 key 为什么要带上服务器地址、为什么必须「先令牌后 agent」）
-- `docs/52-taowa-lianji.md`：**陶瓦联机**（为什么不打包二进制、集成契约的三条、房间码的校验位、房主为什么没有直连地址、对端消失时怎么分辨是谁走了）
-- `docs/53-fuwuduan-rcon.md`：**服务端远程控制台（RCON）**（协议为什么把末尾两个 0 算进长度、长回执为什么要靠读超时收尾、什么时候退回标准输入、留空密码为什么不是「不设密码」）
-- `docs/54-bangzhu-shouce.md`：**面向玩家的帮助手册**（和 docs 下的开发记录分工在哪、为什么是一级页、章节为什么按「要做的事」切、为什么每章底下有个「去这里」）
-- `docs/55-android-qidong-zhunbei.md`：**安卓启动准备**（为什么先做参数表而不是先啃 JNI、`OsFamily.ANDROID` 为什么规则名是 linux、十五个 `-D` 参数漏了各会怎样、为什么要主动丢用户的 `-Xmx`、自检六条为什么不只是「装没装 Java」、渲染库为什么让用户自己放 `.so`）
-- `docs/56-android-jni-ceng.md`：**安卓的 JNI 层**（为什么参数表必须在建 JVM 之前抄出来、为什么 `dlopen` 要用 `RTLD_GLOBAL`、参数认不出来为什么宁可失败、Android 10 的可写目录 dlopen 限制与三条绕法、为什么这一层**大概率在真机上起不来**）
-- `docs/57-liangtiao-tongdao.md`：**正式版与开源版**（哪条线强制正版登录、为什么开源版反而不能强制、通道为什么只有一个判据、为什么「账号还没读出来」不拦、首次启动为什么记时间戳而不是布尔）
+```bash
+./gradlew :androidApp:assembleDebug
+```
+
+没有 NDK 也能编出安装包，只是里面不含启动游戏要用的那几个 `.so`。
+
+**出 Windows 安装包（msi）**还要 WiX 3.14，用 `-PskipWix` 与 `-PwixDir=<WiX 目录>` 指过去。只出免安装 zip 就不用管它。
+
+## 目录
+
+```
+core/            纯 Kotlin，不依赖界面，也不依赖 Android
+  instance/      实例模型（实例 = 自包含目录）
+  download/      多源下载、并发、续传、校验
+  runtime/       Java 运行时探测、推荐与下载
+  auth/          离线 / 微软 / 外置登录
+  launch/        启动计划、参数翻译、命令拼装
+  modpack/       整合包导入导出
+  server/        服务端安装与控制台
+ui/              Compose Multiplatform，桌面与安卓共用
+app-desktop/     桌面端入口
+androidApp/      安卓端入口
+```
+
+`GameRuntime` 是两端的分界线：桌面实现是起一个 java 进程，安卓实现是应用内 JVM 加图形转译。上层只认这个接口，所以模组、存档、整合包那些页面两端是同一份代码。
+
+安卓端的应用内 JVM 已经接到 `JNI_CreateJavaVM`，但真机上还起不来：Android 10 起不允许从可写目录 `dlopen` 原生库，而运行时一定解在可写目录里。图形转译层也还没接。这条线目前能用到「进游戏之前的全部准备」（选运行时、拼参数、跑自检）。
 
 ## 下载
 
-编译好的包**不在仓库里**，走 GitHub Releases 的附件。仓库历史只放源码与构建必需的文件，二进制进去就删不掉，只会把仓库撑大。
+编译好的包不在这个仓库里，走 [Releases](https://github.com/huang404yan/Platypus-Launcher/releases) 的附件。仓库只放源码与构建必需的文件 —— 二进制进了历史就删不掉，只会把仓库撑大。
 
-本地出包后先按通道/平台放到 `releases/` 下（已 gitignore，只在本机）：
+正版登录要用一串微软给的应用 ID。孵化版不内置：任何随安装包发出去的 ID 都等于让所有下载者共用一份别人名下的应用注册，被限流、被收紧、被认定滥用，都不是拿到包的人能处理的。所以第一次打开会告诉你去哪儿申请一个自己的（免费，三分钟），之后一直用。正式版由构建方自己注入。
 
-```
-releases/stable/{android,windows,linux}/    Platypus Launcher 正式版
-releases/preview/{android,windows,linux}/   Platypus Preview 孵化版
-```
+## 许可与贡献
 
-每个平台最多留 5 个，命名与留存规则见 `releases/README.md`。
+Apache-2.0，见 `LICENSE` 与 `NOTICE`。改动之前请先看 `CONTRIBUTING.md`，里面最要紧的一条是不抄 GPL 项目的代码。
 
-> 三端孵化版包都已能出：Android 是 `.apk`，Windows 是免安装 `.zip` 与安装包 `.msi`。产物在 `releases/preview/` 下（不入库）。
-
-## 状态
-
-M0（骨架）+ M1（实例扫描）+ M2（下载器）+ M3（**Windows 一键装闭环**）+ M4（**整合包导入**）已完成，当前版本 **0.8.0-preview.14**（孵化线）。
-
-**Windows 端已经能双击玩起来**：选版本 → 下载（客户端 jar / libraries / assets）→ 缺 Java 自动从 Mojang 官方运行时清单补 → 登记成实例 → 启动进主菜单，全程不需要人替启动器干活。实例内存可在启动页改（512–32768 MB）。
-
-**Android 端补齐了三个页面**：侧边栏从「四个真页面 + 两个哑占位」变成「七个真页面 + 启动占位」。新增模组页（本地 `mods/` 列表 + Modrinth 搜索安装）、联机页（组播扫描 + 手动解析地址，多拿一个 `MulticastLock` 才收得到包）、设置页（与桌面读写同一个 `platypus/settings.json`）。为此把 `ModInstaller` 从 `ui` 的 jvmMain 下沉到 `core`，桌面与安卓共用同一份逻辑。启动页仍不存在——「应用内起 JVM + 图形转译」是独立的 `runtime-android` 模块（`docs/09`），占位页现在写清缺什么而不是一句「还没做」（`docs/20`）。
-
-**Android 端也能管光影、资源包和数据包了**：侧边栏在「模组」与「联机」之间多一项「光影资源包」，页内顶部三个按钮切光影 / 资源包 / 数据包（手机侧边栏放不下二级）。逻辑与桌面端共用 core 的 `PackScanner` / `PackFileOps` / `PackInstaller`，一行没重写：从实例的 `shaderpacks/` 或 `resourcepacks/` 扫出已装的、勾选框启停、删除二次确认、从 Modrinth 搜了直接装。手机端目前还没有应用内启动游戏的能力（`runtime-android` 未开始），所以这一页的用处是「在手机上把包装好」（`docs/29`）。
-
-**Android 端仍未在真机跑过**：这一批新页面（模组、光影资源包、服务端、关于页致谢）和原有的下载页、诊断页一样，验证止于「编译通过 + APK 的 dex 里有这些类」，没有一份真机截图或日志。
-
-**能登录正版了，但 Client ID 要自己申请**：设置页新增「账号」二级项。点「用微软账号登录」→ 界面给出一个八位短码 → 手机或浏览器打开 `microsoft.com/link` 输码 → 这边轮询到结果自动继续，全过程不用起本地回调端口（防火墙、端口占用、浏览器关联都不碰）。登录成功后本地只留一枚 `refresh_token`，存在 `<游戏目录>/platypus/accounts.json`，**那个文件等价于账号密码**。启动游戏时每次现换一份会话（MC 令牌两小时就过期，缓存没意义）；换不到就停下来把原因说清楚，不静默退回离线 —— 静默退回会让人以为自己登录着，等进了服务器才发现是个离线号。当前是正版账号时，启动页侧栏不再显示「离线用户名」输入框（`docs/40`）。
-
-**安装包里不内置 Client ID**：微软不发放通用客户端 ID，任何随包发出的 ID 都等于让所有下载者共用一份别人名下的应用注册（配额共享、随时可能被关闭、仓库公开后谁都能抄走）。所以登录流程的第一步是「填一个自己的应用 ID」——「设置 → 账号」第一张卡里有申请步骤，「打开 Azure 门户」按钮直接跳到对应的门户页面，填完点「保存 ID」立刻生效（Client ID 是每次登录与刷新时现读设置的，不用重启）。三分钟一次，之后一直用。详见 `docs/41-zishen-client-id.md`。
-
-**有两套配色了**：原来一直是 Material 3 默认的紫调浅色——那是「没设计过」的样子。现在按「60% 背景 + 30% 模块 + 10% 强调」定了两套：「自然原色」是深潭青底、泥土棕卡片、鸭嘴橙强调，正式版默认；「特工蓝橙」是灰白底、泰瑞蓝绿模块、亮橙强调，孵化版默认。前者的正文用奶油白而不是纯白（纯白在深色底上盯久了刺眼）、强调色上的字用深棕而不是白（白字压 `#FF8C00` 只有 2.2:1，深棕有 8:1）；后者侧栏与卡片用兑淡的蓝绿而不是饱和的 `#00A896`（整条侧栏刷饱和色会盖过橙色，10% 的强调就不成立了）。色值全在 core 的 `LauncherTheme.kt` 里以 ARGB 长整型存着，桌面与安卓各留一份「转 ColorScheme」的映射；界面里 250 多处颜色本来就全走 `MaterialTheme.colorScheme`，所以换主题没有一行页面代码需要改。「设置 → 界面」三行选项，点一下立刻换皮并落盘（不跟底部「保存」走）；没选过时按版本号自动挑，选过就记住，在孵化版里选了深色也不会因为版本号是 preview 又被掰回去。单测里四条在**算对比度**（正文 ≥ 4.5:1、强调色上的字 ≥ 4.5:1、卡片与底色的层次在 1.05–3 之间、所有色值都不透明），因为「按钮上的字看不清」这种问题只有数字能提前拦住。第一版有个真故障：页面根容器没铺底色，深色主题下没被卡片盖住的空白全是 Swing 窗口的白，压在上面的奶油白文字对比度掉到 1.0:1 —— 所以 `PlatypusTheme` 现在自己在最外层铺一层 `background`；窗口标题栏也跟着配色走（Windows 上用 `DwmSetWindowAttribute`，见 `app-desktop/.../WindowTheme.kt`）。细节都在 `docs/42`。
-
-设置已经能存住：离线用户名、默认游戏目录、新实例默认内存、当前用哪个账号、配色，落在 `<游戏目录>/platypus/settings.json`，关掉再打开还在（`docs/13`）。
-
-**实例页能自己建实例了**：填版本号 + 实例名 + 内存，本地已有那份游戏就直接认养（不联网），没有才走一键装；已登记的实例能改内存、能移除登记（只去掉登记，版本文件不动）。从实例页点「去启动」会跳到启动页并自动选中它（`docs/14`）。
-
-**实例能删了，且删得小心**：卡片上的「删除文件…」先算计划（绝对路径、文件数、总字节数）再弹确认框；`saves/` 默认不删，搬到 `<游戏目录>/platypus/saves-backup/`，要连存档一起删得自己勾。实现是「改名 `<dir>.deleting-<时间戳>` → `walkBottomUp` 递归删 → 失败改名回来」，没引第三方回收站库。三种情况直接拒绝：版本目录不存在、目标在 `versions/` 之外、同一目录还被别的实例登记着（`docs/16`）。
-
-**下载断点续传**：先写 `<文件>.part`，校验通过才转正；`.part` 有内容就发 `Range` 接着下，断网不清半成品，下次自动接上。进度条会额外显示「其中 N 个接着上次下（省了 M MB）」（`docs/14`）。
-
-单测 **952 例全过**（77 个测试类，`./gradlew :core:test :ui:jvmTest`；`ui` 从这一版起有 `jvmTest` 源集，格式化函数与导航常量也进单测了）。另有十二个无头冒烟任务（`e2eInstall` / `settingsSmoke` / `instanceFlowSmoke` / `resumeSmoke` / `deleteSmoke` / `fabricE2e` / `modpackE2e` / `forgeE2e` / `neoForgeE2e` / `modsE2e` / `modUpdateE2e` / `isolationSmoke`），走的是界面按钮同一批函数；`resumeSmoke` / `fabricE2e` / `modpackE2e` / `forgeE2e` / `neoForgeE2e` / `modsE2e` 需要联网，分别在空目录真装 Fabric、真跑 Forge 与 NeoForge 官方安装器、真从 Modrinth 下模组、真把一个 `.mrpack` 从解析装到进主菜单；`deleteSmoke` 在 `dist/_delete-smoke` 里全程造假数据，不碰真实 `.minecraft`。
-
-**能装 Fabric 了**：下载页勾「顺带装 Fabric」→ 拉 meta.fabricmc.net 的 loader 列表（默认落在最新 stable）→ 装 profile json（只改 `id`，保留 `inheritsFrom`）→ 按 maven 坐标补全 8 个库的地址并下载 → 登记成 `1.20.1-fabric-0.20.1` 这样的实例。实测空目录全流程 4 分 29 秒进主菜单，日志首行 `Loading Minecraft 1.20.1 with Fabric Loader 0.20.1`（`docs/15`）。
-
-**能装 Forge 了**：下载页勾「顺带装 Forge」→ 拉 `promotions_slim.json`（默认 recommended）→ 下载官方 installer（8.8 MB，装过一次就复用）→ 备好 `launcher_profiles.json` → 跑 `--installClient` 逐行透传日志 → 校验 version json → **把原版 client jar 复制成 `<forgeId>.jar`**（不 copy 会撞模块，报 `ResolutionException: Module minecraft contains package net.minecraft.server`）→ 登记成 `1.20.1-forge-47.4.28`。实测空目录全流程 7 分 55 秒（含下载 3641 个原版文件与自动补 Java 17）、已装目录 7 秒，进主菜单 11.0 秒（`docs/17`）。
-
-**实例终于真隔离了**：以前所有实例共用一份 `mods/` 与 `saves/`（`--gameDir` 被反推成游戏根目录），装两个整合包会互相打架。现在 `--gameDir` 指向 `<游戏目录>/versions/<id>`，`libraries/` 与 `assets/` 仍共享（详情页有「版本隔离」开关，默认开着；整合包把 `mods/` 平铺在根目录时关掉它才看得见那些模组，见 `docs/37`）；`isolationSmoke` 用五条磁盘判据反向证明（实例目录里的 `logs/latest.log` 有内容 9291 B、共享 `latest.log` 的 mtime 与共享 `saves/` 件数一字未变），实测进主菜单 9.6 秒。模组页跟着改成「先选实例」，隔离前装在共享 `mods/` 里的模组可以一键**复制**进某个实例（不移动、不覆盖同名）。实例卡片新增「详情」：本机 Java 列表里挑运行时、改内存与 JVM 参数、看版本 json 摘要（mainClass / 继承自 / 库条目数 / 需要的 Java）、看八个子目录各占多少、一键打开目录（`docs/22`）。
-
-**有模组页了**：左侧列出 `mods/` 里已装的（读 `fabric.mod.json` / `mods.toml` / `neoforge.mods.toml` 拿 id、名字、版本、加载器，坏 jar 标出来但不崩），右侧从 Modrinth 搜、选一个装进去，下载沿用 `.part` 续传 + sha1 强校验。实测装 Sodium 971 552 字节、33 秒（`docs/18`）。
-
-**模组前置会自动装齐**：Modrinth 的依赖表只给 `project_id`，装完一个模组后启动器再查两次（id → slug、slug → 版本），把前置一层层展开成依赖树，界面按层缩进列出、点一次「一次装齐」全下完。同一个库被多个模组依赖只排一次，`mods/` 里已装的先用 sha1 反查跳过，查不到/没适配/已装过的逐条说清原因。实测装 Iris 1.7.6 时自动列出 `Sodium 0.5.13` 并一并装进（2 726 899 B + 971 552 B）。深度 8 层、单次 64 个封顶，成环会停下。作者标了 `optional` 的依赖不进安装计划，只在同一张卡片里单独列一行「建议一起装」并写明是谁提的——不装照样能启动（`docs/28`）。
-
-**作者声明的不兼容会提前提示**：模组页的「查冲突」把 `mods/` 里每个 jar 的 sha1 拿去 Modrinth 反查，读出作者在版本里写的 `dependency_type = "incompatible"`，把「两个都装着」和「只被点名、没装」分成两段列出来。本机一个真实 Forge 实例的 34 个 jar 里查出 3 条声明（Embeddium 对 Rubidium 与 TexTrue's Embeddium Options、Superb Warfare 对 Iris/Oculus & GeckoLib Compat），三条都是「作者提到但没装」；另造一对互斥的测试实例验了 `present` 分支真的会标成「都装在这个实例里」。措辞统一按「作者声明」写，卡片里明说「不一定崩」（`docs/30`）。
-
-**能装 NeoForge 了**：官方 `maven.neoforged.net` 在本机被重置（`Connection was reset`），所以元数据与库全走 BMCLAPI 镜像；installer 的 `--mirror` 对 client 安装**无效**（`ClientInstall` 根本不引用 `getMirror()`，字节码级确认），改由启动器在跑 installer 之前把 70 个依赖库**预铺**到 `libraries/`，installer 看到文件在、sha1 对上就打 `Checksum valid` 直接跳过——实测 13822 行安装器日志里 `Checksum valid` 117 次、`Downloading library from` 0 次、超时 0 次。NeoForge 版本号到 MC 版本的映射只信 installer jar 内 `version.json` 的 `inheritsFrom`（前缀只是初筛）。实测 1.21.1 + NeoForge 21.1.265：装 54.8 秒、进主菜单 14.9 秒，日志里 `NeoForge mod loading, version 21.1.265, for MC 1.21.1`（`docs/19`）。
-
-**整合包能直接在启动器里搜了**：以前得先在浏览器里翻到 Files 标签、认出哪个是能导入的 `.mrpack`、下载到本地，再回启动器点「选择文件…」。现在下载页的导入卡片多了「从 Modrinth 搜」：关键词 + 游戏版本 + 加载器（按钮循环切换），空关键词也放行（直接看热门）。选中后启动器把 `.mrpack` 下到 `%TEMP%\platypus-modpacks\packs`，再走原来那条本地导入流水线——两条路只有「取包」不同，进度、错误、重试都共用一份。实测搜 `cobblemon` 装 Cobblemon Official Modpack [Fabric]：包 100,855,720 B，预览写「77 个文件要下载，共 209.1 MB」，13 分钟装完（含 209 MB 游戏文件与按需下载的 76 MB Java 运行时），登记实例 `1.21.1-fabric-0.20.1`，`mods/` 下 60 个 jar（`docs/31`）。
-
-**存档能管了**：以前 `saves/` 只在三处被动出现过（删实例时保护、整合包导入时不覆盖、详情页统计大小），想看有哪些世界、想备份一个、想把删掉的捞回来，只能自己开资源管理器翻。现在实例详情页多了「存档与备份」：列出每个世界（名字取 `level.dat` 的 `LevelName`、上次游玩时间、大小、游戏模式、硬核标记，有 `icon.png` 就显示缩略图），一行一个「备份 / 删除」，下面一张卡列历史备份，每份能还原。**删除永远是先备份再删**，备份失败就一个字节都不删 —— 存档是玩家唯一无法重新下载的东西（模组能重下、Java 能重装、连游戏本体都能一键装回来）。备份**是一个 zip 而不是一份目录**：复制几百兆要等十几秒，手滑点两次盘上就留两个同名目录，过两个月谁也分不清；zip 里路径相对世界目录，解出来就能直接塞回 `saves/`。还原默认**不覆盖同名世界**且名字可改 —— 同名时「还原」只有两种结局（覆盖玩家正玩着的那个、或静默失败），所以默认要求换个名字，要覆盖得显式勾上。`level.dat` 是 gzip 压的 NBT，这里自己写了三十来行 reader 而不是引依赖；读不出来不算错误（别人给的存档、复制一半的目录都可能是这样），标一句「读不出元数据」照样能备份能删（`docs/47`）。
-
-**存档还会自己备份**：设置页多了「存档」一栏（开关 / 间隔 1–168 小时 / 每个世界留几份 1–50），默认**开**、24 小时一份、留 5 份。触发点是**游戏正常退出之后**，不是定时器 —— 启动器关着的时候在背后动用户的文件太危险（可能撞上另一个启动器、撞上用户自己在拷存档、撞上半路断电），而游戏退出那一刻是唯一保证世界文件已全部落盘的时刻。三条判据都按**世界**算，不是全局：新开的世界第一次退出就备、某个世界失败只影响它自己、清理只针对本轮成功备份过的那个世界且从最旧删起（最新那份永远留着）。退出码非 0 不备份 —— 崩在半路时世界文件未必写完，留一个刚坏在那儿的 zip 没有意义。备份结果在启动页状态行下面显示一行，自动备份出来的 zip 和手动备份的在同一个列表里，一样能还原。
-
-**整合包也能导出了**：之前只有导入，想把配好的实例发给别人只能手动拖压缩包、再凭记忆写元数据。现在实例详情页的「这个实例在哪」卡里多一个「导出整合包」，三种格式任选 —— MCBBS v2（文件全打进 `overrides/`，不联网也能导，包大）与 CurseForge（只写 `manifest.json`，同样全打进包，体积与 MCBBS 一模一样；差别只在对 CurseForge App 来说少一个陌生文件）与 Modrinth（认得出的模组只写下载地址，包小，要联网核对）。**默认是前两者里的 MCBBS**：没人帮忙的时候它一定成功，而且它的 `manifest.json` 本身就是标准 CurseForge 清单，两边都吃得开。三种元数据一句都不能混写（HMCL 见到 `modrinth.index.json` 就按 Modrinth 包解析，加载器版本对不上整个导入失败，真正对的 `mcbbs.packmeta` 反而读不到），所以是二选一写而不是能写就都写；`addons` 里必须是短名（`forge` 不是 `net.minecraftforge`），而 `manifest.json` 的 `modLoaders` 又要是「短名 + 版本」。**CurseForge 包的 `files[]` 现在能填了**：正规 CF 包会在清单里写「这个文件是哪个项目的哪个文件」，让导入方自己去下。我们本地只有 jar，把 jar 对上项目靠指纹 —— 一个 32 位整数，同一个文件在哪台机器上算出来都一样。算法照抄 PCL（先删掉 `\t` `\n` `\r` 空格四个字节再算、长度用删后的、种子 1、无符号 32 位），单测里钉了 12 个拿 Python 独立实现交叉验证过的参考值。这件事要用 CurseForge 的 API Key，所以它只能由你自己填（内置进仓库就等于公开，会被刷额度甚至封应用）：设置 → 下载里多一张卡，填了才查、留空就不查，留空时导出照样成功只是清单空着。**对上号的文件实体仍然打进 `overrides/`** —— 因为我们的导入器与 PCL 的都不按 `files` 联网下载，省掉实体的话导出的包自己都装不回来。代价是 CurseForge App 会先下一次再被覆盖，结果卡的警告里如实写了。**存档默认不打** —— 里面有别人的世界、服务器地址、聊天记录，要打必须自己勾。导出前先纯读盘数一遍，给出「N 个文件，共 X MB」和各目录各几个；写 `.part` 成功才改名，目标已存在会先问一次（`docs/46`）。
-
-**服务端能配了**：以前服务端页只有「装一个、点启动、看控制台」，想改端口、改游戏模式、给朋友加白名单，只能自己开记事本改 `server.properties`、手写 `whitelist.json`。现在服务端列表每行多一个「配置」：33 个真正影响玩法的键做成了对应控件（数字框、勾选框、一排小按钮、整行输入框），带范围校验，按「玩家 / 世界生成 / 谁能看见 / 性能与超时」分成了五组（最早那 18 项不动位置）；白名单与管理员两张卡能加人、能撤，加人时去查 Mojang 档案接口拿正版 UUID，查不到按离线规则算。三个规矩：**服务端在跑时配置页只读**（它把 properties 读进内存、退出时按自己顺序写回，我们改盘上的文件会被盖掉，用户看到的是「改了没生效」）；白名单与 OP 在跑时要走控制台命令（文件改了也要重启才认，提示里直接给出该发哪条命令）；改完 properties 明说「重启才生效」。`server.properties` **按行保留**而不是读成 Map 再写回 —— 服务端会重排键、里面还夹着用户手写的注释与被 `#` 注释掉的旧值，读成 Map 写回去这些全会消失，用户改一个端口发现整个文件被重排就不敢点第二次了（`docs/48`）。
-
-**国内网络可以优先走镜像了**：以前所有下载都是「官方源排第一、镜像当兜底」写死在代码里，国内网络下每个文件都要先等官方源超时（连接 15 秒、读取 60 秒）再换镜像重来一遍。现在「设置 → 下载」两行选项，点一下立刻生效并落盘。只有「自动（官方源优先）」与「优先国内镜像」两个，**没有「只用官方源」**——那等于把兜底关掉，官方源被墙时用户就只剩一根不动的进度条。两者的差别只是顺序，镜像挂了照样退回官方源，镜像内容坏掉靠 sha1 校验兜住。偏好做成进程级的 `DownloadPreference` 而不是一路透传参数：这条链有十几层（界面 → 各类安装器 → 下载器），漏传一处不会编译报错，只表现为「设置了没用」。两个接入点就覆盖全部 —— 文件走 `HttpDownloader.fetch()`，文本接口（版本清单、安装器清单）走 `VanillaInstaller.fetchText()`；后者容易被漏掉，但它被墙时发生得更早，清单拉不下来后面的文件根本没机会开始。认镜像不能简单 `contains`：`evilbmclapi2.bangbang93.com` 与 `bmclapi2.bangbang93.com.evil.cn` 两方向都得判否，各有单测盯着（`docs/49`）。
-**导入完会自己复核一遍磁盘**：以前「导入完成」只看流程有没有抛异常——切个页面就把导入协程砍了，`.part` 留在磁盘上，界面却停在「已完成 X / Y 个文件」看着像装完了（实测那次 77 个文件只落 76 个，缺的正是 139,966,403 字节的 Cobblemon 本体）。现在下完所有文件后按清单再核一遍：先比大小（`.mrpack` 基本都带 `fileSize`，77 个文件 650 MB 只要几毫秒），清单没写大小时才读盘算 sha1；对不上就收集成清单，标题从「导入完成」改成「导入没装齐」并逐个列出原因（半成品会写明「只下到一半（49.2 MB / 133.5 MB）」）。取消也不再静默：界面明确写「导入已中断（停在「下载整合包文件」）」，重试自动续上没下完的那几个（`docs/32`）。
-
-**从 CurseForge 站点下的包也能装了**：CurseForge 的 `manifest.json` 把版本写在 `minecraft.version` 与 `minecraft.modLoaders` 里，没有 MCBBS 那份 `addons` 数组，而导入侧原来第一步就查 `addons["game"]`，查不到直接报「该整合包未提供游戏版本信息，无法安装」——也就是说这类包此前一律装不上。现在 `addons` 缺失时退一步读 CurseForge 字段：`minecraft.version` 当游戏版本，`modLoaders` 里优先 `primary: true` 的那一项当加载器（`id` 是「短名-版本」，按**第一个**连字符切开，加载器版本自己带连字符时才不会被切坏），并在 `warnings` 里明说「这是 CurseForge 格式的 `manifest.json`，按 `minecraft` 字段读」，用户才知道包没写错。只声明 quilt 时照旧拒绝；有 `modLoaders` 却没有 `version` 时**仍然失败**，不许猜一个版本糊过去——猜错的表现是装完了启动崩在 `UnsupportedClassVersionError`，比直接说装不了糟得多（`docs/46`）。
-**崩了会告诉你为什么**：游戏非正常退出时读实例 `crash-reports/` 里最新一份报告，卡片上给文件名、时间、大小、`Description:` 那句和第一个异常，可展开全文 / 复制全文 / 打开目录。两道闸防误报：退出码 0 不读、报告 mtime 必须不早于本次启动（留 5 秒余量），否则实例上次崩过会把旧报告挂成新的。归因规则新增「模组冲突或缺依赖」与「模组文件损坏」两条，且必须排在「加载器未能启动」之前——缺前置的日志后面必跟 `NoClassDefFoundError: cpw/mods` 连带噪声。日志区同时补了复制 / 导出 / 打开崩溃目录（`docs/26`）。
-
-**能看到有没有新版了**：关于页上多了一块「更新」，进去就自动问一次 GitHub。查到就显示版本号、发布日期、说明开头几行，以及「下载 .msi」「下载 .zip」「打开发布页」三个按钮；查不到就把原因写在原地（限流、404、断网各有各的话）。
-
-它**只回答、不替你办**：不自动下载，更不会把自己换掉。原因很实际——Windows 上正在跑的 exe 是被占用的，自我替换要处理改名、断电、回滚；而一旦换上一个起不来的新版，用户手里那个能用的程序已经没了，**打不开的启动器没法靠自己修回来**。卡片上这句也写着。
-
-通道规则跟着版本号走：版本里带 `-preview` 的才看 Pre-release，正式版不看，否则稳定版用户天天收到实验包提醒；草稿哪条通道都不算。版本号按段比而不是按字符串比——字符串会得出 `preview.9 > preview.10` 这种结论，正式版还要比同号的预发布新。
-
-**外置登录**：有些服务器不用微软账号，自己有一套 Yggdrasil 认证（LittleSkin、自建 authlib 服务端都属于这一类）。「设置 → 账号」多了一张卡：填服务器地址 + 那个服给的账号密码，登录成功后启动游戏就自动带上身份。和微软账号混在同一张列表里，各自标着是哪个服的。
-
-它比微软那条线多一步：光拿到令牌没用，还必须往 JVM 参数里挂 `authlib-injector`，否则游戏照样去找微软验证，玩家会看到「验证服务器连不上」。所以启动链路是「验令牌 → 挂 agent」，顺序不能反——反过来的话，密码过期时用户要先看完 jar 下载进度才被告知该重新登录。jar 放在 `<游戏目录>/platypus/authlib-injector/` 下，文件名不带版本号（换版本不改启动参数），下载后按 sha256 校验一次。认证地址会自动归一：末尾斜杠、被贴上的 `/authserver` 后缀都能认，但**只剥一层**——有的服务端根路径本身就叫 authserver，无脑全剥会剥成空（`docs/51`）。
-
-**日志里的中文不再是方块**：以前游戏按 GBK 往 stdout 写、启动器按 UTF-8 解，中文全变成 一串替换符，字节当场丢失。现在两头都改：给 JVM 传 `-Dstdout.encoding=UTF-8` 与 `-Dfile.encoding=UTF-8`（JDK 18+ 只认前者、17 及更早只认后者），读侧再补一个「先严格试 UTF-8、不合法就整行退回 GBK」的 `LogLineReader`。实测 1.20.1 + Forge 47 模组环境，导出日志 35 137 B / 244 行 / `U+FFFD` 计数 0，原先那条全是方块的声音设备名已经完整显示为「扬声器 (适用于 I2S 音频的英特尔® 智音技术)」（`docs/27`）。
-
-**26.x 的新版本号也认了**：Mojang 从 26.1 起把版本号从 `1.21.11` 换成 `26.1`（没有 `1.` 前缀），旧的正则 `^(1)\.(\d+)…` 匹配不到，会一路落到 else 推出「要 Java 8」。现在加了年份式分支：整串形如「两位数字 + 点 + 数字」开头且年份 ≥ 26 → Java 25，`1.20.1` 这类一位数的不会被误判成年份。
-
-顺带把周号快照也从「一律 21」改成按年份分段：`13w16a–21w18a` → 8、`21w19a–22w02a` → 16、`22w03a–24w13a` → 17、`24w14a–25w46a` → 21、`26w14a` 起 → 25。边界不是猜的，是把 version_manifest_v2 里 744 个快照的 `javaVersion.majorVersion` 全拉下来统计出来的跃迁点；按这套规则复算 744 个只有 1 个不一致（`1.18-pre1` 官方 16、我们按 `1.x` 分支算出 17）。这个函数只是兜底，一键装那条路优先用版本 json 自己的 `javaVersion`。依据是官方 version json：26.1 / 26.2 / 26.3 / 26.1.1 / 26.1.2 与 26.4-snapshot-1…8 全是 `javaVersion = {component: java-runtime-epsilon, majorVersion: 25}`，而 1.21.11 与 24w14a 仍是 `java-runtime-delta / 21`。
-
-**光影和资源包也能装了**：左侧导航多一项「光影资源包」，下面分「光影」「资源包」两个二级页。已装的从 `shaderpacks/` 与 `resourcepacks/` 扫出来，勾选框就是启停（改文件名 `.zip` ↔ `.zip.disabled`），删除要二次确认；文件夹形态的包明确拒绝停用——对目录改名游戏照样认，假装停用只会让人困惑。搜装走 Modrinth：光影用 `loaders=["iris","optifine"]`、资源包用 `["minecraft"]`，都不带 categories facet。实测搜 `complementary` 装进 `shaderpacks/`，落盘 `ComplementaryReimagined_r5.9.3.zip` 553 397 B，已装列表同时列出旧的文件夹形态包并标「· 文件夹」。
-
-**联机页**：扫描局域网广播（`224.0.2.60:4445`，读 `[MOTD]`/`[AD]`）列出同网段的世界，也能手动解析 `host:port`。每个世界后面有「直接进」：1.20+ 拼官方的 `--quickPlayMultiplayer`，1.19 及更早自动退回 `--server` + `--port`，两条都跳过主菜单直接进那个世界——走的是游戏自己的连接流程，皮肤、会话、模组一概不少（`docs/33-lianji-zhilian.md`、`docs/43-zhilian-jiangji.md`）。
-
-联机页还多一段「让朋友连到你」：填游戏里「对局域网开放」给的端口，下面按地址种类列出本机的「地址:端口」（局域网 / 公网 IPv6 / 其它），一条一个复制按钮，并写清每条能用在什么场合。跨网络真正能连的两条路是「双方都有公网 IPv6」和「路由器端口转发」，界面把这两条说明白。
-
-**跨网络那一块交给陶瓦了**：联机页最下面多一张「陶瓦联机」卡，一台机器建房、把房间码发给朋友、对方填进来就能进，双方都不用动路由器。陶瓦的二进制**不随包发**——它是 AGPL-3.0，本项目是 Apache-2.0 且公开发布产物，塞进去会触发传染条款，所以只有「安装 / 更新陶瓦」一个由用户点的动作，下到 `<游戏目录>/platypus/terracotta/` 下。房间码自己先校验一遍：21 位里最后一位是校验位，少抄一位或多抄一个字符当场说「格式不对」，而不是让用户去连一个不存在的房间等十几秒超时。房主态**故意不显示「复制直连地址」**——陶瓦给房主的那个地址是游客本机的回环地址，发出去对方一定连不上，留着就是一个必定失败的按钮。对端消失时界面分辨是谁走了：房主关游戏清掉房间码（这个码定义上已经死了），游客看到「房主已断开」但**不清码**（可能只是本机网络抖了一下，同一个码还能重连）（`docs/52`）。
-
-**服务端控制台的命令能走 RCON 了**：原来发命令是往服务端进程的标准输入里写，这只有「本启动器起的那个进程」收得到 —— 用户双击 `start.bat` 起的服、或者在另一个目录另开的服，输入框看着可用、按发送也不报错，服务端却什么都收不到，属于最难查的一类问题。现在起进程之后会挂一个后台任务去试连 RCON（`enable-rcon=true` 且有密码时），最多试 25 秒（世界加载慢的服要十几秒才监听端口），连上就改走 TCP，界面上写清「命令通道：RCON」。连不上**不算失败**：原版默认就关着 RCON，把它当错误弹出来等于每次开服都报一次假警，那就退回标准输入并在日志里说明一句。`server.properties` 表单也补了 `enable-rcon` / `rcon.port` / `rcon.password` 三个键，密码框是遮住的、旁边有「随机生成一个密码」（字符表去掉了 `0`/`O` 与 `1`/`I`，因为要手抄到另一台机器上）（`docs/53`）。
-
-**安卓端的启动页不再是占位了**：以前点「启动」只有一句「应用内起 JVM 与图形转译是独立模块，现在还不存在」。现在这一页把**进游戏之前的每一步**都做了：挑实例、挑已装好的 Java 运行时、选图形后端（GL4ES / Zink / LTW，三十二位机器上选不了 Zink）、跑六条自检、拼出应用内 JVM 要的完整参数表、把原版 natives 解到实例自己的目录。差的最后一步是 `JNI_CreateJavaVM` —— 那要 NDK 和真机，本机两样都没有，所以**手机上仍然进不了游戏**，页尾明写着这件事而不是装作能进。两个设计点值得记：① 加了 `OsFamily.ANDROID`，但它的规则名是 `linux`（版本 json 的 rules 只有 windows/osx/linux 三种，拿 `android` 去比会让每条 `natives-linux` 都判不匹配、classpath 里一份 natives 都凑不出来）；② 参数里的 `-Xmx` 会从用户手写的额外参数里**主动丢掉**并给一句中文理由 —— 内存由实例设置统一决定，两条同时存在时用哪个是未定义的，而静默丢弃会让用户对着一个内存不对的游戏找半天原因。诊断页也多了一段「启动准备（安卓）」，因为现在没有 adb，出问题时用户能回传的只有界面上的文字（`docs/55`）。
-
-**再往后一步：JNI 层也写出来了**。`androidApp/src/main/cpp/jvm_bridge.c` 编成 `libplatypus-jvm.so`，做的是「把那张参数表交给 `JNI_CreateJavaVM`」：先把字符串与参数数组抄成 C 的（`jstring` 属于创建它的那个 JVM，换了 JVM 就是野指针），再把运行时 `lib/` 下每个 `.so` 用 `RTLD_GLOBAL` 挂进全局符号表 —— `libjvm.so` 的依赖写的是裸文件名，用 `RTLD_LOCAL` 加载会因为「找不到 libjava.so」失败，而那句报错不会告诉你是加载方式的问题 —— 然后 `dlsym` 拿入口、带参数造 JVM、调游戏主类。参数表里认不出的条目让启动**直接失败**而不是忽略：`-Dos.name=Linux` 这种少一条就必然起不来的东西，被悄悄丢掉只会让崩点跑到别处去。**但它大概率在真机上起不来**，原因不在代码：Android 10 起禁止应用从可写目录 `dlopen` 原生库，而应用内 JVM 的 `libjvm.so` 按定义就在应用私有目录里。界面与诊断页都如实写着这件事，按钮旁边那句话是「起不来是常态，不是参数拼错」（`docs/56`）。
-
-**有一份给玩家看的帮助手册了**：以前仓库里五十多篇 docs 全是开发记录 —— 写的是「为什么 CurseForge 包要用回退读字段」「为什么自动备份不做定时器」，对改代码的人必要，对打开启动器的人是噪音。现在侧栏多了一个一级页「帮助」，八章按**要做的事**切（第一次打开 / 装东西 / 登录 / 启动 / 联机 / 开服 / 存档 / 出问题了），只回答「我要做这件事该点哪里」。每章底下有一个「去这里」直接跳到对应页面并选中那一项 —— 手册最容易失效的地方不是写错，是读者看完了不知道按钮在哪。章节 id 与侧栏二级项 id 是同一份（`HELP_CHAPTERS.map { SubTab(it.id, it.label) }`），加一章不会漏改（`docs/54`）。**窗口不用最大化也能用了**：以前 `Main.kt` 的 `Window` 没给尺寸，Compose 按内容开窗，一开就偏窄、右侧按钮被裁在框外，用户第一反应是「得最大化」。现在默认 1280x820、最小 1024x640，窄窗口下侧栏自动从 220dp 收到 180dp、留白从 24dp 收到 16dp。参照的是 PCL 的做法——它默认只有 850x500，但整个界面是按那个尺寸设计的（`docs/35`）。
-
-**实例页能滚了**：原来「固定头 + weight(1f) 的 LazyColumn」，窄窗口里顶部几行吃掉大半屏，权重分完列表只剩几十像素，滚轮落在列表外没反应，表现就是「实例多了看不到、选不着」。现在整页 `verticalScroll`，实例卡片直接铺开（数量是十几个的量级，不需要回收）。联机页同样加了整页滚动。
-
-**目录不再只能手打**：新增 `DirectoryPicker.kt`，用 `javax.swing.JFileChooser` 的 `DIRECTORIES_ONLY`（AWT `FileDialog` 在 Windows 上只能选文件，选目录得先选文件再回退一层）。启动页、实例页、下载页、设置页、模组页、光影资源包页都多了「选择…」按钮，选完自动重扫。
-
-**点「一键安装」当场有反应**：进度、速度、失败原因原来都在整页最下面，一滚就出屏，用户以为按钮没反应会再点几次。现在说明文字下面钉一条状态条：运行中是「正在<步骤> · <进度> · <速度>/s · 已用 <时长>」，失败是「卡在「<步骤>」：<原因>」用错误色，完成是「安装完成：<实例名> 已就绪」。详细的步骤列表与重试按钮照旧留在下方。版本过滤框打错也不再给一个空列表，而是明说「没有名字里带「xxx」的正式版，清空能看全部 N 个」。
-
-**左栏按 PCL 的分法重排了**：以前是「启动 / 实例 / 下载 / 模组 / 光影资源包 / 联机 / 设置 / 关于」八项平铺，模组与光影各占一个一级项、里面再套二级页。现在按 PCL 的做法（`PageDownloadLeft.xaml`）收成六项：模组、整合包、资源包、光影包都变成「下载」下的二级项，整合包也从下载页底部搬出来独立成页——它和一键装原版是并列的两件事，塞在原版页最底下时用户要滚过版本列表和进度条才看得见，那正是「藏得深」。
-
-**刷新按钮挂在菜单项上**：以前每个页面内容区各有一个「刷新」按钮，位置各不相同。现在跟 PCL 一样做成导航项的属性：鼠标碰到「下载」下的某一项，右侧出现一个小 ↻，点它重扫这一页的清单。内容区里不再放第二个入口——同一个动作两个按钮，用户永远在猜哪个才是对的。整合包页故意不挂：它没有可刷新的缓存清单，放一个点了没反应的按钮比不放更糟。
-
-**关于页有开源致谢了**：分四组写清「使用了代码 / 设计参考（未使用代码）/ 格式与协议 / 运行时依赖」。PCL2 是专有许可、HMCL 与 Prism 是 GPL-3.0，本项目一行没抄，所以「使用了代码」这一组是空的——空着是有意的，不是漏写，单测里就有一条断言盯着它：一旦有人真的搬了实现，这条会变红，提醒同时改仓库根 `NOTICE`。致谢数据在 `core/Credits.kt`，关于页与 `NOTICE` 同源，不会出现「界面说没抄、NOTICE 里写着抄了」。
-
-**中文搜索**：Modrinth 只认英文名与 slug，直接搜「钠」什么也搜不到。PCL 能做到是因为它内置了一份 3 万余行的中文名数据库（`PCLCS/Resource/WikiEntries.txt`），而 `pcl-src` 没有 LICENSE 文件、许可状态不明，不能直接拷进本项目。这里改成手写 200 余条常用中英对照（这一版从 153 条扩到 208 条）（`core/search/SearchKeywords.kt`，每条 slug 都用 Modrinth 的 `/search` 实测过「搜出来非空」—— 这一批新增 60 余条时又跑了一遍 141 个 slug 的并发核对，0 条空结果）：输入中文时界面直接说明「搜不到是因为 Modrinth 不认中文」，并给一组可点的英文候选 chip，点一下替换关键词；输入框为空时给这一类热门词（`docs/35`）。这一批还改掉一个判据 bug：原来把「数字」也算成英文，于是「工业2」「匠魂3」「应用能源2」这些自带编号的常用叫法全被当成英文查询发给 Modrinth，悄悄返回空列表 —— 现在只有真正的拉丁字母才算英文（`docs/44` 之前的搜索段没写这件事，记在这条里）。
-
-**整合包之外还能装数据包与服务端了**：下载栏按 PCL 的分法补了两项。数据包和资源包共用同一套扫描/安装代码（`datapacks/` + `loaders=["datapack"]`），中文词典跟着加了 11 条。
-
-**服务端五种加载器都支持了**：原版走 Mojang 的 `server.jar`、Paper 走 `fill.papermc.io/v3` 的构建列表（老 `api.papermc.io/v2` 已经 410 Gone）、Fabric 用 `meta.fabricmc.net` 现成的 server jar（地址必须带 installer 版本，不带直接 404）、Forge 与 NeoForge 跑各自的官方 installer。装完顺手写好 `eula.txt` 与双击就能开的 `start.bat`（Windows，CRLF + `chcp 65001` + `pause`）/ `start.sh`（LF）；Forge / NeoForge 的 `run.bat` 是安装器自己生成的，**绝不覆盖**，所以卡片上写的是「改内存改 `user_jvm_args.txt`」。Paper 只给 sha256 而下载器只认 sha1，所以下完自己算一遍再比对，对不上删掉重下并说明原因。Forge 安装器用的 Java 让用户自己挑：拿新版 java 去跑老版安装器会 `UnsupportedClassVersionError`，而那个报错埋在 installer 日志里，界面上只看得到「失败」（`docs/38`）。
-
-**插件这一项不做，理由是实测的**：Modrinth 的 `project_type:plugin` facet 会把全站模组都搜出来（返回项的 `project_type` 全是 `mod`），插件实际靠 `loaders=["bukkit","paper","spigot"]` 这类值区分；而且插件要落进服务端的 `plugins/`，这一版还没有「服务端实例」这个概念，硬塞入口只会让人装进客户端 `mods/`。
-
-**启动时有一层浮层了**：点「启动」之后整页盖一层半透明遮罩，中间一张卡写「正在启动游戏」、实例名、一根进度条、当前步骤与百分比，底部「取消启动」。照 PCL 的 `PanLaunching`（`PageLaunchLeft.xaml:76-158`）做的，但只取它四行信息里的两行（PCL 还有「登录方式」与「下载速度」，这一版不下载任何东西、也不登录）。进度**只准前进不准后退**：解压原生库那一步会让 `Stage` 回退一次，跟着跳条子会来回抖。取消**不砍协程** —— `DesktopGameRuntime.launch` 在 `withContext` 里同步起进程，中途取消会让 `withContext` 抛异常、已经起来的 java 进程再也拿不到句柄，所以改成「先记下意愿，等 `launch` 返回句柄时立刻 `stop()`」（`docs/38`）。
-
-**两端都能下 Java 了**：桌面端在「设置 → Java」列出 Mojang 官方运行时清单里这个平台能下的每一档（Windows x64 是 8 / 16 / 17 / 21 / 25），已装的标路径、未装的点一下下到 `<游戏目录>/runtime/`；这里刻意**不探测本机**——点「下载」就是要一份自己的、删得掉的。清单会丢掉 `minecraft-java-exe`（它的 version.name 是 14，不是 Java 版本）与 `java-runtime-gamma-snapshot`（与 gamma 同为 17，列两行没意义）。安卓端则是另一套：手机上没有「已装的 JDK」可扫，Android 10 起共享存储也不许执行代码，所以由启动器自己下几份按 ABI 预编译好的 OpenJDK，解到应用私有目录。用 FCL 仓库里的 jreAssets，**是 universal + bin-<abi> 两个包叠着解** —— `bin/java` 与 `release` 都在 bin 包里，只解 universal 会得到一个起不来的 JRE。tar 那层自己解析（`core/runtime/AndroidJava.kt` 的 `TarXz`），xz 用 `org.tukaani:xz`；路径穿越一律抛错而不是静默跳过，可执行位按 tar 头补上。地址走 `gh-proxy.com` 前缀（裸 GitHub 实测 42 秒只收到 64 KB，gh-proxy 883 KB/s）。APK 里不含 JRE，点下载时才取，所以包体积没变（`docs/39`）。
-
-**装过的服务端会被记住**：原来服务端页装完只剩一张「已就绪」卡片，切页回来就没了。现在装完自动写进 `<游戏目录>/platypus/servers.json`（`core/install/ServerRepository.kt`），页面底部列出「装过的服务端（N）」，每条能「打开目录」与「从列表里去掉」。**没有复用 `Instance`**：服务端没有 `versions/` 布局、不该出现在启动页、也不需要 Java 探测那一套，硬塞进去会让实例列表混进一堆点「启动」会报错的东西。同一个目录再存一次不会长出第二条（重装不该变成两行）。刻意**没有「启动服务端」按钮**：开服是长驻进程，用户要往控制台敲 `stop`、`op`、`whitelist`，没有控制台就只能强杀，比不起进程更糟（`docs/38`）。
-
-**安卓端跟上了这一轮**：桌面这边补的「数据包 / 服务端 / 关于页开源致谢」，安卓也补了。侧边栏在「光影资源包」与「联机」之间多一项「服务端」，页内同样能选原版 / Paper / Fabric 三种加载器（Forge 与 NeoForge 要起 java 子进程跑官方 installer，安卓上没有这条路，所以不列）。关于页跟桌面一样有「开源致谢」四组，且从 `core/Credits.kt` 读同一份数据。**启动页浮层与左栏没有搬**：安卓还没有应用内启动游戏的能力（`runtime-android` 未开始），没有启动流程就无从谈启动浮层。
-
-**安卓端认得出自己下的 Java 了**：`runtime-android` 里不需要碰原生的那一层已经落地。① 桌面端靠跑一次 `<java> -XshowSettings:properties -version` 认版本，安卓上两条路都断（应用内 JVM 只允许建一个，拿它去跑 `-version` 等于探测一次废掉进程；Android 10 起共享存储不可执行），改成解析 JRE 自带的 `release` 文件（`core/runtime/JavaReleaseFile.kt`）。② 「装完了」与「能起 JVM」原来是一条判据（`bin/java` 与 `release` 在就算装了），但真起 JVM 还要 `libjvm.so`，解包中断完全可能两个标志文件都在、`libjvm.so` 没了 —— 那时界面显示已安装，用户点启动只能在 `JNI_CreateJavaVM` 那一刻拿到一个闪退。所以另立 `canLaunch = isInstalled && hasLibJvm`，界面与 `detect()` 用它，安装流程判要不要重下仍用 `isInstalled`。③ `AndroidJavaRuntimeService` 把 `JavaRuntimeService` 那个接口实现了，三处语义与桌面刻意一致：只认完全相等的主版本（不拿 21 顶 17，1.16.5 在 Java 16+ 直接崩）、`download` 不先探测、没有可用 ABI 时给可读的错而不是空表。④ 顺带把「一次启动翻译成命令行」从桌面实现里抽到 `core/launch/LaunchPlanner.kt`（读版本 json、合继承链、拼 classpath、算 nativeArchives），`os` 与 `arch` 参数化、承诺纯读盘不写盘，`DesktopGameRuntime` 因此少了 100 多行 —— 安卓以后接上 JNI 只要「拿计划、建 JVM、塞参数」，不必再复制一遍 classpath 逻辑（`docs/45`）。
-
-**启动页也变成左栏了**：照 PCL 的 `PageLaunchLeft.xaml`，左栏放实例列表（吃掉剩余高度、自己滚）+ 离线用户名 + 内存 + **54 高的大号启动按钮**，右栏放游戏目录、Java、直连、崩溃报告与日志。目录行留在右栏是因为「一处目录决定左栏能选到哪些实例」，它属于范围而不是动作（`docs/37`）。
-
-**版本隔离能关了**：`Instance` 新增 `isolated: Boolean = true`（默认值就是旧行为，旧 `instances.json` 不用迁移），实例详情页多一张「版本隔离」卡。关掉之后 `--gameDir` 指回游戏根目录，所有版本共用一份 `mods/`、`saves/`、`options.txt` —— 整合包把模组平铺在根目录时才有得选。不是 `versions/<id>` 形状的目录不给这个开关（关不关都落在同一处），详情页会直说。界面层的游戏目录推导同时统一走 `InstanceLayouts.of(...).gameDir`，模组页、光影页、详情统计跟着一起变（`docs/37`）。
-
-**取消安装不再留一个后台 java**：Forge / NeoForge 的官方安装器以前是「起进程 + 循环读日志」，点「取消」只是取消协程，那个 java 还在往 `libraries/` 里写；超时检查也因为装在读循环里而对不出声的进程永不生效。现在抽成 `core/install/InstallerProcess.kt`：协程一结束就 `destroyForcibly`（连派生的子进程一起杀）、日志由独立协程读而主循环用 `waitFor(100ms)` 盯超时与取消、取消以 `CancellationException` 的形式冒出去而不是被包成「安装失败」。下次再点安装，installer 自己会跳过 `libraries/` 里已经存在的库（`docs/37`）。
-
-**开服前先看端口**：以前服务端撞上「端口被占」时，界面上只有两行英文（`**** FAILED TO BIND TO PORT!` / `Perhaps a server is already running on that port?`）然后状态变回「已停止」，真正该做的事（改哪个文件的哪一行）没有。现在 `core/install/ServerPorts.kt` 统一了三处对端口的认知：从 `server.properties` 读 `server-port`、点「启动」之前真的 bind 一次探空闲、跑起来之后从日志里认领绑定失败。端口被占时**不放进程出去**，直接给一句「25565 端口已经被别的程序占着……要改的是 `<绝对路径>/server.properties` 里的 server-port 那一行」，Windows 上还会用 `netstat -ano` + `ProcessHandle` 报出占用者（`java.exe（pid 1234）`）。这里有个真陷阱：Java 的 `ServerSocket` 默认开着 `SO_REUSEADDR`，在 Windows 上**别人正在监听也照样能 bind 成功**，不显式关掉预检就永远通过。事后认领的提示用 `pinned` 单独存着，因为 `append()` 每来一行日志都会清 `notice`，用普通 notice 会被随后的几行输出立刻擦掉（`docs/44`）。
-
-**关掉版本隔离时能把存档搬过去**：版本隔离期间游戏读写的是 `versions/<id>/`，一关掉就换成游戏根目录，实例目录里那份存档游戏当它不存在 —— 用户看到的是「我两个月前建的世界没了」。现在实例详情页的「版本隔离」卡会先告诉你还有哪些目录有东西（`mods`、`saves`……），给一个「复制到游戏根目录」按钮。**复制而不是移动**：用户可能只是关隔离试两天，原件留着才能无损失地开回去；**默认不覆盖同名文件**：根目录里可能已有别的实例写的同名档，跳过并计数，由用户挑留哪个（`core/instance/InstanceMigration.kt`）。
-
-**Forge 的服务端 jar 认出来了**：`findInstalledServerJar()` 的老注释写着「新版本在 `libraries/` 下」，代码却只查根目录。1.17 起 Forge installer 装完根目录只有 `run.bat`，jar 埋在 `libraries/net/minecraftforge/forge/<mc>-<ver>/`，于是装成功但卡片说找不到 jar。现在先查根目录、再 `walkTopDown()` 查 `libraries/`，并显式排除名字含 `installer` 的 jar（那个也在同一棵树里，认错等于把安装器当服务端开）。顺带核了一条候选：Paper 的 `server:mojang` 构建是伪问题 —— `fill.papermc.io/v3` 对 1.8.8 / 1.16.5 / 1.17.1 / 1.21.1 **只有 `server:default`**，只认它的策略是对的，加了分支反而会把原版服务端当 Paper 装下去（`docs/44`）。
-尚未实现：安卓端没有登录页（那边还不能启动游戏，登录了也没有消费方）、安卓端下好的 Java 到「起 JVM」那一步仍然没接上（启动准备层与 JNI 层都写完了：运行时会认、参数表能拼、自检能跑、natives 能解、`JNI_CreateJavaVM` 也接了 —— 卡在 Android 10 起「不许从可写目录 dlopen 原生库」，且图形转译层没接，见 `docs/56`）、Modrinth 上的插件（`project_type:plugin` facet 实测不可用，见上）、NAT 穿透与公网中转（「直接进」+ 本机地址枚举已能把局域网与公网 IPv6 的场景走通）、中文搜索的完整词库（只有常用对照表，冷门模组仍需用户给英文名）。模组依赖的 `required` / `optional` / `incompatible` 三类声明都已解析：`required` 自动装齐，`optional` 在依赖树卡片里单独列出「作者建议一起装」但**不替你装**，`incompatible` 由模组页的「查冲突」提示。
+非官方项目，与 Mojang Studios 及 Microsoft 无关联。
