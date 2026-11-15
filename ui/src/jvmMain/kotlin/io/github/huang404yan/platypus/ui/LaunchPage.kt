@@ -45,6 +45,7 @@ import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import io.github.huang404yan.platypus.core.auth.AccountBootstrap
 import io.github.huang404yan.platypus.core.auth.OfflineProfile
 import io.github.huang404yan.platypus.core.auth.StoredAccount
 import io.github.huang404yan.platypus.core.instance.Instance
@@ -480,7 +481,7 @@ fun LaunchPage(
                     if (accounts != null) {
                         activeAccount = withContext(Dispatchers.IO) {
                             runCatching { accounts.list() }.getOrNull().orEmpty()
-                        }.firstOrNull { it.key == wanted.trim().lowercase() }
+                        }.firstOrNull { AccountBootstrap.matches(it, wanted) }
                     }
                 }
             }

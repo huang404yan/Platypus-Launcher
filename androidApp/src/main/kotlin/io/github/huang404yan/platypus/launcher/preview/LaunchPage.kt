@@ -34,7 +34,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import io.github.huang404yan.platypus.core.auth.OfflineProfile
+import io.github.huang404yan.platypus.core.auth.AccountBootstrap
+import io.github.huang404yan.platypus.core.auth.AccountSession
 import io.github.huang404yan.platypus.core.instance.Instance
 import io.github.huang404yan.platypus.core.instance.InstanceScanner
 import io.github.huang404yan.platypus.core.instance.JsonInstanceRepository
@@ -116,6 +117,9 @@ internal fun LaunchPage() {
     var exported by remember { mutableStateOf("") }
     var starting by remember { mutableStateOf(false) }
     var startNotice by remember { mutableStateOf("") }
+    // 最近一次自检换出来的登录身份。界面上要如实显示这一局用的是谁 —— 用着离线号却以为
+    // 自己登录着，是进服务器被踢之后才发现的，那时候已经说不清了。
+    var sessionInfo by remember { mutableStateOf<AccountSession?>(null) }
 
     /** 这个实例的 natives 目录：一个实例一份，免得两个版本互相盖掉。 */
     fun nativeDirOf(instance: Instance?): File {
@@ -161,6 +165,24 @@ internal fun LaunchPage() {
         if (exe.isBlank()) { notice = "先到「Java」页装一个运行时，再回来做自检。"; return }
         busy = true
         scope.launch {
+            // 换身份可能要联网（微软是刷新令牌、外置服还要下一份 authlib-injector），失败要单独说清
+            // 是这一步 —— 混进「自检本身出错了」里，用户会跑去查图形库。
+            var stage = ""
+            val resolved = withContext(Dispatchers.IO) {
+                runCatching {
+                    AccountBootstrap.resolve(
+                        gameRoot = File(root.trim().ifBlank { defaultGameRoot() }),
+                        offlineName = username,
+                        onStage = { text -> stage = text },
+                    )
+                }
+            }
+            val session = resolved.getOrElse {
+                busy = false
+                prep = null
+                notice = (if (stage.isBlank()) "" else "（" + stage + "）") + "换登录身份失败：" + describe(it)
+                return@launch
+            }
             val result = withContext(Dispatchers.IO) {
                 runCatching {
                     val runtime = JavaRuntime(
@@ -170,7 +192,8 @@ internal fun LaunchPage() {
                     val request = LaunchRequest(
                         instance = instance,
                         java = runtime,
-                        session = OfflineProfile.session(username),
+                        session = session.session,
+                        jvmArgs = session.jvmArgs,
                     )
                     AndroidLaunchPlanner.prepare(
                         request = request,
@@ -186,7 +209,7 @@ internal fun LaunchPage() {
             }
             busy = false
             result.fold(
-                onSuccess = { prep = it; exported = ""; notice = it.summary },
+                onSuccess = { prep = it; sessionInfo = session; exported = ""; notice = it.summary },
                 onFailure = { prep = null; notice = "自检本身出错了：" + describe(it) },
             )
         }
@@ -223,7 +246,9 @@ internal fun LaunchPage() {
                     val logs = File(current.env.gameDir, "logs")
                     logs.mkdirs()
                     val file = File(logs, "platypus-launch-android.txt")
-                    val token = OfflineProfile.session(username).accessToken
+                    // 用的是自检那一刻的令牌。自检没换过身份（sessionInfo 为空）时打不了码，
+                    // 那就如实写出来 —— 参数表本身得是真的。
+                    val token = sessionInfo?.session?.accessToken.orEmpty()
                     val body = current.fullCommand.joinToString(System.lineSeparator()) { arg ->
                         if (token.isNotBlank() && arg.contains(token)) arg.replace(token, "***") else arg
                     }
@@ -449,6 +474,25 @@ internal fun LaunchPage() {
                 "转译库的体积与许可证要单独决定，所以这一版不随包分发：" +
                     "你自己有那份 .so 时用「放入」选进来就行。文件名必须就是它要的那一个。",
             )
+        }
+
+        LaunchCard("登录身份") {
+            val who = sessionInfo
+            Text(
+                if (who == null) {
+                    "还没做自检。设置里填的离线用户名是 " + username + "；「账号」页里选定过正版或外置账号的话，" +
+                        "自检会拿它去换一枚新令牌。"
+                } else {
+                    who.label
+                },
+                style = MaterialTheme.typography.bodyMedium,
+                color = if (who != null && !who.isOffline) {
+                    MaterialTheme.colorScheme.primary
+                } else {
+                    MaterialTheme.colorScheme.onSurfaceVariant
+                },
+            )
+            LaunchHint("身份在「账号」那一页切换；这一页只如实显示自检时用的是谁。")
         }
 
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {

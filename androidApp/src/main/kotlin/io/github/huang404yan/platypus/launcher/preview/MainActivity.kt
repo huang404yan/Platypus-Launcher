@@ -130,6 +130,10 @@ class MainActivity : ComponentActivity() {
  *
  * 「Java」紧跟设置：它跟桌面一样是「往盘上装一份运行时」，不是改设置，但也不需要单独
  * 占一个顶层位置放前面 —— 装一次就不常来了。
+ *
+ * 「账号」紧挨「启动」而不是并进设置：桌面上它挂在设置的二级里，因为桌面侧栏横向放得下；
+ * 手机上登录是「用之前先做一次」的动作，藏在设置二级里找不到，而它又直接决定启动时
+ * 用的是正版号、外置号还是离线号 —— 放在启动页旁边，用错身份一眼就能看见。
  */
 private enum class Tab(val label: String) {
     INSTANCE("实例"),
@@ -138,6 +142,7 @@ private enum class Tab(val label: String) {
     PACKS("光影资源包"),
     SERVER("服务端"),
     LINK("联机"),
+    ACCOUNT("账号"),
     LAUNCH("启动"),
     SETTINGS("设置"),
     JAVA("Java"),
@@ -184,6 +189,7 @@ private fun AppRoot(theme: LauncherTheme, onThemeChange: (LauncherTheme) -> Unit
                     Tab.PACKS -> PacksPage()
                     Tab.SERVER -> ServerPage()
                     Tab.LINK -> LinkPage()
+                    Tab.ACCOUNT -> AccountPage()
                     Tab.SETTINGS -> SettingsPage(theme = theme, onThemeChange = onThemeChange)
                     Tab.JAVA -> JavaPage()
                     Tab.DIAGNOSTIC -> DiagnosticPage()

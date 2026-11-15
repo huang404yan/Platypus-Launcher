@@ -40,6 +40,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
+import io.github.huang404yan.platypus.core.auth.AccountBootstrap
 import io.github.huang404yan.platypus.core.auth.ClientIds
 import io.github.huang404yan.platypus.core.auth.DeviceCodeGrant
 import io.github.huang404yan.platypus.core.auth.MicrosoftAccountAuth
@@ -299,7 +300,7 @@ internal fun AccountTab(
                 notice = "移除失败：" + (failure.message ?: failure.javaClass.simpleName)
                 return@launch
             }
-            if (account.key == activeUuid.trim().lowercase()) onUseOffline()
+            if (AccountBootstrap.matches(account, activeUuid)) onUseOffline()
             noticeIsError = false
             notice = "已从列表里移除 " + account.name + "（只删本地令牌，账号本身没事）。"
             reload()
@@ -515,7 +516,7 @@ internal fun AccountTab(
                 accounts.forEach { account ->
                     AccountRow(
                         account = account,
-                        active = account.key == activeUuid.trim().lowercase(),
+                        active = AccountBootstrap.matches(account, activeUuid),
                         busy = loggingIn,
                         onUse = { onUseAccount(account.uuid) },
                         onRelogin = { runLogin(relogin = true) },
@@ -608,7 +609,7 @@ internal fun AccountTab(
     ) {
         // 当前选中的是哪种账号，这里要说准：外置登录也是「有账号」，
         // 笼统写成「正版账号」会让用户在启动页找不到自己为什么进不去正版服。
-        val current = accounts.firstOrNull { it.key == activeUuid.trim().lowercase() }
+        val current = accounts.firstOrNull { AccountBootstrap.matches(it, activeUuid) }
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             Text(
                 when {
