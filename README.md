@@ -113,6 +113,7 @@ Windows 下也可以用 `gradlew.bat`。首次构建会下载约 300 MB 依赖�
 - `docs/42-liangtao-peise.md`：**两套配色**（为什么是两套而不是调色盘、60/30/10 的四色对照、正文为什么不用纯白与强调色上的字为什么用深色、默认值按版本给且选过就记住、色值为什么打包成 `Long` 放进 core、换主题只要换一个 `ColorScheme`、对比度是怎么算出来的）
 - `docs/44-duankou-yujian-yu-geli-qianyi.md`：**服务端端口预检、关隔离后搬文件、Forge 的 jar 藏在哪**（`SO_REUSEADDR` 在 Windows 上会让「预检永远通过」这个坑、`pinned` 提示为什么不能走普通 notice、合并为什么是复制不是移动且默认不覆盖、`libraries/` 兜底与 installer jar 的排除、Paper 的 `server:mojang` 为什么是伪问题）
 - `docs/45-android-yunxingshi.md`：**安卓端的 Java 运行时这一层**（为什么安卓不能跑 `java -version` 只能读 `release` 文件、`isInstalled` 与 `canLaunch` 为什么是两条判据、`component` 里的 ABI 约定、把「启动翻译成命令行」抽到 `core/launch/LaunchPlanner.kt` 的理由与它承诺不写盘、`OsFamily` 里为什么还没有 `ANDROID`）
+- `docs/46-zhenghebao-daochu.md`：**整合包导出**（MCBBS v2 与 Modrinth 不是「压缩方式不同」而是「谁持有文件」、三种元数据为什么一句都不能混写、`addons` 用短名而 `modLoaders` 用短名加版本、存档默认不打、sha512 为什么自己算、`downloads` 里 Modrinth 的 CDN 排最后）
 
 ## 下载
 
@@ -155,7 +156,7 @@ M0（骨架）+ M1（实例扫描）+ M2（下载器）+ M3（**Windows 一键�
 
 **下载断点续传**：先写 `<文件>.part`，校验通过才转正；`.part` 有内容就发 `Range` 接着下，断网不清半成品，下次自动接上。进度条会额外显示「其中 N 个接着上次下（省了 M MB）」（`docs/14`）。
 
-单测 **702 例全过**（60 个测试类，`./gradlew :core:test :ui:jvmTest`；`ui` 从这一版起有 `jvmTest` 源集，格式化函数与导航常量也进单测了）。另有十二个无头冒烟任务（`e2eInstall` / `settingsSmoke` / `instanceFlowSmoke` / `resumeSmoke` / `deleteSmoke` / `fabricE2e` / `modpackE2e` / `forgeE2e` / `neoForgeE2e` / `modsE2e` / `modUpdateE2e` / `isolationSmoke`），走的是界面按钮同一批函数；`resumeSmoke` / `fabricE2e` / `modpackE2e` / `forgeE2e` / `neoForgeE2e` / `modsE2e` 需要联网，分别在空目录真装 Fabric、真跑 Forge 与 NeoForge 官方安装器、真从 Modrinth 下模组、真把一个 `.mrpack` 从解析装到进主菜单；`deleteSmoke` 在 `dist/_delete-smoke` 里全程造假数据，不碰真实 `.minecraft`。
+单测 **719 例全过**（61 个测试类，`./gradlew :core:test :ui:jvmTest`；`ui` 从这一版起有 `jvmTest` 源集，格式化函数与导航常量也进单测了）。另有十二个无头冒烟任务（`e2eInstall` / `settingsSmoke` / `instanceFlowSmoke` / `resumeSmoke` / `deleteSmoke` / `fabricE2e` / `modpackE2e` / `forgeE2e` / `neoForgeE2e` / `modsE2e` / `modUpdateE2e` / `isolationSmoke`），走的是界面按钮同一批函数；`resumeSmoke` / `fabricE2e` / `modpackE2e` / `forgeE2e` / `neoForgeE2e` / `modsE2e` 需要联网，分别在空目录真装 Fabric、真跑 Forge 与 NeoForge 官方安装器、真从 Modrinth 下模组、真把一个 `.mrpack` 从解析装到进主菜单；`deleteSmoke` 在 `dist/_delete-smoke` 里全程造假数据，不碰真实 `.minecraft`。
 
 **能装 Fabric 了**：下载页勾「顺带装 Fabric」→ 拉 meta.fabricmc.net 的 loader 列表（默认落在最新 stable）→ 装 profile json（只改 `id`，保留 `inheritsFrom`）→ 按 maven 坐标补全 8 个库的地址并下载 → 登记成 `1.20.1-fabric-0.20.1` 这样的实例。实测空目录全流程 4 分 29 秒进主菜单，日志首行 `Loading Minecraft 1.20.1 with Fabric Loader 0.20.1`（`docs/15`）。
 
@@ -172,6 +173,8 @@ M0（骨架）+ M1（实例扫描）+ M2（下载器）+ M3（**Windows 一键�
 **能装 NeoForge 了**：官方 `maven.neoforged.net` 在本机被重置（`Connection was reset`），所以元数据与库全走 BMCLAPI 镜像；installer 的 `--mirror` 对 client 安装**无效**（`ClientInstall` 根本不引用 `getMirror()`，字节码级确认），改由启动器在跑 installer 之前把 70 个依赖库**预铺**到 `libraries/`，installer 看到文件在、sha1 对上就打 `Checksum valid` 直接跳过——实测 13822 行安装器日志里 `Checksum valid` 117 次、`Downloading library from` 0 次、超时 0 次。NeoForge 版本号到 MC 版本的映射只信 installer jar 内 `version.json` 的 `inheritsFrom`（前缀只是初筛）。实测 1.21.1 + NeoForge 21.1.265：装 54.8 秒、进主菜单 14.9 秒，日志里 `NeoForge mod loading, version 21.1.265, for MC 1.21.1`（`docs/19`）。
 
 **整合包能直接在启动器里搜了**：以前得先在浏览器里翻到 Files 标签、认出哪个是能导入的 `.mrpack`、下载到本地，再回启动器点「选择文件…」。现在下载页的导入卡片多了「从 Modrinth 搜」：关键词 + 游戏版本 + 加载器（按钮循环切换），空关键词也放行（直接看热门）。选中后启动器把 `.mrpack` 下到 `%TEMP%\platypus-modpacks\packs`，再走原来那条本地导入流水线——两条路只有「取包」不同，进度、错误、重试都共用一份。实测搜 `cobblemon` 装 Cobblemon Official Modpack [Fabric]：包 100,855,720 B，预览写「77 个文件要下载，共 209.1 MB」，13 分钟装完（含 209 MB 游戏文件与按需下载的 76 MB Java 运行时），登记实例 `1.21.1-fabric-0.20.1`，`mods/` 下 60 个 jar（`docs/31`）。
+
+**整合包也能导出了**：之前只有导入，想把配好的实例发给别人只能手动拖压缩包、再凭记忆写元数据。现在实例详情页的「这个实例在哪」卡里多一个「导出整合包」，两种格式二选一 —— MCBBS v2（文件全打进 `overrides/`，不联网也能导，包大）与 Modrinth（认得出的模组只写下载地址，包小，要联网核对）。**默认是前者**：没人帮忙的时候它一定成功。三种元数据一句都不能混写（HMCL 见到 `modrinth.index.json` 就按 Modrinth 包解析，加载器版本对不上整个导入失败，真正对的 `mcbbs.packmeta` 反而读不到），所以是二选一写而不是能写就都写；`addons` 里必须是短名（`forge` 不是 `net.minecraftforge`），而 `manifest.json` 的 `modLoaders` 又要是「短名 + 版本」。**存档默认不打** —— 里面有别人的世界、服务器地址、聊天记录，要打必须自己勾。导出前先纯读盘数一遍，给出「N 个文件，共 X MB」和各目录各几个；写 `.part` 成功才改名，目标已存在会先问一次（`docs/46`）。
 
 **导入完会自己复核一遍磁盘**：以前「导入完成」只看流程有没有抛异常——切个页面就把导入协程砍了，`.part` 留在磁盘上，界面却停在「已完成 X / Y 个文件」看着像装完了（实测那次 77 个文件只落 76 个，缺的正是 139,966,403 字节的 Cobblemon 本体）。现在下完所有文件后按清单再核一遍：先比大小（`.mrpack` 基本都带 `fileSize`，77 个文件 650 MB 只要几毫秒），清单没写大小时才读盘算 sha1；对不上就收集成清单，标题从「导入完成」改成「导入没装齐」并逐个列出原因（半成品会写明「只下到一半（49.2 MB / 133.5 MB）」）。取消也不再静默：界面明确写「导入已中断（停在「下载整合包文件」）」，重试自动续上没下完的那几个（`docs/32`）。
 

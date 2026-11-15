@@ -279,6 +279,34 @@ object ModrinthMeta {
         return ModrinthParse.Ok(result)
     }
 
+    /**
+     * 解析 /version_files 的响应，只取「这个 sha1 能从哪儿下到」。
+     *
+     * 与 [parseVersionFiles] 分开是因为用途完全不同：那个要的是「哪个模组的哪个版本」，
+     * 这个要的是「导出整合包时能不能只写个地址、省下一份文件」。所以这里唯一在意的是 url，
+     * 而且**一个 sha1 可能对上多个版本**（同一个文件被多个项目引用过），地址全收着 ——
+     * 导出时按可用性排序，多的地址留着当备份源。
+     *
+     * 响应里 files 的 primary 项优先放在前面：它是官方推荐的那份，
+     * 其它项常常是同一构建换了模板或镜像。
+     */
+    fun parseVersionFileUrls(text: String): Map<String, List<String>> {
+        if (text.isBlank()) return emptyMap()
+        val root = runCatching { json.parseToJsonElement(text).jsonObject }.getOrNull() ?: return emptyMap()
+        val result = mutableMapOf<String, List<String>>()
+        for ((hash, element) in root) {
+            val obj = element as? JsonObject ?: continue
+            val files = (obj["files"] as? JsonArray)?.mapNotNull { it as? JsonObject }.orEmpty()
+            val primary = files.firstOrNull { boolOf(it, "primary") == true }
+            val ordered = listOfNotNull(primary) + files.filter { it !== primary }
+            val urls = ordered.mapNotNull { stringOf(it, "url") }
+                .filter { it.startsWith("http", ignoreCase = true) }
+                .distinct()
+            if (urls.isNotEmpty()) result[hash.lowercase()] = urls
+        }
+        return result
+    }
+
     /** 解析 /projects?ids=[...]：返回 project_id → 项目。只有检查更新与缺依赖清单会用到。 */
     fun parseProjects(text: String): ModrinthParse<Map<String, ModProject>> {
         if (text.isBlank()) return ModrinthParse.Failure("项目列表是空的")
