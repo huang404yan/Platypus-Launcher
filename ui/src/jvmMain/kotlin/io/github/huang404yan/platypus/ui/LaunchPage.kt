@@ -2,6 +2,7 @@ package io.github.huang404yan.platypus.ui
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -9,6 +10,8 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.height
@@ -92,6 +95,11 @@ import kotlinx.coroutines.Dispatchers
  * 线程模型：GameRuntime 的 onEvent 来自 IO 线程，这里直接写 Compose 快照状态
  * （快照状态本身线程安全），读日志的循环留在后端，界面不做轮询。
  */
+internal const val IDENTITY_MS = "ms"
+internal const val IDENTITY_OFFLINE = "offline"
+internal const val IDENTITY_AUTH = "auth"
+
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun LaunchPage(
     backend: LauncherBackend?,
@@ -109,6 +117,8 @@ fun LaunchPage(
     onOpenSelect: () -> Unit = {},
     /** 打开「版本设置」副页面：对当前选中的实例做精细设置。 */
     onOpenSetup: (Instance) -> Unit = {},
+    /** 身份三格底下的「管理账号 →」，直接落到「设置 → 账号」。 */
+    onOpenAccountPage: () -> Unit = {},
 ) {
     if (backend == null) {
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -159,6 +169,12 @@ fun LaunchPage(
     // 账号文件里的全部身份。启动页要能换身份，就得人手一份名单 ——
     // 只有一个 activeAccount 的话，用户还得跑去「设置 → 账号」才知道自己有几个号。
     var accountList by remember { mutableStateOf<List<StoredAccount>>(emptyList()) }
+    // 身份三格当前在哪一格（正版 / 离线 / 第三方）。与 activeAccount 分开：
+    // 切格子是「我要看这一类身份」，选行是「就用这个号」，两件事。
+    // 初始格在读完设置后按当前身份定（见 LaunchedEffect(Unit)）。
+    var identityTab by remember { mutableStateOf(IDENTITY_MS) }
+    // 主区的「游戏目录与 Java」默认收起。
+    var showAdvanced by remember { mutableStateOf(false) }
     var phase by remember { mutableStateOf<LaunchPhase>(LaunchPhase.Idle) }
     var stageText by remember { mutableStateOf("") }
     // 启动阶段的假进度（准备版本文件 0.05 → 解压原生库 0.15 → 起进程 0.2）。
@@ -568,6 +584,13 @@ fun LaunchPage(
                     } else {
                         all.firstOrNull { AccountBootstrap.matches(it, wanted) }
                     }
+                    // 初始格跟着当前身份走：用着外置号就落在「第三方」格，没登录就落在「离线」格。
+                    // 不能死落在「正版」：一个外置账号用户打开启动页，就看不见自己正在用的那个号。
+                    identityTab = when {
+                        activeAccount == null -> IDENTITY_OFFLINE
+                        activeAccount!!.isYggdrasil -> IDENTITY_AUTH
+                        else -> IDENTITY_MS
+                    }
                 }
             }
         }
@@ -604,6 +627,9 @@ fun LaunchPage(
             accountList = accountList,
             activeAccount = activeAccount,
             onPickIdentity = { pickIdentity(it) },
+            identityTab = identityTab,
+            onIdentityTab = { identityTab = it },
+            onOpenAccountPage = onOpenAccountPage,
             memoryText = memoryText,
             onMemoryChange = { memoryText = it },
             memoryNotice = memoryNotice,
@@ -639,103 +665,155 @@ fun LaunchPage(
         ) {
             Text("启动", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
             Text(
-                "左栏选实例、点「启动」；这一栏放目录、Java 与日志。离线模式，不登录任何账号。",
+                "点一张卡就是选定它；身份在左边那一排 —— 正版 / 离线 / 第三方，不用进二级菜单找。",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
 
-            // 目录：一处目录决定左栏能选到哪些实例，所以留在内容区顶部而不是左栏。
-            Row(
-                Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                OutlinedTextField(
-                    value = rootText,
-                    onValueChange = { rootText = it },
-                    modifier = Modifier.weight(1f),
-                    label = { Text("游戏目录（.minecraft）") },
-                    singleLine = true,
-                    enabled = !busy,
+            // 实例卡片网格，照 HTML 预览的主区（dist/xin-jiagou-yulan.html 的 .grid / .icard）。
+            // 以前主区是一路往下的表单：目录、Java、直连、日志，用户点「启动」之前要先往下滚。
+            // 现在主区回答「盘上有哪些版本、今天玩哪一个」，点一张卡就选定它。
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    if (merged.isEmpty()) "版本" else "版本 · " + merged.size + " 个",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold,
                 )
-                OutlinedButton(
-                    onClick = {
-                        pickDirectory(rootText)?.let {
-                            rootText = it.absolutePath
-                            scope.launch { rescan() }
-                        }
-                    },
-                    enabled = !busy,
-                ) { Text("选择…") }
-                Button(onClick = { scope.launch { rescan() } }, enabled = !busy) { Text("扫描") }
-            }
-            // Java 运行时
-            Row(
-                Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                Text("Java 运行时", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
                 Spacer(Modifier.weight(1f))
-                if (requiredMajor != null) {
-                    Text(
-                        "游戏需要 Java " + requiredMajor,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-                val installing = javaPhase as? JavaPhase.Installing
-                if (requiredMajor != null && exactJava == null && javaPhase is JavaPhase.Done && !busy) {
-                    Button(onClick = { installJava() }, enabled = installing == null) {
-                        Text(if (installing != null) "补 Java 中…" else "自动补 Java " + requiredMajor)
+                OutlinedButton(onClick = onOpenSelect, enabled = !busy) { Text("管理版本…") }
+            }
+            if (merged.isEmpty()) {
+                SectionHint(
+                    "这个目录里没扫到版本。点右上角「管理版本…」去下载、或者换个目录 —— " +
+                        "目录在下面的「游戏目录与 Java」里改。",
+                )
+            } else {
+                FlowRow(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    merged.forEach { instance ->
+                        val selectedKey = selected?.let { instanceKey(it) }
+                        InstanceTile(
+                            instance = instance,
+                            selected = selectedKey != null && instanceKey(instance) == selectedKey,
+                            enabled = !busy,
+                            onClick = {
+                                selected = instance
+                                memoryText = instance.memoryMb.toString()
+                                memoryNotice = ""
+                            },
+                            onOpenSetup = { onOpenSetup(instance) },
+                        )
                     }
                 }
-                OutlinedButton(
-                    onClick = { detectJava() },
-                    enabled = javaPhase !is JavaPhase.Detecting && installing == null && !busy,
-                ) {
-                    Text(if (javaPhase is JavaPhase.Detecting) "探测中…" else "重新探测")
-                }
             }
-
-            when (val current = javaPhase) {
-                is JavaPhase.Idle -> SectionHint("还没有探测。")
-                is JavaPhase.Detecting -> SectionHint("正在探测本机 Java…")
-                is JavaPhase.Installing -> SectionHint(
-                    current.detail + "（" + (current.fraction * 100f).toInt() + "%）",
-                )
-                is JavaPhase.Failed -> SectionHint(
-                    (if (current.duringInstall) "补 Java 失败：" else "探测 Java 失败：") + current.message,
-                    error = true,
-                )
-                is JavaPhase.Done -> {
-                    if (current.runtimes.isEmpty()) {
-                        SectionHint("没有找到任何 Java。可以点上面的「自动补 Java」现下一个。", error = true)
-                    } else {
-                        if (requiredMajor != null && current.runtimes.findExactMajor(requiredMajor) == null) {
-                            SectionHint(
-                                "本机没有 Java " + requiredMajor + "。点「自动补 Java " + requiredMajor + "」会从 Mojang 下到游戏目录的 runtime/ 下。",
-                                error = true,
-                            )
+            // 游戏目录与 Java 收成一个可折叠的块：HTML 预览里启动页主区就是「版本卡片 + 直连 + 日志」，
+            // 这两项属于「一次配好就不再动」的设置，铺在卡片下面会把卡片挤下去。
+            // 折叠不是删除 —— 换目录、补 Java 仍然在这一页，只是要点一下才展开。
+            TextButton(onClick = { showAdvanced = !showAdvanced }, enabled = !busy) {
+                Text(if (showAdvanced) "收起游戏目录与 Java" else "游戏目录与 Java（点开改）")
+            }
+            if (showAdvanced) {
+                Column(
+                    Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                // 目录：一处目录决定左栏能选到哪些实例，所以留在内容区顶部而不是左栏。
+                Row(
+                    Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    OutlinedTextField(
+                        value = rootText,
+                        onValueChange = { rootText = it },
+                        modifier = Modifier.weight(1f),
+                        label = { Text("游戏目录（.minecraft）") },
+                        singleLine = true,
+                        enabled = !busy,
+                    )
+                    OutlinedButton(
+                        onClick = {
+                            pickDirectory(rootText)?.let {
+                                rootText = it.absolutePath
+                                scope.launch { rescan() }
+                            }
+                        },
+                        enabled = !busy,
+                    ) { Text("选择…") }
+                    Button(onClick = { scope.launch { rescan() } }, enabled = !busy) { Text("扫描") }
+                }
+                // Java 运行时
+                Row(
+                    Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    Text("Java 运行时", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+                    Spacer(Modifier.weight(1f))
+                    if (requiredMajor != null) {
+                        Text(
+                            "游戏需要 Java " + requiredMajor,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    val installing = javaPhase as? JavaPhase.Installing
+                    if (requiredMajor != null && exactJava == null && javaPhase is JavaPhase.Done && !busy) {
+                        Button(onClick = { installJava() }, enabled = installing == null) {
+                            Text(if (installing != null) "补 Java 中…" else "自动补 Java " + requiredMajor)
                         }
-                        LazyColumn(
-                            Modifier.fillMaxWidth().heightIn(max = 110.dp),
-                            verticalArrangement = Arrangement.spacedBy(6.dp),
-                        ) {
-                            items(current.runtimes) { runtime ->
-                                JavaRow(
-                                    runtime = runtime,
-                                    selected = runtime.path == selectedJava?.path,
-                                    recommended = runtime.majorVersion == requiredMajor,
-                                    enabled = !busy,
-                                    onClick = { selectedJava = runtime },
+                    }
+                    OutlinedButton(
+                        onClick = { detectJava() },
+                        enabled = javaPhase !is JavaPhase.Detecting && installing == null && !busy,
+                    ) {
+                        Text(if (javaPhase is JavaPhase.Detecting) "探测中…" else "重新探测")
+                    }
+                }
+
+                when (val current = javaPhase) {
+                    is JavaPhase.Idle -> SectionHint("还没有探测。")
+                    is JavaPhase.Detecting -> SectionHint("正在探测本机 Java…")
+                    is JavaPhase.Installing -> SectionHint(
+                        current.detail + "（" + (current.fraction * 100f).toInt() + "%）",
+                    )
+                    is JavaPhase.Failed -> SectionHint(
+                        (if (current.duringInstall) "补 Java 失败：" else "探测 Java 失败：") + current.message,
+                        error = true,
+                    )
+                    is JavaPhase.Done -> {
+                        if (current.runtimes.isEmpty()) {
+                            SectionHint("没有找到任何 Java。可以点上面的「自动补 Java」现下一个。", error = true)
+                        } else {
+                            if (requiredMajor != null && current.runtimes.findExactMajor(requiredMajor) == null) {
+                                SectionHint(
+                                    "本机没有 Java " + requiredMajor + "。点「自动补 Java " + requiredMajor + "」会从 Mojang 下到游戏目录的 runtime/ 下。",
+                                    error = true,
                                 )
+                            }
+                            LazyColumn(
+                                Modifier.fillMaxWidth().heightIn(max = 110.dp),
+                                verticalArrangement = Arrangement.spacedBy(6.dp),
+                            ) {
+                                items(current.runtimes) { runtime ->
+                                    JavaRow(
+                                        runtime = runtime,
+                                        selected = runtime.path == selectedJava?.path,
+                                        recommended = runtime.majorVersion == requiredMajor,
+                                        enabled = !busy,
+                                        onClick = { selectedJava = runtime },
+                                    )
+                                }
                             }
                         }
                     }
                 }
-            }
 
+                }
+            }
             // 直连：联机页点「直接进」会填到这里，也可以手填
             Row(
                 Modifier.fillMaxWidth(),
@@ -1223,6 +1301,11 @@ private fun LaunchSidePanel(
     activeAccount: StoredAccount?,
     /** 换身份：传 null 表示改回离线。写盘在调用方那边做，这里只负责画。 */
     onPickIdentity: (StoredAccount?) -> Unit,
+    /** 身份三格在哪一格（IDENTITY_MS / IDENTITY_OFFLINE / IDENTITY_AUTH）。 */
+    identityTab: String,
+    onIdentityTab: (String) -> Unit,
+    /** 「管理账号 →」要去哪里。 */
+    onOpenAccountPage: () -> Unit,
     memoryText: String,
     onMemoryChange: (String) -> Unit,
     memoryNotice: String,
@@ -1277,9 +1360,12 @@ private fun LaunchSidePanel(
                 accountList = accountList,
                 active = activeAccount,
                 enabled = !busy,
+                tab = identityTab,
+                onTab = onIdentityTab,
                 onPick = onPickIdentity,
+                onOpenAccountPage = onOpenAccountPage,
             )
-            if (activeAccount == null) {
+            if (activeAccount == null && identityTab == IDENTITY_OFFLINE) {
                 OutlinedTextField(
                     value = username,
                     onValueChange = onUsernameChange,
@@ -1378,43 +1464,217 @@ private fun LaunchSidePanel(
 }
 
 /**
- * 启动栏里的身份选择：离线一行，之后每个账号一行。
+ * 启动栏里的身份选择，照 HTML 预览（dist/xin-jiagou-yulan.html 的 .idtypes）一对一复刻：
+ * 上面三个横排格子「正版 / 离线 / 第三方」，点哪一格就在下面显示那一类身份的行。
  *
- * 用 Card 竖排而不是下拉菜单：账号一般只有一两个，全部摆出来比再点一次更省事；
- * 而且「我现在用的是谁」必须一眼能看见 —— 收进下拉之后，用错号要等进服务器被踢才发现。
+ * 为什么不是「一列全摆出来」：账号多了之后这一列会长到把启动按钮挤出屏幕，
+ * 而九成时候只用一个号；三格的顺序是固定的，第二格永远是离线 —— 肌肉记忆比搜索快。
+ *
+ * 三格只切面板，不直接改身份（离线那格除外）。切到「正版」时若无脑挑第一个号，
+ * 用户在只是「看看自己有哪些号」的时候就被换掉了身份，下次启动才发现登录的是别人。
  */
+/**
+ * 实例卡片，照 HTML 预览的 .icard：版本号 + 加载器徽标 + 一行说明 + 「版本设置」。
+ *
+ * 为什么不用 InstancePage 里的那张 InstanceCard：那张是「管理列表」里的条目，带改内存、
+ * 移除登记这些动作；启动页这张只回答「点它就用这个版本」，动作收进「版本设置」副页面。
+ * 两张卡共用一个的话，启动页会多出一堆只有管理时才该出现的按钮。
+ */
+@Composable
+private fun InstanceTile(
+    instance: Instance,
+    selected: Boolean,
+    enabled: Boolean,
+    onClick: () -> Unit,
+    onOpenSetup: () -> Unit,
+) {
+    Surface(
+        Modifier
+            .width(252.dp)
+            .clickable(enabled = enabled, onClick = onClick),
+        color = if (selected) {
+            MaterialTheme.colorScheme.primary.copy(alpha = 0.14f)
+        } else {
+            MaterialTheme.colorScheme.surfaceVariant
+        },
+        shape = RoundedCornerShape(12.dp),
+        border = androidx.compose.foundation.BorderStroke(
+            if (selected) 1.5.dp else 1.dp,
+            if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant,
+        ),
+    ) {
+        Column(Modifier.padding(horizontal = 14.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    instance.gameVersion,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                )
+                Spacer(Modifier.width(8.dp))
+                LoaderTag(instance.loader)
+                Spacer(Modifier.weight(1f))
+                if (selected) {
+                    Text(
+                        "当前",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                }
+            }
+            Text(
+                buildString {
+                    append(instance.loaderLabel())
+                    append(" · ")
+                    append(instance.memoryMb)
+                    append(" MB")
+                },
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+            )
+            Text(
+                instance.name,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Spacer(Modifier.weight(1f))
+                TextButton(onClick = onOpenSetup, enabled = enabled) {
+                    Text("版本设置", style = MaterialTheme.typography.labelSmall)
+                }
+            }
+        }
+    }
+}
+
+/** 加载器徽标（原版 / Fabric / Forge / NeoForge / Quilt / OptiFine）。 */
+@Composable
+private fun LoaderTag(loader: io.github.huang404yan.platypus.core.instance.LoaderKind) {
+    val label = when (loader) {
+        io.github.huang404yan.platypus.core.instance.LoaderKind.VANILLA -> "原版"
+        io.github.huang404yan.platypus.core.instance.LoaderKind.FABRIC -> "Fabric"
+        io.github.huang404yan.platypus.core.instance.LoaderKind.FORGE -> "Forge"
+        io.github.huang404yan.platypus.core.instance.LoaderKind.NEOFORGE -> "NeoForge"
+        io.github.huang404yan.platypus.core.instance.LoaderKind.QUILT -> "Quilt"
+        io.github.huang404yan.platypus.core.instance.LoaderKind.OPTIFINE -> "OptiFine"
+        io.github.huang404yan.platypus.core.instance.LoaderKind.OTHER -> "其他"
+    }
+    Text(
+        label,
+        Modifier
+            .background(
+                MaterialTheme.colorScheme.secondary.copy(alpha = 0.18f),
+                RoundedCornerShape(6.dp),
+            )
+            .padding(horizontal = 6.dp, vertical = 1.dp),
+        style = MaterialTheme.typography.labelSmall,
+        color = MaterialTheme.colorScheme.secondary,
+    )
+}
+
+/** 「Fabric 0.20.1」这种一行说明；原版就只有「原版」。 */
+private fun Instance.loaderLabel(): String {
+    val tag = when (loader) {
+        io.github.huang404yan.platypus.core.instance.LoaderKind.VANILLA -> "原版"
+        io.github.huang404yan.platypus.core.instance.LoaderKind.FABRIC -> "Fabric"
+        io.github.huang404yan.platypus.core.instance.LoaderKind.FORGE -> "Forge"
+        io.github.huang404yan.platypus.core.instance.LoaderKind.NEOFORGE -> "NeoForge"
+        io.github.huang404yan.platypus.core.instance.LoaderKind.QUILT -> "Quilt"
+        io.github.huang404yan.platypus.core.instance.LoaderKind.OPTIFINE -> "OptiFine"
+        io.github.huang404yan.platypus.core.instance.LoaderKind.OTHER -> "其他"
+    }
+    val version = loaderVersion?.takeIf { it.isNotBlank() }
+    return if (version == null || tag == "原版") tag else tag + " " + version
+}
+
 @Composable
 private fun IdentityPicker(
     accountList: List<StoredAccount>,
     active: StoredAccount?,
     enabled: Boolean,
+    tab: String,
+    onTab: (String) -> Unit,
     onPick: (StoredAccount?) -> Unit,
+    onOpenAccountPage: () -> Unit,
 ) {
-    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        Text(
-            "登录身份",
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        IdentityRow(
-            title = "离线",
-            detail = "不用联网",
-            selected = active == null,
-            enabled = enabled,
-            onClick = { onPick(null) },
-        )
-        accountList.forEach { account ->
-            IdentityRow(
-                title = account.name,
-                detail = if (account.isYggdrasil) "外置登录" else "微软账号",
-                selected = active != null && active.key == account.key,
-                enabled = enabled,
-                onClick = { onPick(account) },
+    val microsoft = accountList.filter { !it.isYggdrasil }
+    val external = accountList.filter { it.isYggdrasil }
+    val shown = if (tab == IDENTITY_AUTH) external else microsoft
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            IdentityTypeCell("正版", tab == IDENTITY_MS, enabled) { onTab(IDENTITY_MS) }
+            IdentityTypeCell("离线", tab == IDENTITY_OFFLINE, enabled) {
+                // 离线这一格是唯一「点了就生效」的：它没有可选的号，名字就是身份。
+                onTab(IDENTITY_OFFLINE)
+                onPick(null)
+            }
+            IdentityTypeCell("第三方", tab == IDENTITY_AUTH, enabled) { onTab(IDENTITY_AUTH) }
+        }
+        when {
+            tab == IDENTITY_OFFLINE -> Unit // 名字的输入框在调用方那边，紧跟着这一块画
+            shown.isEmpty() -> SectionHint(
+                if (tab == IDENTITY_AUTH) {
+                    "还没有外置登录的账号。去「设置 → 账号」填一个认证服务器。"
+                } else {
+                    "还没有登录过微软账号。去「设置 → 账号」加一个。"
+                },
             )
+            else -> shown.forEach { account ->
+                IdentityRow(
+                    title = account.name,
+                    detail = if (account.isYggdrasil) "外置登录" else "微软账号",
+                    selected = active != null && active.key == account.key,
+                    enabled = enabled,
+                    onClick = { onPick(account) },
+                )
+            }
         }
-        if (accountList.isEmpty()) {
-            SectionHint("还没登录过账号。去「设置 → 账号」加一个，回来这里就能选。")
-        }
+        Text(
+            if (tab == IDENTITY_AUTH) "添加外置登录 →" else "管理账号 →",
+            Modifier
+                .fillMaxWidth()
+                .clickable(enabled = enabled, onClick = onOpenAccountPage)
+                .padding(vertical = 2.dp),
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.primary,
+        )
+    }
+}
+
+@Composable
+private fun androidx.compose.foundation.layout.RowScope.IdentityTypeCell(
+    label: String,
+    selected: Boolean,
+    enabled: Boolean,
+    onClick: () -> Unit,
+) {
+    Box(
+        Modifier
+            .weight(1f)
+            .background(
+                if (selected) {
+                    MaterialTheme.colorScheme.primary.copy(alpha = 0.18f)
+                } else {
+                    MaterialTheme.colorScheme.surface
+                },
+                MaterialTheme.shapes.small,
+            )
+            .clickable(enabled = enabled, onClick = onClick)
+            .padding(vertical = 7.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            label,
+            style = MaterialTheme.typography.bodyMedium,
+            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+            color = if (selected) {
+                MaterialTheme.colorScheme.primary
+            } else {
+                MaterialTheme.colorScheme.onSurfaceVariant
+            },
+        )
     }
 }
 

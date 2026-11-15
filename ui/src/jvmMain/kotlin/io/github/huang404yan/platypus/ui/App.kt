@@ -146,6 +146,12 @@ fun App(
                             quickPlayServer = quickPlay,
                             onOpenSelect = { overlay = Overlay.InstanceSelect },
                             onOpenSetup = { instance -> openSetup(instance) },
+                            onOpenAccountPage = {
+                                // 只切一级页的话用户会落在「设置 → 启动」上，找不到登录按钮；
+                                // 顺手把二级项也定成「账号」（帮助页那儿踩过一次同样的坑）。
+                                subSelection[Page.SETTINGS.name] = SETTINGS_TAB_ACCOUNT
+                                page = Page.SETTINGS
+                            },
                         )
                         Page.DOWNLOAD -> when (sub) {
                             DOWNLOAD_TAB_MODS -> ModsPage(initialGameRoot, backend, tick)
@@ -203,30 +209,41 @@ fun App(
 
         // 副页面盖在最上面。不放 when(page) 里：副页面是「从某个页面出发的」，
         // 它自己的返回键负责把它摘掉，底下那一页还留着，回来时状态都在。
-        when (val current = overlay) {
-            null -> Unit
-            Overlay.InstanceSelect -> InstancePage(
-                backend = backend,
-                initialGameRoot = initialGameRoot,
-                onBack = { overlay = null },
-                onLaunch = { instance ->
-                    focusKey = instanceKey(instance)
-                    page = Page.LAUNCH
-                    overlay = null
-                },
-                onOpenSetup = { instance -> openSetup(instance) },
-            )
-            is Overlay.InstanceSetup -> {
-                val instance = overlayInstance
-                if (instance == null) {
-                    overlay = null
-                } else {
-                    InstanceDetailPanel(
-                        instance = instance,
+        //
+        // 必须自己铺一层不透明的底：Compose 的 Box / Surface 会把子项**叠**在一起，
+        // 不铺底的话底下那一页的字会从副页面后面透出来 —— preview.17 实测就是这样，
+        // 「版本选择」四个字和顶栏的品牌名糊成了一团。
+        val currentOverlay = overlay
+        if (currentOverlay != null) {
+            Surface(
+                Modifier.fillMaxSize(),
+                color = MaterialTheme.colorScheme.background,
+            ) {
+                when (currentOverlay) {
+                    Overlay.InstanceSelect -> InstancePage(
                         backend = backend,
+                        initialGameRoot = initialGameRoot,
                         onBack = { overlay = null },
-                        onNotice = { println("[setup] " + it) },
+                        onLaunch = { instance ->
+                            focusKey = instanceKey(instance)
+                            page = Page.LAUNCH
+                            overlay = null
+                        },
+                        onOpenSetup = { instance -> openSetup(instance) },
                     )
+                    is Overlay.InstanceSetup -> {
+                        val instance = overlayInstance
+                        if (instance == null) {
+                            overlay = null
+                        } else {
+                            InstanceDetailPanel(
+                                instance = instance,
+                                backend = backend,
+                                onBack = { overlay = null },
+                                onNotice = { println("[setup] " + it) },
+                            )
+                        }
+                    }
                 }
             }
         }
