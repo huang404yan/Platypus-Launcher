@@ -343,6 +343,11 @@ fun ServerPage(initialGameRoot: String? = null, backend: LauncherBackend? = null
             dir = File(openConfig),
             running = console.running && sameDir,
             onBack = { configDir = null },
+            // 正在跑的不是这个目录时必须拒发：命令只能进一个控制台，发错了就是把
+            // 另一个服的白名单改了。running 已经含 sameDir，这里是第二道闸。
+            onSendCommand = { command ->
+                if (console.running && sameDir) ServerRuntime.send(command) else CommandSend.NotRunning
+            },
         )
         return
     }

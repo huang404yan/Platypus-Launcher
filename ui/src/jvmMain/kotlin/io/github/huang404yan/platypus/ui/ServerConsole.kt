@@ -68,6 +68,28 @@ internal data class ServerConsoleState(
 )
 
 /**
+ * 一条命令发出去之后，它到底走到哪了。
+ *
+ * 为什么要把这件事返回给调用方、而不是只写进控制台日志：白名单与管理员那两个按钮
+ * 需要按结果说不同的话 —— 走 RCON 是「已经生效」，走标准输入是「发出去了，看控制台回执」，
+ * 服务端没在跑就得说「只改了文件，下次开服才生效」。日志里那句 `[本地]` 用户看不明白，
+ * 而这些差别恰好是他唯一能判断「我现在能不能进服」的依据。
+ */
+internal sealed interface CommandSend {
+    /** 走到 RCON，拿到回执（回执可能为空字符串）。 */
+    data class Rcon(val reply: String) : CommandSend
+
+    /** 走到我们起的那个进程的标准输入。没有回执可等 —— 原版服务端不发确认。 */
+    data object Stdin : CommandSend
+
+    /** 服务端没在跑（或者不是我们起的），命令没发出去。 */
+    data object NotRunning : CommandSend
+
+    /** 写出去了但失败了，例如进程刚退出、输出流已关闭。 */
+    data class Failed(val reason: String) : CommandSend
+}
+
+/**
  * 进程级的服务端运行时。
  *
  * 为什么是 object 而不是页面里的 remember：服务端一跑就是几小时，用户切到实例页
@@ -264,34 +286,40 @@ internal object ServerRuntime {
         process = null
     }
 
-    fun send(text: String) {
+    fun send(text: String): CommandSend {
         val command = text.trim()
-        if (command.isEmpty()) return
+        if (command.isEmpty()) return CommandSend.Failed("命令是空的，没发出去。")
         append("[本地] " + command)
         val channel = rcon
         if (channel != null) {
             // RCON 的回执就是命令的输出（不经过 stdout）。原样打出来，
             // 否则用户会发现「发了 list 但屏幕上什么都没有」。
             val reply = runCatching { withContextBlocking { channel.command(command) } }
-            reply.onSuccess { text ->
-                if (text.isNotBlank()) {
-                    text.lineSequence().forEach { append("[RCON] " + it) }
+            val got = reply.getOrNull()
+            if (got != null) {
+                if (got.isNotBlank()) {
+                    got.lineSequence().forEach { append("[RCON] " + it) }
                 }
-            }.onFailure { error ->
-                append("[RCON] 发不出去：" + (error.message ?: error::class.simpleName.orEmpty()))
-                // 连接坏了就退回去走标准输入，别让后面的命令全砸在这一条死连接上。
-                closeRcon()
-                _state.update { it.copy(channel = STDIN_CHANNEL) }
+                return CommandSend.Rcon(got)
             }
-            return
+            val error = reply.exceptionOrNull()
+            append("[RCON] 发不出去：" + (error?.message ?: error?.let { it::class.simpleName }.orEmpty()))
+            // 连接坏了就退回去走标准输入，别让后面的命令全砸在这一条死连接上。
+            // 这条命令本身也顺着往下再走一遍：RCON 断掉多半是服务端重开过，
+            // 标准输入那条路还活着 —— 命令不该因为一条死连接就凭空消失。
+            closeRcon()
+            _state.update { it.copy(channel = STDIN_CHANNEL) }
         }
-        val p = process ?: return
-        runCatching {
+        val p = process ?: return CommandSend.NotRunning
+        try {
             p.outputStream.write((command + "\n").toByteArray(Charsets.UTF_8))
             p.outputStream.flush()
-        }.onFailure {
-            append("[本地] 发不出去：" + (it.message ?: "输出流已关闭"))
+        } catch (e: Exception) {
+            val message = e.message ?: "输出流已关闭"
+            append("[本地] 发不出去：" + message)
+            return CommandSend.Failed(message)
         }
+        return CommandSend.Stdin
     }
 
     /** 在 IO 线程上同步跑一段。RCON 是阻塞 IO，不能压在界面线程上。 */

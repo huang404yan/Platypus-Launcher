@@ -61,8 +61,9 @@ import kotlinx.coroutines.withContext
  * 三条与后端有关的规矩写在实现里，不只写在这里：
  * ① **服务端正在跑时只读**。原版服务端启动时把 properties 读进内存，之后会自己写回；
  *    我们这时候改盘上的文件，它一保存就被覆盖，用户会以为「改了没生效」。
- * ② 白名单与 OP 优先走控制台命令（`whitelist add` / `op`），只有服务端没在跑时才直接改 json ——
- *    同样是因为服务端会拿内存状态覆盖盘上的文件。
+ * ② 白名单与 OP 两边都动：先把 json 写好（服务端重启后按它算），服务端正在跑时再顺手把
+ *    `whitelist add` / `op` 这类命令发进控制台（当场的准入靠它）。两个顺序不能反 —— 先发命令
+ *    再写文件的话，中间失败就变成「控制台认了、文件里没有」，重启后又把人挡在外面。
  * ③ 改完 properties 要提示「重启服务端才生效」。原版不读热更新，这一点不写清楚就是坑。
  */
 @Composable
@@ -70,6 +71,8 @@ internal fun ServerConfigPanel(
     dir: File,
     running: Boolean,
     onBack: () -> Unit,
+    /** 把一条命令发进控制台。服务端没在跑时不会被调用。 */
+    onSendCommand: (String) -> CommandSend,
 ) {
     val scope = rememberCoroutineScope()
     var view by remember(dir.absolutePath) { mutableStateOf<ServerPropertiesView?>(null) }
@@ -101,6 +104,8 @@ internal fun ServerConfigPanel(
         notice = text
         noticeIsError = error
     }
+
+    fun deliver(command: String): String = commandNotice(command, onSendCommand(command))
 
     fun save() {
         val current = view ?: return
@@ -134,6 +139,11 @@ internal fun ServerConfigPanel(
         }
     }
 
+    fun levelNote(level: Int): String {
+        val configured = fields["op-permission-level"]?.trim()?.toIntOrNull() ?: 4
+        return levelNotice(level, configured)
+    }
+
     fun addPlayer(name: String, toWhitelist: Boolean, level: Int, done: () -> Unit) {
         if (saving) return
         saving = true
@@ -150,10 +160,12 @@ internal fun ServerConfigPanel(
                 reload()
                 val who = lookup.name + "（" + lookup.kind.label + "）"
                 val command = if (toWhitelist) "whitelist add " + lookup.name else "op " + lookup.name
+                // 先写文件、再发命令。反过来的话，命令成功而写文件失败，就成了
+                // 「控制台认了、盘上没有」，重启之后人又被挡在门外。
                 speak(
                     if (running) {
-                        "文件里已经加上了 " + who + "。服务端正在跑，它只认控制台里的 " +
-                            command + " —— 回上一页，在控制台里发一次才立刻生效。"
+                        "文件里已经加上了 " + who + "。" + deliver(command) +
+                            (if (toWhitelist) "" else " " + levelNote(level))
                     } else {
                         "已加上 " + who + "。下次开服就生效。"
                     },
@@ -179,11 +191,10 @@ internal fun ServerConfigPanel(
             try {
                 withContext(Dispatchers.IO) { ServerPlayers.removeWhitelist(dir, player.key) }
                 reload()
+                val command = "whitelist remove " + player.name
                 speak(
                     if (running) {
-                        "已从白名单文件里删掉 " + player.name + "。服务端还在跑，" +
-                            "它要到重启后才不认这个人；要立刻踢掉就在控制台里发 whitelist remove " +
-                            player.name + "。"
+                        "已从白名单文件里删掉 " + player.name + "。" + deliver(command)
                     } else {
                         "已从白名单里删掉 " + player.name + "。"
                     },
@@ -338,7 +349,11 @@ internal fun ServerConfigPanel(
                                 try {
                                     withContext(Dispatchers.IO) { ServerPlayers.removeOp(dir, player.key) }
                                     reload()
-                                    speak("已撤掉 " + player.name + " 的管理员。")
+                                    val command = "deop " + player.name
+                                    speak(
+                                        "已从 ops.json 里撤掉 " + player.name + " 的管理员。" +
+                                            (if (running) deliver(command) else "下次开服就生效。"),
+                                    )
                                 } catch (e: Exception) {
                                     speak("撤不掉：" + (e.message ?: e::class.simpleName.orEmpty()), error = true)
                                 }
@@ -615,4 +630,29 @@ private fun ConfigCard(title: String, content: @Composable () -> Unit) {
             content()
         }
     }
+}
+
+/**
+ * 一条命令发出去之后的说法。抽成顶层函数是为了能单独测 —— 四种结果四种口径，
+ * 说错一种的代价是用户以为「已经生效」，回游戏里发现进不去。
+ */
+internal fun commandNotice(command: String, result: CommandSend): String = when (result) {
+    is CommandSend.Rcon -> "已把 " + command + " 发进控制台，当场生效。"
+    CommandSend.Stdin -> "已把 " + command + " 发进控制台的标准输入，回执去服务端那一页看。"
+    CommandSend.NotRunning -> "文件改好了，但服务端进程已经不在了，" + command + " 没发出去，下次开服生效。"
+    is CommandSend.Failed ->
+        "文件改好了，但 " + command + " 没发出去（" + result.reason + "），回上一页手动发一次。"
+}
+
+/**
+ * 对话框里选的权限等级，和 server.properties 里写的那一项对不上时要提醒。
+ *
+ * 为什么不干脆把选的那个等级也发过去：原版没有「按等级 op」的命令，`op` 只会按
+ * server.properties 的值给。所以两处不一致是必然的，只能把话说清楚。
+ */
+internal fun levelNotice(chosen: Int, configured: Int): String {
+    if (chosen <= 0 || chosen == configured) return ""
+    return "注意等级：op 命令当场给的是 server.properties 里的 " + configured +
+        " 级；对话框里选的 " + chosen + " 级只写在 ops.json 里，" +
+        "要按它来就得把「管理员权限等级」改成 " + chosen + " 再重启。"
 }
