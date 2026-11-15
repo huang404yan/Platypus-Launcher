@@ -33,6 +33,10 @@
   对着能随手改的代码设卡没有意义，还会挡住「想先看看界面」「想给自己孩子装一个」这类正当用法。
   所以只弹一次窗，讲清「想用正版账号得先自己申请一个应用 ID」，然后放行。
 
+应用 ID 也从这里分开：正式版由构建方注入（`-Pplatypus.msClientId=` 或 `PLATYPUS_MS_CLIENT_ID`），
+下载的人什么都不用填；孵化版不注入，用户自己申请一个。取值顺序在 `core/auth/ClientIds.kt`，
+仓库里那一份永远是空串。
+
 两边的实现与理由写在 `docs/57-liangtiao-tongdao.md`。
 
 ## 孵化版不占正式版版本号
@@ -104,9 +108,12 @@ set PLATYPUS_WIX_DIR=D:\ruanjian\kaifa\wix314                                   
 孵化版是公开分发的包，下面是硬约束，出包前逐条过一遍：
 
 - **不内置第三方 Client ID**。OAuth 的 `client_id` 不是密钥，但内置一个人家注册的 ID，
-  等于让所有下载者共用同一份配额、共享同一个被随时关闭的风险。安装包里
-  `MicrosoftEndpoints.DEFAULT_CLIENT_ID` 必须是空串，正版登录由用户自己注册
+  等于让所有下载者共用同一份配额、共享同一个被随时关闭的风险。孵化版出包时既不能传
+  `-Pplatypus.msClientId` 也不能设 `PLATYPUS_MS_CLIENT_ID`，`BuildInfo.MS_CLIENT_ID` 与
+  `MicrosoftEndpoints.DEFAULT_CLIENT_ID` 都必须是空串，正版登录由用户自己注册
   （步骤见 `docs/41-zishen-client-id.md`，界面「设置 → 账号」第一张卡里也有一份缩写）。
+  **正式版是另一回事**：由构建方在自己机器上注册并注入，那份 ID 属于发行方，不随源码走。
+  三条路的优先级见 `core/auth/ClientIds.kt`。
 - **不带任何隐私内容**：真实账号 / UUID / refresh_token、本机路径与用户名、
   诊断页导出的现场、日志文件、`settings.json`、`accounts.json`、`.minecraft` 里的任何东西。
 - **不留申请指引的缺口**：Release 说明必须有一段讲「正版登录要先自己填一个应用 ID」，
@@ -119,5 +126,17 @@ set PLATYPUS_WIX_DIR=D:\ruanjian\kaifa\wix314                                   
 grep -rn "04b07795\|1950a258" --include=*.kt --exclude-dir=test .   # 应无输出
 grep -rn "C:\\Users\\|/home/[a-z]" --include=*.kt --include=*.json .   # 应无输出
 grep -n "DEFAULT_CLIENT_ID" core/src/main/kotlin/io/github/huang404yan/platypus/core/auth/MicrosoftAuth.kt
-# 最后一条应打印：const val DEFAULT_CLIENT_ID = ""
+# 第四条应打印：const val DEFAULT_CLIENT_ID = ""
 ```
+
+孵化版还要确认构建产物里那份是空的（前一条只查了源码里的常量，注入的值走的是另一条路）：
+
+```bash
+# 出完包在构建目录里查一眼，内容应是 const val MS_CLIENT_ID: String = ""
+grep -n "MS_CLIENT_ID" core/build/generated/platypus/kotlin/io/github/huang404yan/platypus/core/BuildInfo.kt
+# 环境变量别留在 shell 里（Windows 的 set 与 bash 的 env 都查一下）
+env | grep PLATYPUS_MS_CLIENT_ID    # 应无输出
+```
+
+IDE 或命令行里为了调试设过 `-Pplatypus.msClientId=` / `PLATYPUS_MS_CLIENT_ID` 的话，
+出包前必须清掉，否则那个开发用的 ID 会静默进到孵化版包里。

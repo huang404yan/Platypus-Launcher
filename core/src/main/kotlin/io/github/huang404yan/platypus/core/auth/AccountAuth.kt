@@ -29,16 +29,19 @@ class MicrosoftAccountAuth(
     /** 允许为 null：没有仓库时照样能登录，只是下次得重来（假后端 / 单测用）。 */
     private val repository: AccountRepository? = null,
     /**
-     * 去哪儿要用户填的 Client ID。
+     * 到底用哪个应用 ID。
      *
-     * 做成函数而不是构造参数，是因为它存在设置文件里、用户可以随时改：登录那一刻的
-     * 值才算数；缓存住会让「刚填完 ID 就点登录」用上旧值。挂了设置仓库的装配会
-     * 现读 settings.json，没挂的（假后端 / 单测）用 [MicrosoftEndpoints.DEFAULT_CLIENT_ID]。
+     * 做成函数而不是构造参数，是因为它可能来自设置文件、用户可以随时改：登录那一刻的
+     * 值才算数；缓存住会让「刚填完 ID 就点登录」用上旧值。
+     *
+     * 取舍顺序在 [ClientIds] 里：安装包自带的优先（正式版由构建方注入，下载的人不用
+     * 做任何事），没有才用用户在设置里填的（孵化版）。装配处一般直接写
+     * `{ ClientIds.resolve(settingsRepository.load().microsoftClientId) }`。
      *
      * **登录与刷新必须用同一个 ID** —— 微软把 refresh_token 绑在应用上，换了 ID
      * 刷新一律 invalid_grant，用户会看到「登录凭据已被作废」，其实只是 ID 变了。
      */
-    private val clientIdProvider: suspend () -> String = { MicrosoftEndpoints.DEFAULT_CLIENT_ID },
+    private val clientIdProvider: suspend () -> String = { ClientIds.builtin() },
 ) : AccountAuth {
 
     /**

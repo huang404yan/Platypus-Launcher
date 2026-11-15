@@ -1,6 +1,6 @@
 package io.github.huang404yan.platypus.core.edition
 
-import io.github.huang404yan.platypus.core.auth.MicrosoftAuth
+import io.github.huang404yan.platypus.core.auth.ClientIds
 import io.github.huang404yan.platypus.core.settings.LauncherSettings
 
 /**
@@ -42,7 +42,9 @@ object FirstRun {
         signedIn: Boolean = false,
         accountsLoaded: Boolean = false,
     ): FirstRunState {
-        val clientProblem = MicrosoftAuth.clientIdProblem(settings.microsoftClientId)
+        // 包自带 ID（正式版由构建方注入）时这里恒为 null：用户不需要填任何东西。
+        // 只有一份都没有时才给出「还没有填 Client ID」那句话。
+        val clientProblem = ClientIds.missingProblem(settings.microsoftClientId)
         return FirstRunState(
             needed = needed(settings),
             edition = edition,

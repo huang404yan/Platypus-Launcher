@@ -40,6 +40,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
+import io.github.huang404yan.platypus.core.auth.ClientIds
 import io.github.huang404yan.platypus.core.auth.DeviceCodeGrant
 import io.github.huang404yan.platypus.core.auth.MicrosoftAccountAuth
 import io.github.huang404yan.platypus.core.auth.MicrosoftAuth
@@ -68,9 +69,10 @@ import kotlinx.coroutines.withContext
  *
  * [onUseAccount] 负责把选中的账号写进设置；[onUseOffline] 清掉这个选择。
  *
- * 登录之前必须先有一个自己注册的 Azure 应用 ID（[clientId]）—— 安装包里刻意不内置，
- * 理由写在 [MicrosoftEndpoints.DEFAULT_CLIENT_ID] 的注释里。这个页面负责让用户
- * 「照着四步申请、粘进来、当场能用」，所以那段指引不能只写在文档里。
+ * 应用 ID 从哪儿来，由 [ClientIds] 决定：**正式版由构建方注入**，包里带着，下载的人
+ * 什么都不用做；**孵化版不带**，于是这个页面负责让用户「照着四步申请、粘进来、
+ * 当场能用」—— 那种包的包里没有 ID，凭空要求用户「去申请一个」只会让人莫名其妙，
+ * 所以这里读一次 [ClientIds.builtin]，有就整张卡换掉。
  */
 @Composable
 internal fun AccountTab(
@@ -263,6 +265,11 @@ internal fun AccountTab(
             notice = "当前后端没有提供登录实现，正版登录不可用。"
             return
         }
+        // 包自带 ID 时上面那张「填 ID」的卡根本不显示，也就没有输入框可校验，直接登录。
+        if (ClientIds.builtin().isNotEmpty()) {
+            runLogin(relogin = false)
+            return
+        }
         // 本地先挡一道：空 ID 发出去只会换回一个 AADSTS700016，用户看不懂那串东西。
         val problem = MicrosoftAuth.clientIdProblem(idText)
         if (problem != null) {
@@ -299,7 +306,24 @@ internal fun AccountTab(
         }
     }
 
-    SettingCard(
+    // 包里自带应用 ID 时（正式版），「四步申请」那张卡没有意义 —— 换成一句「已经配好了」。
+    // 判据走 ClientIds.builtin() 而不是看 [clientId] 参数：参数是用户自己填在设置里的值，
+    // 内置 ID 在的时候它通常是空的，拿它判会把孵化版的逻辑套到正式版头上。
+    val packagedId = ClientIds.builtin()
+    if (packagedId.isNotEmpty()) {
+        SettingCard(
+            title = "应用 ID",
+            hint = "这个安装包已经自带一个应用 ID，正版登录不需要你填任何东西，直接看下面第二步。",
+        ) {
+            Text(
+                "用的是这个包自己的应用注册（前 8 位 " + packagedId.take(8) + "…）。" +
+                    "换成自己申请的那个只会让已经存下来的登录凭据对不上 —— 微软把 refresh_token " +
+                    "绑在应用上，换了 ID 一律要重登，所以不用管它。",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    } else SettingCard(
         title = "第一步：填一个自己的应用 ID",
         hint = "微软不发放通用的客户端 ID，任何「随安装包一起发」的 ID 都等于所有使用者共用一份" +
             "别人的应用注册，出了限流或被收紧，拿到安装包的人无从处理；仓库公开后谁都能抄走。" +

@@ -3,6 +3,7 @@ package io.github.huang404yan.platypus.desktop
 import io.github.huang404yan.platypus.core.auth.AccountAuth
 import io.github.huang404yan.platypus.core.auth.AccountRepository
 import io.github.huang404yan.platypus.core.auth.JsonAccountRepository
+import io.github.huang404yan.platypus.core.auth.ClientIds
 import io.github.huang404yan.platypus.core.auth.MicrosoftAccountAuth
 import io.github.huang404yan.platypus.core.auth.YggdrasilAccountAuth
 import io.github.huang404yan.platypus.core.install.JsonServerRepository
@@ -76,10 +77,14 @@ class DesktopServices private constructor(
                 settings = settingsRepository,
                 servers = JsonServerRepository(defaultServerIndex(gameRoot)),
                 accounts = accountRepository,
-                // Client ID 从设置里现读：用户注册完填进去，下一次点登录就该生效。
+                // 应用 ID 的取舍在 ClientIds 里：这个包自带的优先（正式版由构建方注入，
+                // 下载的人不用做任何事），没有才用用户自己填的（孵化版）。两者都是现读，
+                // 用户注册完填进去，下一次点登录就该生效。
                 auth = MicrosoftAccountAuth(
                     repository = accountRepository,
-                    clientIdProvider = { settingsRepository.load().microsoftClientId },
+                    clientIdProvider = {
+                        ClientIds.resolve(settingsRepository.load().microsoftClientId)
+                    },
                 ),
                 // authlib-injector 落在 <gameRoot>/platypus/authlib-injector/ 下面，是这份
                 // 游戏目录的附属物，所以跟着 gameRoot 走；没有游戏目录时退到用户目录。
