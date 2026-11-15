@@ -216,7 +216,7 @@ internal fun InstanceDetailPanel(
     }
 
     if (exporting) {
-        ExportPanel(instance = instance, onBack = { exporting = false })
+        ExportPanel(instance = instance, backend = backend, onBack = { exporting = false })
         return
     }
 

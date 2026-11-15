@@ -32,6 +32,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import io.github.huang404yan.platypus.core.Brand
@@ -150,6 +151,7 @@ fun SettingsPage(
     var autoBackupEnabled by remember { mutableStateOf(AutoBackupPolicy.DEFAULT.enabled) }
     var autoBackupHours by remember { mutableStateOf(AutoBackupPolicy.DEFAULT.intervalHours.toString()) }
     var autoBackupKeep by remember { mutableStateOf(AutoBackupPolicy.DEFAULT.keep.toString()) }
+    var curseForgeKey by remember { mutableStateOf("") }
 
     LaunchedEffect(Unit) {
         val settings = withContext(Dispatchers.IO) {
@@ -164,6 +166,7 @@ fun SettingsPage(
         autoBackupEnabled = settings.autoBackupEnabled
         autoBackupHours = settings.autoBackupHours.toString()
         autoBackupKeep = settings.autoBackupKeep.toString()
+        curseForgeKey = settings.curseForgeApiKey
         loaded = true
         loadedFrom = (repository as? JsonSettingsRepository)?.path.orEmpty()
     }
@@ -209,6 +212,7 @@ fun SettingsPage(
                         autoBackupEnabled = autoBackupEnabled,
                         autoBackupHours = clampedHours,
                         autoBackupKeep = clampedKeep,
+                        curseForgeApiKey = curseForgeKey,
                     ),
                 )
             }
@@ -282,6 +286,7 @@ fun SettingsPage(
                         autoBackupEnabled = autoBackupEnabled,
                         autoBackupHours = backupPolicyNow().intervalHours,
                         autoBackupKeep = backupPolicyNow().keep,
+                        curseForgeApiKey = curseForgeKey,
                     ),
                 )
             }
@@ -325,6 +330,7 @@ fun SettingsPage(
                         autoBackupEnabled = autoBackupEnabled,
                         autoBackupHours = backupPolicyNow().intervalHours,
                         autoBackupKeep = backupPolicyNow().keep,
+                        curseForgeApiKey = curseForgeKey,
                     ),
                 )
             }
@@ -361,6 +367,7 @@ fun SettingsPage(
                         autoBackupEnabled = autoBackupEnabled,
                         autoBackupHours = backupPolicyNow().intervalHours,
                         autoBackupKeep = backupPolicyNow().keep,
+                        curseForgeApiKey = curseForgeKey,
                     ),
                 )
             }.onSuccess { stored ->
@@ -395,6 +402,46 @@ fun SettingsPage(
      * 与配色一样不跟底部「保存」按钮走：用户改完就想马上重试一次下载，
      * 如果那时还没落盘、也没同步到 [DownloadPreference]，点了下载还是老顺序。
      */
+    /**
+     * 存 CurseForge 的 API Key。与下载源一样是「点完立刻落盘」，不走底部保存按钮 ——
+     * 下载页本来就没有那个按钮（底部保存被 SETTINGS_TAB_DOWNLOAD 排除了）。
+     */
+    fun saveCurseKey(raw: String) {
+        val cleaned = raw.trim().trim('"').trim()
+        curseForgeKey = cleaned
+        val parsedMemory = memoryText.trim().toIntOrNull() ?: Instance.DEFAULT_MEMORY_MB
+        scope.launch {
+            runCatching {
+                repository.save(
+                    LauncherSettings(
+                        offlineUsername = normalizeOfflineUsername(username),
+                        defaultGameRoot = gameRoot.trim(),
+                        defaultMemoryMb = Instance.clampMemoryMb(parsedMemory),
+                        activeAccountUuid = activeAccountUuid,
+                        microsoftClientId = microsoftClientId,
+                        theme = theme.id,
+                        downloadSource = downloadSource,
+                        autoBackupEnabled = autoBackupEnabled,
+                        autoBackupHours = backupPolicyNow().intervalHours,
+                        autoBackupKeep = backupPolicyNow().keep,
+                        curseForgeApiKey = cleaned,
+                    ),
+                )
+            }.onSuccess {
+                savedAt = it.updatedAt
+                noticeIsError = false
+                notice = if (cleaned.isBlank()) {
+                    "已清空 CurseForge 的 Key。导出 CurseForge 包时不再查文件归属，文件全部打进包里。"
+                } else {
+                    "CurseForge 的 Key 已保存（" + cleaned.take(4) + "…）。导出 CurseForge 包时会用它查文件归属。"
+                }
+            }.onFailure {
+                noticeIsError = true
+                notice = "保存失败：" + (it.message ?: it::class.simpleName)
+            }
+        }
+    }
+
     fun pickDownloadSource(picked: DownloadSource) {
         downloadSource = picked.id
         DownloadPreference.source = picked
@@ -413,6 +460,7 @@ fun SettingsPage(
                         autoBackupEnabled = autoBackupEnabled,
                         autoBackupHours = backupPolicyNow().intervalHours,
                         autoBackupKeep = backupPolicyNow().keep,
+                        curseForgeApiKey = curseForgeKey,
                     ),
                 )
             }.onSuccess {
@@ -454,6 +502,9 @@ fun SettingsPage(
             SETTINGS_TAB_DOWNLOAD -> DownloadTab(
                 current = DownloadSource.of(downloadSource),
                 onPick = { pickDownloadSource(it) },
+                curseKey = curseForgeKey,
+                onCurseKeyChange = { curseForgeKey = it },
+                onSaveCurseKey = { saveCurseKey(it) },
             )
             SETTINGS_TAB_SAVES -> SavesTab(
                 enabled = autoBackupEnabled,
@@ -605,6 +656,9 @@ private fun LaunchTab(
 private fun DownloadTab(
     current: DownloadSource,
     onPick: (DownloadSource) -> Unit,
+    curseKey: String,
+    onCurseKeyChange: (String) -> Unit,
+    onSaveCurseKey: (String) -> Unit,
 ) {
     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         SettingCard(
@@ -628,6 +682,46 @@ private fun DownloadTab(
                 "现在用的镜像是 BMCLAPI（bmclapi2.bangbang93.com）：游戏本体、libraries、assets " +
                     "都走它。模组与整合包本来就是从 Modrinth / CurseForge 直接下，没有国内镜像可用，" +
                     "这一项对它们没有影响。",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        SettingCard(
+            "CurseForge API Key（可选）",
+            "只在导出 CurseForge 格式的整合包时用到：靠它把包里的文件对上「哪个项目的哪个文件」，" +
+                "写进 manifest.json 的 files 列表。不填也能导出，只是那份列表空着。",
+        ) {
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                OutlinedTextField(
+                    value = curseKey,
+                    onValueChange = onCurseKeyChange,
+                    modifier = Modifier.weight(1f),
+                    label = { Text("API Key") },
+                    singleLine = true,
+                    textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+                    placeholder = { Text("粘贴 CurseForge 后台给你的那串字符") },
+                )
+                Button(onClick = { onSaveCurseKey(curseKey) }) { Text("保存 Key") }
+                if (curseKey.isNotBlank()) {
+                    OutlinedButton(onClick = { onSaveCurseKey("") }) { Text("清掉") }
+                }
+            }
+            val problem = io.github.huang404yan.platypus.core.mods.CurseForgeLookup.apiKeyProblem(curseKey)
+            if (problem != null) {
+                Text(
+                    problem,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                )
+            }
+            Text(
+                "为什么不内置一个：这个 Key 会随源码一起公开，轻则被刷爆额度，重则整个应用被封。" +
+                    "去 CurseForge 开发者后台（docs.curseforge.com 里的「Get an API key」）免费申请一个，填一次就行。" +
+                    "它只存在本机的设置文件里，不进安装包、不进仓库。",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )

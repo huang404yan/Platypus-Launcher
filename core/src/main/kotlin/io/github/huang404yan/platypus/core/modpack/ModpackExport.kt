@@ -3,6 +3,7 @@ package io.github.huang404yan.platypus.core.modpack
 import io.github.huang404yan.platypus.core.instance.Instance
 import io.github.huang404yan.platypus.core.instance.InstanceLayouts
 import io.github.huang404yan.platypus.core.instance.LoaderKind
+import io.github.huang404yan.platypus.core.mods.CurseForgeFingerprint
 import io.github.huang404yan.platypus.core.mods.ModUpdateChecker
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -100,6 +101,18 @@ data class ModpackHostedEntry(
     val urls: List<String>,
 )
 
+/**
+ * 一个「CurseForge 认识、因此不必打进包里」的文件。
+ *
+ * 只有一对 ID，没有下载地址 —— CurseForge 的 manifest.json 里就只写这两个数，
+ * 由导入方自己按 ID 去下。指纹留着是为了让日志能说清是哪个文件对上的号。
+ */
+data class ModpackCurseFile(
+    val fingerprint: Long,
+    val projectId: Int,
+    val fileId: Int,
+)
+
 /** 导出进度。只给界面用，不参与判断。 */
 data class ModpackExportProgress(
     val step: String,
@@ -121,6 +134,8 @@ data class ModpackExportResult(
     val packaged: Int,
     /** 写进压缩包的原始字节数（压缩前）。 */
     val bytes: Long,
+    /** 只留 CurseForge 的 projectID/fileID、没打进包的文件数。 */
+    val curseFiles: Int = 0,
     val warnings: List<String> = emptyList(),
 )
 
@@ -160,6 +175,16 @@ object ModpackExport {
     /** 查一个文件在 Modrinth 上是不是公开版本；返回 sha1 → 可用下载地址。 */
     fun interface HostedLookup {
         suspend fun lookup(sha1s: List<String>): Map<String, List<String>>
+    }
+
+    /**
+     * 查一个文件在 CurseForge 上是哪个项目的哪个文件；返回指纹 → (projectID, fileID)。
+     *
+     * 与 [HostedLookup] 分开是因为语义不同：Modrinth 给的是下载地址，CurseForge 给的是两个
+     * 整数 ID（manifest.json 的 files 里就只要这两个数）。合成一个接口会让两边都别扭。
+     */
+    fun interface CurseLookup {
+        suspend fun lookup(fingerprints: List<Long>): Map<Long, Pair<Int, Int>>
     }
 
     /**
@@ -214,6 +239,7 @@ object ModpackExport {
         target: File,
         options: ModpackExportOptions,
         hostedLookup: HostedLookup? = null,
+        curseLookup: CurseLookup? = null,
         onProgress: (ModpackExportProgress) -> Unit = {},
     ): ModpackExportResult = withContext(Dispatchers.IO) {
         val resolved = options.copy(name = options.name.trim().ifBlank { instance.name })
@@ -254,6 +280,41 @@ object ModpackExport {
             packaged += entries
         }
 
+        // CurseForge 包的对号：认出来的文件把 projectID/fileID 写进 manifest.json 的 files。
+        //
+        // 但**文件实体照样打进 overrides/**，不因为对上号就省掉。这是本仓库与标准 CF 导出的
+        // 一处刻意分歧，理由在导入侧：本启动器读 MCBBS_V2 包时 files 恒为空、只按 overrides
+        // 铺文件（ModpackMeta.parseMcbbs），PCL 的导入器也一样（它自己的注释明说「不会按 files
+        // 列表联网下载」）。省掉实体的话，导出的包自己就装不回来 —— 一个只有自己装不上的格式
+        // 比没有这个格式更糟。
+        //
+        // 代价是 files 里的项目在 CurseForge App 上会被先下载一次、再被 overrides 覆盖。
+        // 换来的是这个包在任何启动器上都能离线装。warnings 里会如实说这一点。
+        val curseFiles = mutableListOf<ModpackCurseFile>()
+        if (resolved.format == ModpackExportFormat.CURSE && curseLookup != null) {
+            onProgress(ModpackExportProgress("计算文件指纹", 0, packaged.size))
+            val byPath = linkedMapOf<String, Long>()
+            packaged.forEachIndexed { index, entry ->
+                runCatching { CurseForgeFingerprint.of(entry.file) }
+                    .onSuccess { byPath[entry.path] = it }
+                if (index % 20 == 0) onProgress(ModpackExportProgress("计算文件指纹", index, packaged.size))
+            }
+            onProgress(ModpackExportProgress("向 CurseForge 核对", 0, 0))
+            val ids = runCatching { curseLookup.lookup(byPath.values.toList()) }
+                .getOrElse { error ->
+                    warnings += "向 CurseForge 核对文件失败（" + (error.message ?: "网络不通") + "），全部文件都打进包里了"
+                    emptyMap()
+                }
+            for ((_, fingerprint) in byPath) {
+                val pair = ids[fingerprint] ?: continue
+                curseFiles += ModpackCurseFile(fingerprint, pair.first, pair.second)
+            }
+            if (curseFiles.isNotEmpty()) {
+                warnings += "有 " + curseFiles.size + " 个文件能对上 CurseForge 上的项目，清单里写了它们的 ID；" +
+                    "文件实体也在包里的 overrides/ 里，所以不联网也装得上（CurseForge App 会多下一次）。"
+            }
+        }
+
         val loader = instance.loader
         val loaderVersion = instance.loaderVersion
         if (loader == LoaderKind.QUILT || loader == LoaderKind.OPTIFINE || loader == LoaderKind.OTHER) {
@@ -269,7 +330,7 @@ object ModpackExport {
         if (parent != null && !parent.isDirectory) parent.mkdirs()
         val temp = File(parent ?: File("."), target.name + ".part")
         if (temp.exists()) temp.delete()
-        val bytes = writeZip(temp, resolved, instance, hosted, packaged) { done ->
+        val bytes = writeZip(temp, resolved, instance, hosted, packaged, curseFiles) { done ->
             onProgress(ModpackExportProgress("写入压缩包", done, packaged.size))
         }
         replaceFile(temp, target)
@@ -281,6 +342,7 @@ object ModpackExport {
             hosted = hosted.size,
             packaged = packaged.size,
             bytes = bytes,
+            curseFiles = curseFiles.size,
             warnings = warnings,
         )
     }
@@ -328,6 +390,7 @@ object ModpackExport {
         instance: Instance,
         hosted: List<ModpackHostedEntry>,
         packaged: List<ModpackExportEntry>,
+        curseFiles: List<ModpackCurseFile>,
         onEntry: (Int) -> Unit,
     ): Long {
         var written = 0L
@@ -359,7 +422,13 @@ object ModpackExport {
                     writeText(
                         zip,
                         MANIFEST_NAME,
-                        curseManifestJson(options, instance.gameVersion, instance.loader, instance.loaderVersion),
+                        curseManifestJson(
+                            options,
+                            instance.gameVersion,
+                            instance.loader,
+                            instance.loaderVersion,
+                            curseFiles,
+                        ),
                     )
                 }
             }
@@ -464,12 +533,19 @@ object ModpackExport {
         return PRETTY.encodeToString(JsonObject.serializer(), root)
     }
 
-    /** CurseForge 风格的 manifest.json（MCBBS 包也会带一份，给老启动器兜底）。 */
+    /**
+     * CurseForge 风格的 manifest.json（MCBBS 包也会带一份，给老启动器兜底）。
+     *
+     * [curseFiles] 只在导出 CurseForge 包时非空。MCBBS 包一律传空 —— 那份 manifest.json
+     * 只是给老启动器认格式用的，里面写 files 会让导入器以为要联网下载，明明能离线装的
+     * 包反而装不上（PCL 对 MCBBS 导入器的实测结论）。
+     */
     fun curseManifestJson(
         options: ModpackExportOptions,
         gameVersion: String,
         loader: LoaderKind,
         loaderVersion: String?,
+        curseFiles: List<ModpackCurseFile> = emptyList(),
     ): String {
         val root = buildJsonObject {
             put("manifestType", "minecraftModpack")
@@ -489,7 +565,15 @@ object ModpackExport {
                     }
                 }
             }
-            putJsonArray("files") {}
+            putJsonArray("files") {
+                for (file in curseFiles) {
+                    addJsonObject {
+                        put("projectID", file.projectId)
+                        put("fileID", file.fileId)
+                        put("required", true)
+                    }
+                }
+            }
             put("overrides", OVERRIDES_DIR)
         }
         return PRETTY.encodeToString(JsonObject.serializer(), root)

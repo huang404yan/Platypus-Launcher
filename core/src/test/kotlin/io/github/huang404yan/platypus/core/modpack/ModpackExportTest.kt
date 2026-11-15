@@ -199,6 +199,84 @@ class ModpackExportTest {
         assertTrue(manifest.warnings.any { it.contains("CurseForge") }, manifest.warnings.toString())
     }
 
+    @Test
+    fun `对上号的文件把 ID 写进清单但实体仍打进包里`() = runBlocking {
+        val jar = write("mods/sodium.jar", "sodium content")
+        val fingerprint = io.github.huang404yan.platypus.core.mods.CurseForgeFingerprint.of(jar)
+        var asked: List<Long> = emptyList()
+        val lookup = ModpackExport.CurseLookup { idList ->
+            asked = idList
+            mapOf(fingerprint to (394468 to 5123456))
+        }
+        val target = File(root, "cf/ids.zip")
+        val result = ModpackExport.export(
+            instance(LoaderKind.FORGE, "47.2.0"),
+            target,
+            ModpackExportOptions(version = "2.0.0", format = ModpackExportFormat.CURSE),
+            curseLookup = lookup,
+        )
+        assertEquals(listOf(fingerprint), asked)
+        assertEquals(1, result.curseFiles)
+        val manifest = textOf(target, ModpackExport.MANIFEST_NAME).orEmpty()
+        assertTrue(manifest.contains("\"projectID\": 394468"), manifest)
+        assertTrue(manifest.contains("\"fileID\": 5123456"), manifest)
+        assertTrue(manifest.contains("\"required\": true"), manifest)
+        // 实体还在：省掉它的话这个包自己都装不回来
+        assertTrue(entriesOf(target).contains("overrides/mods/sodium.jar"), entriesOf(target).toString())
+        assertEquals(1, result.packaged)
+        assertTrue(result.warnings.any { it.contains("CurseForge") }, result.warnings.toString())
+    }
+
+    @Test
+    fun `没对上号的文件不进 files 列表`() = runBlocking {
+        write("mods/sodium.jar", "sodium content")
+        write("mods/other.jar", "other content")
+        val lookup = ModpackExport.CurseLookup { emptyMap() }
+        val target = File(root, "cf/none.zip")
+        val result = ModpackExport.export(
+            instance(),
+            target,
+            ModpackExportOptions(format = ModpackExportFormat.CURSE),
+            curseLookup = lookup,
+        )
+        assertEquals(0, result.curseFiles)
+        assertEquals(2, result.packaged)
+        val manifest = textOf(target, ModpackExport.MANIFEST_NAME).orEmpty()
+        assertFalse(manifest.contains("projectID"), manifest)
+    }
+
+    @Test
+    fun `核对 CurseForge 失败时整包照打并留一句警告`() = runBlocking {
+        write("mods/sodium.jar")
+        val lookup = ModpackExport.CurseLookup { throw java.io.IOException("连不上") }
+        val target = File(root, "cf/fail.zip")
+        val result = ModpackExport.export(
+            instance(),
+            target,
+            ModpackExportOptions(format = ModpackExportFormat.CURSE),
+            curseLookup = lookup,
+        )
+        assertEquals(0, result.curseFiles)
+        assertEquals(1, result.packaged)
+        assertTrue(result.warnings.any { it.contains("向 CurseForge 核对文件失败") }, result.warnings.toString())
+        assertTrue(entriesOf(target).contains("overrides/mods/sodium.jar"), entriesOf(target).toString())
+    }
+
+    @Test
+    fun `MCBBS 包的清单里不写 files 列表`() = runBlocking {
+        write("mods/sodium.jar")
+        val lookup = ModpackExport.CurseLookup { mapOf(123L to (1 to 2)) }
+        val target = File(root, "cf/mcbbs.zip")
+        ModpackExport.export(
+            instance(),
+            target,
+            ModpackExportOptions(format = ModpackExportFormat.MCBBS),
+            curseLookup = lookup,
+        )
+        val manifest = textOf(target, ModpackExport.MANIFEST_NAME).orEmpty()
+        assertFalse(manifest.contains("projectID"), manifest)
+    }
+
     // ---- Modrinth ----
 
     @Test

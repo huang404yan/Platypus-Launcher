@@ -67,6 +67,14 @@ data class LauncherSettings(
     val autoBackupHours: Int = AutoBackupPolicy.DEFAULT_INTERVAL_HOURS,
     /** 每个世界最多留几份自动备份；超出的从最旧的开始删。 */
     val autoBackupKeep: Int = AutoBackupPolicy.DEFAULT_KEEP,
+    /**
+     * 用户自己申请的 CurseForge API Key；空串表示没填，导出 CurseForge 包时查不了文件归属。
+     *
+     * 刻意不内置：CurseForge 的 API 要 Key，而内置进仓库的 Key 会随源码一起公开 ——
+     * 轻则被刷爆额度，重则整个应用被封。填一次就行，只存在本机 settings.json 里。
+     * 没填时导出照样能导，只是 manifest.json 的 files 列表空着（文件全在 overrides/ 里）。
+     */
+    val curseForgeApiKey: String = "",
     /** 最近一次写盘时间（毫秒）；0 表示还没写过。 */
     val updatedAt: Long = 0L,
 ) {
@@ -87,6 +95,7 @@ data class LauncherSettings(
             microsoftClientId = raw.microsoftClientId.trim().trim('"').trim(),
             theme = raw.theme.trim().lowercase(),
             downloadSource = raw.downloadSource.trim().lowercase(),
+            curseForgeApiKey = raw.curseForgeApiKey.trim().trim('"').trim(),
             autoBackupHours = raw.autoBackupHours.coerceIn(
                 AutoBackupPolicy.INTERVAL_RANGE.first,
                 AutoBackupPolicy.INTERVAL_RANGE.last,

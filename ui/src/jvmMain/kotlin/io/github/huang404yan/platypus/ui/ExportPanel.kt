@@ -45,6 +45,7 @@ import io.github.huang404yan.platypus.core.modpack.ModpackExportFormat
 import io.github.huang404yan.platypus.core.modpack.ModpackExportOptions
 import io.github.huang404yan.platypus.core.modpack.ModpackExportProgress
 import io.github.huang404yan.platypus.core.modpack.ModpackExportResult
+import io.github.huang404yan.platypus.core.mods.CurseForgeLookup
 import io.github.huang404yan.platypus.core.mods.ModrinthHostedLookup
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -64,6 +65,7 @@ import java.io.File
 @Composable
 internal fun ExportPanel(
     instance: Instance,
+    backend: LauncherBackend? = null,
     onBack: () -> Unit,
 ) {
     val scope = rememberCoroutineScope()
@@ -124,6 +126,14 @@ internal fun ExportPanel(
                         // 只有 Modrinth 格式才值得联网核对：MCBBS 包本来就要求文件随包走。
                         hostedLookup = if (format == ModpackExportFormat.MRPACK) {
                             ModrinthHostedLookup.asHostedLookup()
+                        } else {
+                            null
+                        },
+                        // CurseForge 那条要 API Key，从设置里读；没填就传 null（files 列表留空，
+                        // 文件照样全打进包里 —— 这是正常结果，不是失败）。
+                        curseLookup = if (format == ModpackExportFormat.CURSE) {
+                            val key = runCatching { backend?.settings?.load() }.getOrNull()?.curseForgeApiKey.orEmpty()
+                            if (key.isBlank()) null else CurseForgeLookup.asCurseLookup(key)
                         } else {
                             null
                         },
@@ -351,7 +361,9 @@ internal fun ExportPanel(
                     Text("导出完成", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
                     Text(done.archive.absolutePath, style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace)
                     Text(
-                        "打进包里 " + done.packaged + " 个，只留下载地址 " + done.hosted + " 个，共 " + sizeTextOf(done.bytes) + "。",
+                        "打进包里 " + done.packaged + " 个，只留下载地址 " + done.hosted + " 个" +
+                            (if (done.curseFiles > 0) "，清单里写了 " + done.curseFiles + " 个文件的 CurseForge ID" else "") +
+                            "，共 " + sizeTextOf(done.bytes) + "。",
                         style = MaterialTheme.typography.bodySmall,
                     )
                     done.warnings.forEach { warning ->
