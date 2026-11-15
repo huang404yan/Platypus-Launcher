@@ -10,6 +10,10 @@ android {
     // 两者是同一台设备上可以并存的两个应用，孵化的改动迁到正式线时换包名重出一次。
     namespace = "io.github.huang404yan.platypus.launcher.preview"
     compileSdk = 37
+    // 应用内起 JVM 那一层是 C 写的（见 src/main/cpp/jvm_bridge.c）。
+    // 版本写死在这里而不是靠 AGP 猜：不同 NDK 版本对 dlopen 的默认行为不一样，
+    // 出问题时要能一眼看出是拿哪一套编的。
+    ndkVersion = "28.2.13676358"
 
     defaultConfig {
         applicationId = "io.github.huang404yan.platypus.launcher.preview"
@@ -45,6 +49,14 @@ android {
     packaging {
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
+        }
+    }
+
+    // 用最朴素的 ndk-build：这一层只有一个 .c 文件、零第三方依赖，
+    // 为它再装一套 CMake 不划算。Android.mk / Application.mk 就在源码目录里。
+    externalNativeBuild {
+        ndkBuild {
+            path = file("src/main/cpp/Android.mk")
         }
     }
 }

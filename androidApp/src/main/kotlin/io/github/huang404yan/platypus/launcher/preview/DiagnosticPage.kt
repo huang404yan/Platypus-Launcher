@@ -52,6 +52,7 @@ import io.github.huang404yan.platypus.core.runtime.AndroidJavaCatalog
 import io.github.huang404yan.platypus.core.runtime.AndroidJavaRuntimeService
 import io.github.huang404yan.platypus.core.runtime.GameJavaRules
 import io.github.huang404yan.platypus.core.runtime.JavaRuntime
+import io.github.huang404yan.platypus.launcher.preview.runtime.JvmBridge
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -492,6 +493,20 @@ internal object Diagnostics {
         val abi = AndroidJavaCatalog.supportedAbi(Build.SUPPORTED_ABIS?.toList().orEmpty())
         rows += DiagnosticRow("主 ABI", abi ?: "不认识（已支持：" + AndroidJavaCatalog.ABIS.joinToString("、") + "）", abi != null)
         rows += DiagnosticRow("系统版本", Build.VERSION.RELEASE.orEmpty() + " / SDK " + Build.VERSION.SDK_INT)
+        // JNI 层是编在 APK 里的（libplatypus-jvm.so）。它加载失败时启动按钮点了也是白点，
+        // 而失败原因（架构不匹配 / 打包漏了）只有这一行能看出来。
+        rows += DiagnosticRow(
+            "JNI 层",
+            if (JvmBridge.available) "已加载 libplatypus-jvm.so" else "加载失败：" + JvmBridge.loadFailure,
+            JvmBridge.available,
+        )
+        if (Build.VERSION.SDK_INT >= 29) {
+            rows += DiagnosticRow(
+                "可写目录加载原生库",
+                "Android 10 起禁止 —— 应用内 JVM 的 libjvm.so 就在可写目录里，这一步很可能起不来",
+                null,
+            )
+        }
 
         val javaRoot = File(context.filesDir, "java")
         val runtimes = runCatching { AndroidJavaRuntimeService(javaRoot, abi).installedRuntimes() }

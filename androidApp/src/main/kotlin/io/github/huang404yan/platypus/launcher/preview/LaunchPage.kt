@@ -52,6 +52,8 @@ import io.github.huang404yan.platypus.core.runtime.GameJavaRules
 import io.github.huang404yan.platypus.core.runtime.JavaRuntime
 import io.github.huang404yan.platypus.core.settings.JsonSettingsRepository
 import io.github.huang404yan.platypus.core.settings.LauncherSettings
+import io.github.huang404yan.platypus.launcher.preview.runtime.JvmBridge
+import io.github.huang404yan.platypus.launcher.preview.runtime.JvmStartResult
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -71,15 +73,19 @@ import java.io.File
  * 2. 六条自检（游戏目录 / Java 运行时 / 图形后端 / 渲染库 / 临时目录 / 原生库目录），
  *    哪条不过就说清是哪个路径上缺什么；
  * 3. 把应用内 JVM 要的那张参数表整个算出来并显示出来，可以导出成文件对照；
- * 4. 把版本 json 里的 natives 解压到实例自己的目录里。
+ * 4. 把版本 json 里的 natives 解压到实例自己的目录里；
+ * 5. 自检全过之后，把这张参数表交给 JNI 层的 `JNI_CreateJavaVM` 真正起一个 JVM
+ *    （`androidApp/src/main/cpp/jvm_bridge.c`，编成 libplatypus-jvm.so）。
  *
- * ## 还差什么
+ * ## 最大的风险不在这一页
  *
- * 差最后一步：把这张参数表交给 JNI 的 `JVM_CreateJavaVM`，再把 JVM 起在哪个线程、
- * 图形上下文怎么挂上去、`System.exit` 怎么接管这几件事做掉 —— 那是 native 层，
- * 要 NDK 编 `.so`，见 docs/45-android-yunxingshi.md 的第 1 层与第 2 层。
- * 所以这一页不是「做了个假的」，而是**把那一步之前的错全部前移到界面上**：
- * 参数拼错、natives 没解、JRE 缺 libjvm.so、渲染库没放，现在都能在进游戏前看见。
+ * Android 10 起，系统禁止应用从**可写目录** `dlopen` 原生库。而应用内 JVM 的
+ * libjvm.so 按定义一定躺在 `/data/data/<包名>/files/java/...` 这种可写目录里 ——
+ * 也就是说这台设备只要升到 Android 10 及以上，这一步很可能直接失败在
+ * 「没能加载 libjvm.so」上。这是系统限制，不是参数拼错。
+ *
+ * 所以界面照样给「启动」按钮，但把这句话写在按钮旁边：**能起是运气，起不来不是 bug**。
+ * 图形那一层（GL4ES / Zink 转译）同样还没接 —— 即使 JVM 起来了，游戏窗口也挂不上去。
  *
  * ## 为什么不打包图形转译库
  *
@@ -108,6 +114,8 @@ internal fun LaunchPage() {
     var notice by remember { mutableStateOf("") }
     var prep by remember { mutableStateOf<AndroidLaunchPreparation?>(null) }
     var exported by remember { mutableStateOf("") }
+    var starting by remember { mutableStateOf(false) }
+    var startNotice by remember { mutableStateOf("") }
 
     /** 这个实例的 natives 目录：一个实例一份，免得两个版本互相盖掉。 */
     fun nativeDirOf(instance: Instance?): File {
@@ -229,6 +237,31 @@ internal fun LaunchPage() {
         }
     }
 
+    /**
+     * 真正启动：[JvmBridge.start] 会一直在调用线程上跑到游戏退出，所以必须扔进后台线程。
+     *
+     * 失败时把原因留在界面上 —— 这里几乎每一种失败（没有 JNI 层、加载不了 libjvm.so、
+     * JVM 造不出来、主类找不到）都是用户自己改不了的系统或环境问题，
+     * 一句「启动失败」等于什么都没说。
+     */
+    fun startGame() {
+        val current = prep ?: run { startNotice = "先做一次自检。"; return }
+        if (!current.ready) { startNotice = "自检还没过，先把上面标红的几条处理掉。"; return }
+        starting = true
+        startNotice = ""
+        scope.launch {
+            val outcome = withContext(Dispatchers.IO) {
+                runCatching { JvmBridge.start(current) }
+                    .getOrElse { JvmStartResult.Failed("启动时抛了异常：" + describe(it)) }
+            }
+            starting = false
+            startNotice = when (outcome) {
+                is JvmStartResult.Ok -> "游戏进程结束了。"
+                is JvmStartResult.Failed -> outcome.message
+            }
+        }
+    }
+
     // 选文件那个回调是 remember 的，捕获的是首次组合的变量值，得用最新的这份。
     val latestSelected by rememberUpdatedState(selected)
     val latestRenderer by rememberUpdatedState(renderer)
@@ -274,8 +307,9 @@ internal fun LaunchPage() {
     ) {
         Text("启动", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
         Text(
-            "手机上要在应用内起 JVM 再把 OpenGL 转译成 GLES，这一步（JNI）还没做。" +
-                "这一页做到的是它之前的全部准备：挑运行时、六条自检、拼出完整的启动参数表。",
+            "手机上要在应用内起 JVM 再把 OpenGL 转译成 GLES。这一页做到：挑运行时、六条自检、" +
+                "拼出完整的启动参数表，自检全过之后可以试着启动。" +
+                "但 Android 10 起系统禁止从可写目录加载原生库，这一步大概率起不来 —— 起不来不是参数问题。",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.tertiary,
         )
@@ -426,6 +460,28 @@ internal fun LaunchPage() {
             }
         }
 
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Button(
+                onClick = { startGame() },
+                enabled = !busy && !starting && prep?.ready == true,
+            ) {
+                Text(if (starting) "游戏运行中…" else "启动")
+            }
+            Text(
+                if (JvmBridge.available) "JNI 层已就位" else "这个包没带 JNI 层：" + JvmBridge.loadFailure,
+                style = MaterialTheme.typography.labelSmall,
+                color = if (JvmBridge.available) {
+                    MaterialTheme.colorScheme.onSurfaceVariant
+                } else {
+                    MaterialTheme.colorScheme.error
+                },
+                modifier = Modifier.padding(top = 12.dp),
+            )
+        }
+        if (startNotice.isNotBlank()) {
+            LaunchHint(startNotice, error = startNotice != "游戏进程结束了。")
+        }
+
         if (notice.isNotBlank()) {
             val isError = notice.startsWith("自检本身出错") || notice.startsWith("复制失败") ||
                 notice.startsWith("解压失败") || notice.startsWith("写文件失败");
@@ -496,8 +552,10 @@ internal fun LaunchPage() {
         }
 
         LaunchHint(
-            "还差的最后一步：把上面那张参数表交给 JNI 的 JVM_CreateJavaVM，并接管 System.exit。" +
-                "那要 NDK 编 native 库，属于 docs/45 的第 1 层；做完这一步，「做启动自检」就该换成「启动」。",
+            "「启动」走的是 native 层（libplatypus-jvm.so）：dlopen 运行时的 libjvm.so、" +
+                "dlsym 拿到 JNI_CreateJavaVM、带着上面那张参数表造一个 JVM、再调游戏主类。" +
+                "这条路被 Android 10 的「不许从可写目录加载原生库」挡着，起不来是常态；" +
+                "图形转译（GL4ES / Zink）也还没接到这一层，即使 JVM 起来了窗口也挂不上去。",
         )
     }
 }
