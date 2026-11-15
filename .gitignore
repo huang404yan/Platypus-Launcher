@@ -25,7 +25,13 @@ releases/**/*.aab
 #   发布包    —— 走 GitHub Release 附件
 #   品牌源图  —— 图标已接进各模块资源，源图没必要跟仓库
 #   截图      —— 占体积且随时过期
+#   开发记录  —— 写给自己看的，读者是下一个改这段代码的人，不是用户
 releases/*
 !releases/README.md
 branding/
-docs/screenshots/
+
+# 开发记录留在本机。它们是维护者对照「当时为什么这么写」用的，不是给使用者看的文档：
+# 放在仓库里会让第一次打开仓库的人以为这是产品文档，实际情况是 58 篇内部笔记。
+# README 里的图片另存了一份 assets/，不受这条影响。
+docs/*
+!docs/README.md

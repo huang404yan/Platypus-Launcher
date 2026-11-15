@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/logo.png" width="128" alt="鸭嘴兽启动器图标">
+  <img src="assets/logo.png" width="128" alt="鸭嘴兽启动器图标">
 </p>
 
 # 鸭嘴兽启动器（Platypus Launcher）
