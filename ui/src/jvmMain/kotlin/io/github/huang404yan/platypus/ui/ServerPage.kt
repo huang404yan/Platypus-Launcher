@@ -239,6 +239,9 @@ fun ServerPage(initialGameRoot: String? = null, backend: LauncherBackend? = null
     // 本次启动用的内存。登记时写它而不是读输入框：用户装完之后可能已经改了输入框，
     // 而已经装好的那个服务端用的还是当时那个值。
     var lastMemoryMb by remember { mutableStateOf(ServerInstaller.DEFAULT_MEMORY_MB) }
+    // 配置是详情页那种「子页」：点进去、改完、返回。服务端配置永远属于某个具体目录，
+    // 脱离目录没有意义，所以不做成左栏一级导航项。
+    var configDir by remember { mutableStateOf<String?>(null) }
     var registryNotice by remember { mutableStateOf("") }
     var registryError by remember { mutableStateOf("") }
     var registeredDir by remember { mutableStateOf("") }
@@ -330,6 +333,18 @@ fun ServerPage(initialGameRoot: String? = null, backend: LauncherBackend? = null
     val releases = manifest?.releases().orEmpty()
     val visible = if (filterText.isBlank()) releases else releases.filter {
         it.id.contains(filterText.trim(), ignoreCase = true)
+    }
+
+    val openConfig = configDir
+    if (openConfig != null) {
+        // 只有当正在跑的就是这个目录时才标「运行中」：跑着的可能是另一个服务端。
+        val sameDir = console.dir.replace('\\', '/').equals(openConfig.replace('\\', '/'), ignoreCase = true)
+        ServerConfigPanel(
+            dir = File(openConfig),
+            running = console.running && sameDir,
+            onBack = { configDir = null },
+        )
+        return
     }
 
     Column(
@@ -509,6 +524,7 @@ fun ServerPage(initialGameRoot: String? = null, backend: LauncherBackend? = null
                     // 一长串参数，自己拼 java 命令只会拼错。
                     ServerRuntime.start(entry.directory)
                 },
+                onConfig = { entry -> configDir = entry.directory },
                 onForget = { entry ->
                     val repo = backend?.servers
                     if (repo == null) {
@@ -812,6 +828,7 @@ private fun ServerRegistryCard(
     entries: List<ServerEntry>,
     onOpen: (ServerEntry) -> Unit,
     onStart: (ServerEntry) -> Unit,
+    onConfig: (ServerEntry) -> Unit,
     onForget: (ServerEntry) -> Unit,
 ) {
     Card(
@@ -844,6 +861,7 @@ private fun ServerRegistryCard(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                     OutlinedButton(onClick = { onOpen(entry) }) { Text("打开目录") }
+                    OutlinedButton(onClick = { onConfig(entry) }) { Text("配置") }
                     Button(onClick = { onStart(entry) }) { Text("启动") }
                     OutlinedButton(onClick = { onForget(entry) }) { Text("从列表里去掉") }
                 }

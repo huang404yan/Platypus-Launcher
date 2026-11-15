@@ -1,5 +1,6 @@
 package io.github.huang404yan.platypus.core.install
 
+import io.github.huang404yan.platypus.core.server.ServerProperties
 import java.io.File
 import java.net.InetSocketAddress
 import java.net.ServerSocket
@@ -20,8 +21,9 @@ object ServerPorts {
     /** 原版服务端不写 server-port 时用的端口。 */
     const val DEFAULT_PORT = 25565
 
-    const val PROPERTIES_NAME = "server.properties"
+    const val PROPERTIES_NAME = ServerProperties.FILE_NAME
 
+    /** 与 [ServerProperties] 那边用的是同一个键名。 */
     private const val PORT_KEY = "server-port"
 
     fun propertiesFile(dir: File): File = File(dir, PROPERTIES_NAME)
@@ -47,16 +49,10 @@ object ServerPorts {
      * 值超出 1..65535 或不是整数时返回 null（服务端自己也会忽略这种值）。
      */
     fun parsePort(properties: String): Int? {
-        for (line in properties.lineSequence()) {
-            val trimmed = line.trim()
-            if (trimmed.isEmpty() || trimmed.startsWith("#") || trimmed.startsWith("!")) continue
-            val eq = trimmed.indexOf('=')
-            if (eq <= 0) continue
-            if (!trimmed.substring(0, eq).trim().equals(PORT_KEY, ignoreCase = true)) continue
-            val value = trimmed.substring(eq + 1).trim().toIntOrNull() ?: continue
-            if (value in 1..65535) return value
-        }
-        return null
+        // 走 ServerProperties 那份解析器，不在这里再写一遍逐行切分：
+        // 同一个文件的两种解析方式迟早会分叉（比如一边认 "!" 注释、另一边不认）。
+        val raw = ServerProperties.parse(properties).raw(PORT_KEY)?.trim()?.toIntOrNull() ?: return null
+        return raw.takeIf { it in 1..65535 }
     }
 
     /**

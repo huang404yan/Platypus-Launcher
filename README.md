@@ -114,6 +114,7 @@ Windows 下也可以用 `gradlew.bat`。首次构建会下载约 300 MB 依赖�
 - `docs/44-duankou-yujian-yu-geli-qianyi.md`：**服务端端口预检、关隔离后搬文件、Forge 的 jar 藏在哪**（`SO_REUSEADDR` 在 Windows 上会让「预检永远通过」这个坑、`pinned` 提示为什么不能走普通 notice、合并为什么是复制不是移动且默认不覆盖、`libraries/` 兜底与 installer jar 的排除、Paper 的 `server:mojang` 为什么是伪问题）
 - `docs/45-android-yunxingshi.md`：**安卓端的 Java 运行时这一层**（为什么安卓不能跑 `java -version` 只能读 `release` 文件、`isInstalled` 与 `canLaunch` 为什么是两条判据、`component` 里的 ABI 约定、把「启动翻译成命令行」抽到 `core/launch/LaunchPlanner.kt` 的理由与它承诺不写盘、`OsFamily` 里为什么还没有 `ANDROID`）
 - `docs/47-cundang-guanli.md`：**存档管理**（`level.dat` 的 NBT 为什么自己读、读不出来为什么不算错误、删除为什么永远先备份、备份为什么是一个 zip 而不是一份目录、还原为什么默认不覆盖且名字可改、备份与世界为什么分成两张卡）
+- `docs/48-fuwuduan-peizhi.md`：**服务端配置页**（`server.properties` 为什么按行保留而不是读成 Map、值里的换行为什么要压平、为什么只放 18 个键、白名单与 OP 的 UUID 从哪来且「网络不通」与「这个正版账号不存在」为什么要分开说、`[]` 为什么不是空文件、端口解析为什么只剩一份）
 - `docs/46-zhenghebao-daochu.md`：**整合包导出**（MCBBS v2 与 Modrinth 不是「压缩方式不同」而是「谁持有文件」、三种元数据为什么一句都不能混写、`addons` 用短名而 `modLoaders` 用短名加版本、存档默认不打、sha512 为什么自己算、`downloads` 里 Modrinth 的 CDN 排最后）
 
 ## 下载
@@ -157,7 +158,7 @@ M0（骨架）+ M1（实例扫描）+ M2（下载器）+ M3（**Windows 一键�
 
 **下载断点续传**：先写 `<文件>.part`，校验通过才转正；`.part` 有内容就发 `Range` 接着下，断网不清半成品，下次自动接上。进度条会额外显示「其中 N 个接着上次下（省了 M MB）」（`docs/14`）。
 
-单测 **739 例全过**（63 个测试类，`./gradlew :core:test :ui:jvmTest`；`ui` 从这一版起有 `jvmTest` 源集，格式化函数与导航常量也进单测了）。另有十二个无头冒烟任务（`e2eInstall` / `settingsSmoke` / `instanceFlowSmoke` / `resumeSmoke` / `deleteSmoke` / `fabricE2e` / `modpackE2e` / `forgeE2e` / `neoForgeE2e` / `modsE2e` / `modUpdateE2e` / `isolationSmoke`），走的是界面按钮同一批函数；`resumeSmoke` / `fabricE2e` / `modpackE2e` / `forgeE2e` / `neoForgeE2e` / `modsE2e` 需要联网，分别在空目录真装 Fabric、真跑 Forge 与 NeoForge 官方安装器、真从 Modrinth 下模组、真把一个 `.mrpack` 从解析装到进主菜单；`deleteSmoke` 在 `dist/_delete-smoke` 里全程造假数据，不碰真实 `.minecraft`。
+单测 **765 例全过**（65 个测试类，`./gradlew :core:test :ui:jvmTest`；`ui` 从这一版起有 `jvmTest` 源集，格式化函数与导航常量也进单测了）。另有十二个无头冒烟任务（`e2eInstall` / `settingsSmoke` / `instanceFlowSmoke` / `resumeSmoke` / `deleteSmoke` / `fabricE2e` / `modpackE2e` / `forgeE2e` / `neoForgeE2e` / `modsE2e` / `modUpdateE2e` / `isolationSmoke`），走的是界面按钮同一批函数；`resumeSmoke` / `fabricE2e` / `modpackE2e` / `forgeE2e` / `neoForgeE2e` / `modsE2e` 需要联网，分别在空目录真装 Fabric、真跑 Forge 与 NeoForge 官方安装器、真从 Modrinth 下模组、真把一个 `.mrpack` 从解析装到进主菜单；`deleteSmoke` 在 `dist/_delete-smoke` 里全程造假数据，不碰真实 `.minecraft`。
 
 **能装 Fabric 了**：下载页勾「顺带装 Fabric」→ 拉 meta.fabricmc.net 的 loader 列表（默认落在最新 stable）→ 装 profile json（只改 `id`，保留 `inheritsFrom`）→ 按 maven 坐标补全 8 个库的地址并下载 → 登记成 `1.20.1-fabric-0.20.1` 这样的实例。实测空目录全流程 4 分 29 秒进主菜单，日志首行 `Loading Minecraft 1.20.1 with Fabric Loader 0.20.1`（`docs/15`）。
 
@@ -178,6 +179,8 @@ M0（骨架）+ M1（实例扫描）+ M2（下载器）+ M3（**Windows 一键�
 **存档能管了**：以前 `saves/` 只在三处被动出现过（删实例时保护、整合包导入时不覆盖、详情页统计大小），想看有哪些世界、想备份一个、想把删掉的捞回来，只能自己开资源管理器翻。现在实例详情页多了「存档与备份」：列出每个世界（名字取 `level.dat` 的 `LevelName`、上次游玩时间、大小、游戏模式、硬核标记，有 `icon.png` 就显示缩略图），一行一个「备份 / 删除」，下面一张卡列历史备份，每份能还原。**删除永远是先备份再删**，备份失败就一个字节都不删 —— 存档是玩家唯一无法重新下载的东西（模组能重下、Java 能重装、连游戏本体都能一键装回来）。备份**是一个 zip 而不是一份目录**：复制几百兆要等十几秒，手滑点两次盘上就留两个同名目录，过两个月谁也分不清；zip 里路径相对世界目录，解出来就能直接塞回 `saves/`。还原默认**不覆盖同名世界**且名字可改 —— 同名时「还原」只有两种结局（覆盖玩家正玩着的那个、或静默失败），所以默认要求换个名字，要覆盖得显式勾上。`level.dat` 是 gzip 压的 NBT，这里自己写了三十来行 reader 而不是引依赖；读不出来不算错误（别人给的存档、复制一半的目录都可能是这样），标一句「读不出元数据」照样能备份能删（`docs/47`）。
 
 **整合包也能导出了**：之前只有导入，想把配好的实例发给别人只能手动拖压缩包、再凭记忆写元数据。现在实例详情页的「这个实例在哪」卡里多一个「导出整合包」，两种格式二选一 —— MCBBS v2（文件全打进 `overrides/`，不联网也能导，包大）与 Modrinth（认得出的模组只写下载地址，包小，要联网核对）。**默认是前者**：没人帮忙的时候它一定成功。三种元数据一句都不能混写（HMCL 见到 `modrinth.index.json` 就按 Modrinth 包解析，加载器版本对不上整个导入失败，真正对的 `mcbbs.packmeta` 反而读不到），所以是二选一写而不是能写就都写；`addons` 里必须是短名（`forge` 不是 `net.minecraftforge`），而 `manifest.json` 的 `modLoaders` 又要是「短名 + 版本」。**存档默认不打** —— 里面有别人的世界、服务器地址、聊天记录，要打必须自己勾。导出前先纯读盘数一遍，给出「N 个文件，共 X MB」和各目录各几个；写 `.part` 成功才改名，目标已存在会先问一次（`docs/46`）。
+
+**服务端能配了**：以前服务端页只有「装一个、点启动、看控制台」，想改端口、改游戏模式、给朋友加白名单，只能自己开记事本改 `server.properties`、手写 `whitelist.json`。现在服务端列表每行多一个「配置」：18 个真正影响玩法的键做成了对应控件（数字框、勾选框、一排小按钮、整行输入框），带范围校验；白名单与管理员两张卡能加人、能撤，加人时去查 Mojang 档案接口拿正版 UUID，查不到按离线规则算。三个规矩：**服务端在跑时配置页只读**（它把 properties 读进内存、退出时按自己顺序写回，我们改盘上的文件会被盖掉，用户看到的是「改了没生效」）；白名单与 OP 在跑时要走控制台命令（文件改了也要重启才认，提示里直接给出该发哪条命令）；改完 properties 明说「重启才生效」。`server.properties` **按行保留**而不是读成 Map 再写回 —— 服务端会重排键、里面还夹着用户手写的注释与被 `#` 注释掉的旧值，读成 Map 写回去这些全会消失，用户改一个端口发现整个文件被重排就不敢点第二次了（`docs/48`）。
 
 **导入完会自己复核一遍磁盘**：以前「导入完成」只看流程有没有抛异常——切个页面就把导入协程砍了，`.part` 留在磁盘上，界面却停在「已完成 X / Y 个文件」看着像装完了（实测那次 77 个文件只落 76 个，缺的正是 139,966,403 字节的 Cobblemon 本体）。现在下完所有文件后按清单再核一遍：先比大小（`.mrpack` 基本都带 `fileSize`，77 个文件 650 MB 只要几毫秒），清单没写大小时才读盘算 sha1；对不上就收集成清单，标题从「导入完成」改成「导入没装齐」并逐个列出原因（半成品会写明「只下到一半（49.2 MB / 133.5 MB）」）。取消也不再静默：界面明确写「导入已中断（停在「下载整合包文件」）」，重试自动续上没下完的那几个（`docs/32`）。
 
