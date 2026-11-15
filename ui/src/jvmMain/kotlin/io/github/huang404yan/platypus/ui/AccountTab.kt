@@ -44,6 +44,7 @@ import io.github.huang404yan.platypus.core.auth.DeviceCodeGrant
 import io.github.huang404yan.platypus.core.auth.MicrosoftAccountAuth
 import io.github.huang404yan.platypus.core.auth.MicrosoftAuth
 import io.github.huang404yan.platypus.core.auth.StoredAccount
+import io.github.huang404yan.platypus.core.auth.YggdrasilClient
 import java.awt.Desktop
 import java.net.URI
 import java.text.SimpleDateFormat
@@ -83,6 +84,7 @@ internal fun AccountTab(
     val scope = rememberCoroutineScope()
     val repository = backend?.accounts
     val auth = backend?.auth as? MicrosoftAccountAuth
+    val external = backend?.yggdrasil
 
     var accounts by remember { mutableStateOf<List<StoredAccount>>(emptyList()) }
     var loading by remember { mutableStateOf(true) }
@@ -101,6 +103,14 @@ internal fun AccountTab(
     // key 一变 remember 就把它重置成 false，提示永远显示不出来（实点验证时踩到）。
     var idSaved by remember { mutableStateOf(false) }
     var openingPortal by remember { mutableStateOf("") }
+    // 外置登录（Yggdrasil）那张卡的状态。与微软那几个分开：两套流程的输入项、
+    // 失败原因、进度文案都不一样，混在一组变量里只会互相干扰。
+    var serverText by remember { mutableStateOf("") }
+    var externalUser by remember { mutableStateOf("") }
+    var externalPassword by remember { mutableStateOf("") }
+    var externalBusy by remember { mutableStateOf(false) }
+    var externalStep by remember { mutableStateOf("") }
+    var serverProblem by remember { mutableStateOf<String?>(null) }
     // Client ID 在界面上默认遮成圆点。它不是密钥（公共客户端没有 client_secret），但它是
     // 「哪个应用在替我调微软接口」的指纹，截图、录屏、共享屏幕时没必要露出来。
     // 做法照 PCL 自用版：默认遮住、按住才看明文、这个框不允许复制（粘贴照常）。
@@ -192,6 +202,61 @@ internal fun AccountTab(
         }
     }
 
+    /** 外置登录：填地址 + 账号密码，成功后直接切换成这个账号。 */
+    fun runExternalLogin() {
+        val service = external
+        if (service == null) {
+            noticeIsError = true
+            notice = "当前后端没有提供外置登录实现。"
+            return
+        }
+        val problem = YggdrasilClient.apiRootProblem(serverText)
+        if (problem != null) {
+            serverProblem = problem
+            noticeIsError = true
+            notice = problem
+            return
+        }
+        if (externalUser.isBlank() || externalPassword.isBlank()) {
+            noticeIsError = true
+            notice = "外置登录要填账号和密码（就是你在那个服务器网站上注册的那一对）。"
+            return
+        }
+        notice = ""
+        noticeIsError = false
+        externalBusy = true
+        externalStep = "正在登录"
+        loginJob = scope.launch {
+            try {
+                val stored = service.login(
+                    serverUrl = serverText,
+                    username = externalUser.trim(),
+                    password = externalPassword,
+                    onProgress = { step -> externalStep = step },
+                )
+                accounts = withContext(Dispatchers.IO) {
+                    repository?.let { runCatching { it.list() }.getOrNull() }.orEmpty()
+                }
+                // 密码用完就清掉，不在内存里留着。
+                externalPassword = ""
+                onUseAccount(stored.uuid)
+                noticeIsError = false
+                notice = "已登录外置服账号：" + stored.name + "，接下来启动游戏就用这个账号。"
+            } catch (e: CancellationException) {
+                notice = "已取消外置登录。"
+                noticeIsError = false
+                throw e
+            } catch (e: Exception) {
+                noticeIsError = true
+                notice = "外置登录失败：" + (e.message ?: e.javaClass.simpleName)
+            } finally {
+                externalBusy = false
+                externalStep = ""
+                loginJob = null
+            }
+        }
+    }
+
     fun startLogin() {
         if (auth == null) {
             noticeIsError = true
@@ -218,7 +283,9 @@ internal fun AccountTab(
     fun forget(account: StoredAccount) {
         scope.launch {
             val failure = withContext(Dispatchers.IO) {
-                runCatching { repository?.remove(account.uuid) }.exceptionOrNull()
+                // 按 key 删而不是按 uuid：外置服上的账号和微软账号可能是同一个 UUID，
+                // 按 uuid 删会把另一条也顺手删掉。
+                runCatching { repository?.removeKey(account.key) }.exceptionOrNull()
             }
             if (failure != null) {
                 noticeIsError = true
@@ -435,14 +502,96 @@ internal fun AccountTab(
         }
     }
 
+    if (external != null) {
+        SettingCard(
+            title = "外置登录（自建服 / 第三方认证）",
+            hint = "有些服务器不用微软账号，而是自己的一套认证（Yggdrasil 协议，LittleSkin、" +
+                "自建 authlib 服务端都属于这一类）。这里填那个服务器给的账号密码就行 —— " +
+                "它们不经过微软，也不会从这里漏到别处；本地只留令牌，密码用完就丢。",
+        ) {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedTextField(
+                    value = serverText,
+                    onValueChange = {
+                        serverText = it
+                        serverProblem = YggdrasilClient.apiRootProblem(it)
+                    },
+                    label = { Text("认证服务器地址") },
+                    placeholder = { Text("https://littleskin.cn/api/yggdrasil") },
+                    singleLine = true,
+                    isError = serverProblem != null,
+                    supportingText = {
+                        Text(
+                            serverProblem ?: "服务器主页或教程里会写明这个地址，通常以 /api/yggdrasil 结尾。" +
+                                "填 /authserver 那种带后缀的也能认。",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = if (serverProblem != null) {
+                                MaterialTheme.colorScheme.error
+                            } else {
+                                MaterialTheme.colorScheme.onSurfaceVariant
+                            },
+                        )
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    OutlinedTextField(
+                        value = externalUser,
+                        onValueChange = { externalUser = it },
+                        label = { Text("账号") },
+                        singleLine = true,
+                        modifier = Modifier.weight(1f),
+                    )
+                    OutlinedTextField(
+                        value = externalPassword,
+                        onValueChange = { externalPassword = it },
+                        label = { Text("密码") },
+                        singleLine = true,
+                        visualTransformation = PasswordVisualTransformation('●'),
+                        modifier = Modifier.weight(1f),
+                    )
+                }
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Button(
+                        onClick = { runExternalLogin() },
+                        enabled = !externalBusy && !loggingIn,
+                    ) { Text(if (externalBusy) "正在登录…" else "登录这个服务器") }
+                    if (externalBusy) {
+                        Text(
+                            externalStep.ifBlank { "正在登录…" },
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+                // 说清「这条链路上我们还多做了什么事」：下载 authlib-injector。
+                // 不写的话用户看到进度条卡在「正在准备」会以为卡死了。
+                Text(
+                    "启动时还要往 JVM 参数里挂一个 authlib-injector（第一次会下几十 KB，" +
+                        "存在 " + external.jarFile().let { file -> file.parentFile?.absolutePath ?: "" } +
+                        " 下面），不挂它游戏拿不到你的身份。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+    }
+
     SettingCard(
         title = "离线模式",
         hint = "启动游戏时用「启动」页填的用户名，UUID 由名字算出来。原版服务器要开正版验证就进不去，" +
             "但单机、局域网、关掉验证的服务器都能玩。",
     ) {
+        // 当前选中的是哪种账号，这里要说准：外置登录也是「有账号」，
+        // 笼统写成「正版账号」会让用户在启动页找不到自己为什么进不去正版服。
+        val current = accounts.firstOrNull { it.key == activeUuid.trim().lowercase() }
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             Text(
-                if (activeUuid.isBlank()) "当前：离线模式" else "当前：正版账号",
+                when {
+                    activeUuid.isBlank() -> "当前：离线模式"
+                    current?.isYggdrasil == true -> "当前：外置登录账号 " + current.name
+                    else -> "当前：正版账号"
+                },
                 style = MaterialTheme.typography.bodyMedium,
             )
             Spacer(Modifier.weight(1f))
@@ -491,11 +640,22 @@ private fun AccountRow(
             // 令牌失效（改过密码、微软风控要求重登）时原来只有「移除」一条路：
             // 用户在启动页看到「正版账号验证失败」，却不知道该点哪个。重新登录走同一套
             // 设备码流程，成功后按 uuid 覆盖同一行，不会多出一个重复账号。
-            TextButton(onClick = onRelogin, enabled = !busy) { Text("重新登录") }
+            //
+            // 外置账号不给这个按钮：它的「重新登录」是重填那个服的账号密码，
+            // 走微软的设备码流程只会得到一个跟这行无关的微软账号（实测口径见 docs/51）。
+            if (!account.isYggdrasil) {
+                TextButton(onClick = onRelogin, enabled = !busy) { Text("重新登录") }
+            }
             TextButton(onClick = onForget, enabled = !busy) { Text("移除") }
         }
+        // 外置账号最要紧的信息不是 UUID，而是「这是哪个服的账号」——
+        // 几个服可能都有叫 Steve 的人。
         Text(
-            account.uuid,
+            if (account.isYggdrasil) {
+                "外置登录 · " + account.serverUrl.ifBlank { "（地址缺失）" }
+            } else {
+                "微软账号 · " + account.uuid
+            },
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )

@@ -4,6 +4,7 @@ import io.github.huang404yan.platypus.core.auth.AccountAuth
 import io.github.huang404yan.platypus.core.auth.AccountRepository
 import io.github.huang404yan.platypus.core.auth.JsonAccountRepository
 import io.github.huang404yan.platypus.core.auth.MicrosoftAccountAuth
+import io.github.huang404yan.platypus.core.auth.YggdrasilAccountAuth
 import io.github.huang404yan.platypus.core.install.JsonServerRepository
 import io.github.huang404yan.platypus.core.install.ServerRepository
 import io.github.huang404yan.platypus.core.instance.InstanceRepository
@@ -39,6 +40,8 @@ class DesktopServices private constructor(
     override val accounts: AccountRepository,
     /** 正版登录。 */
     override val auth: AccountAuth,
+    /** 外置登录（Yggdrasil）。 */
+    override val yggdrasil: YggdrasilAccountAuth,
 ) : LauncherBackend {
     companion object {
         /**
@@ -77,6 +80,12 @@ class DesktopServices private constructor(
                 auth = MicrosoftAccountAuth(
                     repository = accountRepository,
                     clientIdProvider = { settingsRepository.load().microsoftClientId },
+                ),
+                // authlib-injector 落在 <gameRoot>/platypus/authlib-injector/ 下面，是这份
+                // 游戏目录的附属物，所以跟着 gameRoot 走；没有游戏目录时退到用户目录。
+                yggdrasil = YggdrasilAccountAuth(
+                    gameRoot = gameRoot ?: fallbackHome(),
+                    repository = accountRepository,
                 ),
             )
         }

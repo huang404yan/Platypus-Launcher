@@ -118,6 +118,7 @@ Windows 下也可以用 `gradlew.bat`。首次构建会下载约 300 MB 依赖�
 - `docs/48-fuwuduan-peizhi.md`：**服务端配置页**（`server.properties` 为什么按行保留而不是读成 Map、值里的换行为什么要压平、为什么只放 18 个键、白名单与 OP 的 UUID 从哪来且「网络不通」与「这个正版账号不存在」为什么要分开说、`[]` 为什么不是空文件、端口解析为什么只剩一份）
 - `docs/49-xiazaiyuan.md`：**下载源偏好**（为什么只有「顺序」两个选项而没有「只用官方源」、为什么做成进程级全局量而不是一路透传、两个接入点为什么就够、镜像主机名两个方向都要卡、排序为什么必须是稳定的）
 - `docs/50-gengxin-jiancha.md`：**检查更新**（为什么只查不换、通道规则「孵化版才看预发布」、版本号为什么不能按字符串比、限流与 404 各说什么、说明只显示开头）
+- `docs/51-waizhi-denglu.md`：**外置登录**（为什么拿到令牌不算成功、地址为什么只能剥一层后缀、jar 为什么不带版本号、账号 key 为什么要带上服务器地址、为什么必须「先令牌后 agent」）
 
 ## 下载
 
@@ -160,7 +161,7 @@ M0（骨架）+ M1（实例扫描）+ M2（下载器）+ M3（**Windows 一键�
 
 **下载断点续传**：先写 `<文件>.part`，校验通过才转正；`.part` 有内容就发 `Range` 接着下，断网不清半成品，下次自动接上。进度条会额外显示「其中 N 个接着上次下（省了 M MB）」（`docs/14`）。
 
-单测 **791 例全过**（67 个测试类，`./gradlew :core:test :ui:jvmTest`；`ui` 从这一版起有 `jvmTest` 源集，格式化函数与导航常量也进单测了）。另有十二个无头冒烟任务（`e2eInstall` / `settingsSmoke` / `instanceFlowSmoke` / `resumeSmoke` / `deleteSmoke` / `fabricE2e` / `modpackE2e` / `forgeE2e` / `neoForgeE2e` / `modsE2e` / `modUpdateE2e` / `isolationSmoke`），走的是界面按钮同一批函数；`resumeSmoke` / `fabricE2e` / `modpackE2e` / `forgeE2e` / `neoForgeE2e` / `modsE2e` 需要联网，分别在空目录真装 Fabric、真跑 Forge 与 NeoForge 官方安装器、真从 Modrinth 下模组、真把一个 `.mrpack` 从解析装到进主菜单；`deleteSmoke` 在 `dist/_delete-smoke` 里全程造假数据，不碰真实 `.minecraft`。
+单测 **811 例全过**（68 个测试类，`./gradlew :core:test :ui:jvmTest`；`ui` 从这一版起有 `jvmTest` 源集，格式化函数与导航常量也进单测了）。另有十二个无头冒烟任务（`e2eInstall` / `settingsSmoke` / `instanceFlowSmoke` / `resumeSmoke` / `deleteSmoke` / `fabricE2e` / `modpackE2e` / `forgeE2e` / `neoForgeE2e` / `modsE2e` / `modUpdateE2e` / `isolationSmoke`），走的是界面按钮同一批函数；`resumeSmoke` / `fabricE2e` / `modpackE2e` / `forgeE2e` / `neoForgeE2e` / `modsE2e` 需要联网，分别在空目录真装 Fabric、真跑 Forge 与 NeoForge 官方安装器、真从 Modrinth 下模组、真把一个 `.mrpack` 从解析装到进主菜单；`deleteSmoke` 在 `dist/_delete-smoke` 里全程造假数据，不碰真实 `.minecraft`。
 
 **能装 Fabric 了**：下载页勾「顺带装 Fabric」→ 拉 meta.fabricmc.net 的 loader 列表（默认落在最新 stable）→ 装 profile json（只改 `id`，保留 `inheritsFrom`）→ 按 maven 坐标补全 8 个库的地址并下载 → 登记成 `1.20.1-fabric-0.20.1` 这样的实例。实测空目录全流程 4 分 29 秒进主菜单，日志首行 `Loading Minecraft 1.20.1 with Fabric Loader 0.20.1`（`docs/15`）。
 
@@ -194,6 +195,10 @@ M0（骨架）+ M1（实例扫描）+ M2（下载器）+ M3（**Windows 一键�
 它**只回答、不替你办**：不自动下载，更不会把自己换掉。原因很实际——Windows 上正在跑的 exe 是被占用的，自我替换要处理改名、断电、回滚；而一旦换上一个起不来的新版，用户手里那个能用的程序已经没了，**打不开的启动器没法靠自己修回来**。卡片上这句也写着。
 
 通道规则跟着版本号走：版本里带 `-preview` 的才看 Pre-release，正式版不看，否则稳定版用户天天收到实验包提醒；草稿哪条通道都不算。版本号按段比而不是按字符串比——字符串会得出 `preview.9 > preview.10` 这种结论，正式版还要比同号的预发布新。
+
+**外置登录**：有些服务器不用微软账号，自己有一套 Yggdrasil 认证（LittleSkin、自建 authlib 服务端都属于这一类）。「设置 → 账号」多了一张卡：填服务器地址 + 那个服给的账号密码，登录成功后启动游戏就自动带上身份。和微软账号混在同一张列表里，各自标着是哪个服的。
+
+它比微软那条线多一步：光拿到令牌没用，还必须往 JVM 参数里挂 `authlib-injector`，否则游戏照样去找微软验证，玩家会看到「验证服务器连不上」。所以启动链路是「验令牌 → 挂 agent」，顺序不能反——反过来的话，密码过期时用户要先看完 jar 下载进度才被告知该重新登录。jar 放在 `<游戏目录>/platypus/authlib-injector/` 下，文件名不带版本号（换版本不改启动参数），下载后按 sha256 校验一次。认证地址会自动归一：末尾斜杠、被贴上的 `/authserver` 后缀都能认，但**只剥一层**——有的服务端根路径本身就叫 authserver，无脑全剥会剥成空（`docs/51`）。
 
 **日志里的中文不再是方块**：以前游戏按 GBK 往 stdout 写、启动器按 UTF-8 解，中文全变成 一串替换符，字节当场丢失。现在两头都改：给 JVM 传 `-Dstdout.encoding=UTF-8` 与 `-Dfile.encoding=UTF-8`（JDK 18+ 只认前者、17 及更早只认后者），读侧再补一个「先严格试 UTF-8、不合法就整行退回 GBK」的 `LogLineReader`。实测 1.20.1 + Forge 47 模组环境，导出日志 35 137 B / 244 行 / `U+FFFD` 计数 0，原先那条全是方块的声音设备名已经完整显示为「扬声器 (适用于 I2S 音频的英特尔® 智音技术)」（`docs/27`）。
 
@@ -250,4 +255,4 @@ M0（骨架）+ M1（实例扫描）+ M2（下载器）+ M3（**Windows 一键�
 **关掉版本隔离时能把存档搬过去**：版本隔离期间游戏读写的是 `versions/<id>/`，一关掉就换成游戏根目录，实例目录里那份存档游戏当它不存在 —— 用户看到的是「我两个月前建的世界没了」。现在实例详情页的「版本隔离」卡会先告诉你还有哪些目录有东西（`mods`、`saves`……），给一个「复制到游戏根目录」按钮。**复制而不是移动**：用户可能只是关隔离试两天，原件留着才能无损失地开回去；**默认不覆盖同名文件**：根目录里可能已有别的实例写的同名档，跳过并计数，由用户挑留哪个（`core/instance/InstanceMigration.kt`）。
 
 **Forge 的服务端 jar 认出来了**：`findInstalledServerJar()` 的老注释写着「新版本在 `libraries/` 下」，代码却只查根目录。1.17 起 Forge installer 装完根目录只有 `run.bat`，jar 埋在 `libraries/net/minecraftforge/forge/<mc>-<ver>/`，于是装成功但卡片说找不到 jar。现在先查根目录、再 `walkTopDown()` 查 `libraries/`，并显式排除名字含 `installer` 的 jar（那个也在同一棵树里，认错等于把安装器当服务端开）。顺带核了一条候选：Paper 的 `server:mojang` 构建是伪问题 —— `fill.papermc.io/v3` 对 1.8.8 / 1.16.5 / 1.17.1 / 1.21.1 **只有 `server:default`**，只认它的策略是对的，加了分支反而会把原版服务端当 Paper 装下去（`docs/44`）。
-尚未实现：安卓端没有登录页（那边还不能启动游戏，登录了也没有消费方）、Yggdrasil 外置登录仍是空壳（`core/auth/Account.kt` 只有接口）、安卓端下好的 Java 仍然没有消费方（`runtime-android` 的运行时服务与启动翻译这一层已经有了，但起 JVM 与图形转译还没做，下完只能先存着）、Modrinth 上的插件（`project_type:plugin` facet 实测不可用，见上）、NAT 穿透与公网中转（「直接进」+ 本机地址枚举已能把局域网与公网 IPv6 的场景走通）、中文搜索的完整词库（只有常用对照表，冷门模组仍需用户给英文名）。模组依赖的 `required` / `optional` / `incompatible` 三类声明都已解析：`required` 自动装齐，`optional` 在依赖树卡片里单独列出「作者建议一起装」但**不替你装**，`incompatible` 由模组页的「查冲突」提示。
+尚未实现：安卓端没有登录页（那边还不能启动游戏，登录了也没有消费方）、安卓端下好的 Java 仍然没有消费方（`runtime-android` 的运行时服务与启动翻译这一层已经有了，但起 JVM 与图形转译还没做，下完只能先存着）、Modrinth 上的插件（`project_type:plugin` facet 实测不可用，见上）、NAT 穿透与公网中转（「直接进」+ 本机地址枚举已能把局域网与公网 IPv6 的场景走通）、中文搜索的完整词库（只有常用对照表，冷门模组仍需用户给英文名）。模组依赖的 `required` / `optional` / `incompatible` 三类声明都已解析：`required` 自动装齐，`optional` 在依赖树卡片里单独列出「作者建议一起装」但**不替你装**，`incompatible` 由模组页的「查冲突」提示。

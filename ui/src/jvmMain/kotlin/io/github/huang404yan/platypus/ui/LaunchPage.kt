@@ -293,9 +293,13 @@ fun LaunchPage(
                 // 正版账号每次启动现换一份会话：MC 令牌两小时就过期，缓存下来十个九个是废的。
                 // 换不到就停在这儿说清楚 —— 静默退回离线会让人以为自己登录着，
                 // 等进了服务器才发现是个离线号，那时候已经说不清了。
-                val auth = backend.auth
+                // 外置登录在「验证账号」之外还多一步：往 JVM 参数里挂 authlib-injector。
+                // 只拿到令牌而不挂 agent，游戏根本不去用它 —— 玩家会进游戏发现是个离线号。
+                val yggdrasil = backend.yggdrasil
+                val external = account != null && account.isYggdrasil
+                val auth = if (external) yggdrasil ?: backend.auth else backend.auth
                 val session = if (account != null && auth != null) {
-                    stageText = "正在验证正版账号"
+                    stageText = if (external) "正在验证外置登录账号" else "正在验证正版账号"
                     stageFraction = 0f
                     try {
                         withContext(Dispatchers.IO) { auth.sessionFor(account) }
@@ -303,7 +307,8 @@ fun LaunchPage(
                         throw e
                     } catch (e: Exception) {
                         phase = LaunchPhase.Failed(
-                            "正版账号验证失败：" + (e.message ?: e.javaClass.simpleName) +
+                            (if (external) "外置登录验证失败：" else "正版账号验证失败：") +
+                                (e.message ?: e.javaClass.simpleName) +
                                 " 去「设置 → 账号」重新登录，或者在那里改用离线模式。",
                         )
                         stageText = ""
@@ -312,10 +317,31 @@ fun LaunchPage(
                 } else {
                     offlineSession
                 }
+                // 令牌拿到之后再挂 agent：反过来的话，密码过期也要先下完 jar 才告诉用户。
+                val extraJvmArgs = if (account != null && external && yggdrasil != null) {
+                    stageText = "正在准备外置登录"
+                    try {
+                        withContext(Dispatchers.IO) {
+                            yggdrasil.launchArgs(account) { text -> stageText = text }
+                        }
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (e: Exception) {
+                        phase = LaunchPhase.Failed(
+                            "外置登录准备失败：" + (e.message ?: e.javaClass.simpleName) +
+                                " 去「设置 → 账号」重新登录一次。",
+                        )
+                        stageText = ""
+                        return@launch
+                    }
+                } else {
+                    emptyList()
+                }
                 val request = LaunchRequest(
                     instance = instance,
                     java = java,
                     session = session,
+                    jvmArgs = extraJvmArgs,
                     quickPlayServer = quickTarget,
                 )
                 val started = backend.gameRuntime.launch(request) { event ->

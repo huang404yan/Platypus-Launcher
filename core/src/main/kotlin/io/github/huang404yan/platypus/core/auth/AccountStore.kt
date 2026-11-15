@@ -22,9 +22,43 @@ data class StoredAccount(
     val refreshToken: String,
     val createdAt: Long = 0L,
     val lastLoginAt: Long = 0L,
+    /**
+     * 这条记录是哪种登录：[KIND_MICROSOFT] 或 [KIND_YGGDRASIL]。
+     *
+     * 默认值是 microsoft —— 这个字段是后加的，老文件里没有它，读出来必须还是微软账号，
+     * 否则升级一次所有人的正版账号都变成「不知道是什么」。
+     */
+    val kind: String = KIND_MICROSOFT,
+    /** 外置登录的认证服务器根地址；微软账号这里是空串。 */
+    val serverUrl: String = "",
+    /**
+     * 外置登录的 clientToken（启动器自己生成的随机串，没有过期时间）。
+     *
+     * 微软那边没有这个概念，所以留空。它必须和 accessToken 一起存：refresh 时服务端
+     * 拿它判断「是不是同一个启动器」，对不上会把旧会话踢掉。
+     */
+    val clientToken: String = "",
 ) {
-    /** 同一个微软账号（按 UUID 认）再次登录，不该在列表里多出一条。 */
-    val key: String get() = MicrosoftAuth.compactUuid(uuid).lowercase()
+    /**
+     * 同一个账号不该在列表里多出一条。
+     *
+     * 微软按 UUID 认。外置登录要多带服务器地址 —— 不同服的两个同名 UUID 是完全不同的
+     * 两个账号，只按 UUID 合并会把其中一个顶掉。
+     */
+    val key: String
+        get() = if (isYggdrasil) {
+            "yggdrasil|" + MicrosoftAuth.compactUuid(uuid).lowercase() + "|" +
+                serverUrl.trim().trimEnd('/').lowercase()
+        } else {
+            MicrosoftAuth.compactUuid(uuid).lowercase()
+        }
+
+    val isYggdrasil: Boolean get() = kind == KIND_YGGDRASIL
+
+    companion object {
+        const val KIND_MICROSOFT = "microsoft"
+        const val KIND_YGGDRASIL = "yggdrasil"
+    }
 }
 
 /** 账号的存取。和实例、服务端一样走单文件 JSON。 */
@@ -32,6 +66,17 @@ interface AccountRepository {
     suspend fun list(): List<StoredAccount>
     suspend fun save(account: StoredAccount)
     suspend fun remove(uuid: String)
+
+    /**
+     * 按 [StoredAccount.key] 精确删除一条。
+     *
+     * 外置登录让「按 UUID 删」变得不安全：同一个 UUID 在两个不同的外置服上是两个账号，
+     * 按 UUID 删会把不相干的那条也删掉。默认实现退化成 [remove]（对微软账号两者等价），
+     * 已有的实现不写这个方法也不会坏。
+     */
+    suspend fun removeKey(key: String) {
+        remove(key)
+    }
 }
 
 /**
@@ -76,6 +121,13 @@ class JsonAccountRepository(private val indexFile: File) : AccountRepository {
 
     override suspend fun remove(uuid: String) = mutex.withLock {
         val key = MicrosoftAuth.compactUuid(uuid).lowercase()
+        val current = read()
+        // 只删微软那条：同一个 UUID 还可能对应某个外置服上的账号，那不是同一个人。
+        val kept = current.filterNot { !it.isYggdrasil && it.key == key }
+        if (kept.size != current.size) write(kept)
+    }
+
+    override suspend fun removeKey(key: String) = mutex.withLock {
         val current = read()
         val kept = current.filterNot { it.key == key }
         if (kept.size != current.size) write(kept)

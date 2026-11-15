@@ -2,6 +2,7 @@ package io.github.huang404yan.platypus.ui
 
 import io.github.huang404yan.platypus.core.auth.AccountAuth
 import io.github.huang404yan.platypus.core.auth.AccountRepository
+import io.github.huang404yan.platypus.core.auth.YggdrasilAccountAuth
 import io.github.huang404yan.platypus.core.install.ServerRepository
 import io.github.huang404yan.platypus.core.instance.InstanceRepository
 import io.github.huang404yan.platypus.core.launch.GameRuntime
@@ -50,4 +51,13 @@ interface LauncherBackend {
      * 登录失败要给用户看微软那边的原话。
      */
     val auth: AccountAuth? get() = null
+
+    /**
+     * 外置登录（Yggdrasil / authlib-injector）。
+     *
+     * 与 [auth] 并列而不是塞进同一个实现里：微软那条线只要令牌，外置这条还要在启动时
+     * 往 JVM 参数里挂一个 javaagent，两边的「失败方式」和「启动时要做什么」都不一样。
+     * 给默认 null —— 没有账号存储的假后端不该被迫实现它。
+     */
+    val yggdrasil: YggdrasilAccountAuth? get() = null
 }
