@@ -1,5 +1,6 @@
 package io.github.huang404yan.platypus.ui
 
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.BorderStroke
@@ -17,6 +18,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -44,11 +46,19 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.StrokeJoin
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import io.github.huang404yan.platypus.core.auth.AccountBootstrap
 import io.github.huang404yan.platypus.core.auth.OfflineProfile
@@ -1331,7 +1341,7 @@ private fun LaunchSidePanel(
         shape = RoundedCornerShape(10.dp),
     ) {
         Column(
-            Modifier.fillMaxHeight().padding(12.dp),
+            Modifier.fillMaxHeight().verticalScroll(rememberScrollState()).padding(12.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             // 当前玩的是哪一版：这一栏不再列全部实例（那是「版本选择」副页面的事），
@@ -1364,6 +1374,47 @@ private fun LaunchSidePanel(
                 onTab = onIdentityTab,
                 onPick = onPickIdentity,
                 onOpenAccountPage = onOpenAccountPage,
+            )
+            IdentityBadge(tab = identityTab)
+            // 大号按钮照 PCL 的 54 高：它是这一页唯一的主要动作，不该和旁边的次要按钮一样大。
+            Button(
+                onClick = onLaunch,
+                modifier = Modifier.fillMaxWidth().height(54.dp),
+                enabled = !busy && canLaunch,
+            ) {
+                Text(if (busy) "启动中…" else "启动游戏", style = MaterialTheme.typography.titleMedium)
+            }
+            if (running || busy) {
+                OutlinedButton(onClick = onStop, modifier = Modifier.fillMaxWidth(), enabled = running) {
+                    Text(if (running) "停止游戏" else "正在启动…")
+                }
+            } else if (stageText.isNotBlank()) {
+                SectionHint(stageText)
+            }
+            // 两个副页面入口照 PCL 的 PageLaunchLeft.xaml:27-28（版本选择 / 版本设置）。
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                OutlinedButton(onClick = onOpenSelect, modifier = Modifier.weight(1f), enabled = !busy) {
+                    Text("版本选择")
+                }
+                OutlinedButton(
+                    onClick = onOpenSetup,
+                    modifier = Modifier.weight(1f),
+                    enabled = !busy && selected != null,
+                ) { Text("版本设置") }
+            }
+
+            Spacer(Modifier.height(2.dp))
+            Box(
+                Modifier.fillMaxWidth().height(1.dp)
+                    .background(MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f)),
+            )
+            Text(
+                "这个版本的启动参数",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             if (activeAccount == null && identityTab == IDENTITY_OFFLINE) {
                 OutlinedTextField(
@@ -1429,35 +1480,6 @@ private fun LaunchSidePanel(
                 memoryNotice.isNotBlank() -> SectionHint(memoryNotice)
                 memoryDirty && !memoryAuto ->
                     SectionHint("这个数还没写进实例：点「启动」会一起保存，或者点旁边的「存」。")
-            }
-            // 大号按钮照 PCL 的 54 高：它是这一页唯一的主要动作，不该和旁边的次要按钮一样大。
-            Button(
-                onClick = onLaunch,
-                modifier = Modifier.fillMaxWidth().height(54.dp),
-                enabled = !busy && canLaunch,
-            ) {
-                Text(if (busy) "启动中…" else "启动游戏", style = MaterialTheme.typography.titleMedium)
-            }
-            if (running || busy) {
-                OutlinedButton(onClick = onStop, modifier = Modifier.fillMaxWidth(), enabled = running) {
-                    Text(if (running) "停止游戏" else "正在启动…")
-                }
-            } else if (stageText.isNotBlank()) {
-                SectionHint(stageText)
-            }
-            // 两个副页面入口照 PCL 的 PageLaunchLeft.xaml:27-28（版本选择 / 版本设置）。
-            Row(
-                Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                OutlinedButton(onClick = onOpenSelect, modifier = Modifier.weight(1f), enabled = !busy) {
-                    Text("版本选择")
-                }
-                OutlinedButton(
-                    onClick = onOpenSetup,
-                    modifier = Modifier.weight(1f),
-                    enabled = !busy && selected != null,
-                ) { Text("版本设置") }
             }
         }
     }
@@ -1587,6 +1609,143 @@ private fun Instance.loaderLabel(): String {
     }
     val version = loaderVersion?.takeIf { it.isNotBlank() }
     return if (version == null || tag == "原版") tag else tag + " " + version
+}
+
+/**
+ * 身份标志：三格下面那一块，回答「这格是干什么的」。
+ *
+ * 为什么自己用 Canvas 画而不是引图标库：ui 模块没有 material-icons 依赖，
+ * 为一个侧栏图示拉一整个图标库不划算；三个图形都是几笔直线曲线，几十行就够。
+ * 图形跟着三格切换 —— 正版是盾牌加勾，外置是机架（皮肤站/认证服务器），
+ * 离线是一个没有连线的人形。
+ */
+@Composable
+private fun IdentityBadge(tab: String) {
+    val accent = MaterialTheme.colorScheme.primary
+    val title: String
+    val detail: String
+    when (tab) {
+        IDENTITY_MS -> {
+            title = "正版账号"
+            detail = "微软账号登录，uuid 与皮肤都是官方的，能进正版服。"
+        }
+        IDENTITY_AUTH -> {
+            title = "外置登录"
+            detail = "皮肤站账号（Authlib-Injector），LittleSkin 这类服认它。"
+        }
+        else -> {
+            title = "离线模式"
+            detail = "不联网、名字随便起；别人看到的是默认皮肤。"
+        }
+    }
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .background(
+                MaterialTheme.colorScheme.surface.copy(alpha = 0.5f),
+                RoundedCornerShape(10.dp),
+            )
+            .padding(horizontal = 12.dp, vertical = 12.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Canvas(Modifier.size(60.dp)) {
+            val w = size.width
+            val h = size.height
+            val line = Stroke(width = w * 0.055f, cap = StrokeCap.Round, join = StrokeJoin.Round)
+            when (tab) {
+                IDENTITY_MS -> {
+                    // 盾牌：正版的身份是被微软「担保」过的
+                    val shield = Path().apply {
+                        moveTo(w * 0.5f, h * 0.07f)
+                        lineTo(w * 0.87f, h * 0.23f)
+                        lineTo(w * 0.87f, h * 0.53f)
+                        cubicTo(w * 0.87f, h * 0.78f, w * 0.68f, h * 0.9f, w * 0.5f, h * 0.95f)
+                        cubicTo(w * 0.32f, h * 0.9f, w * 0.13f, h * 0.78f, w * 0.13f, h * 0.53f)
+                        lineTo(w * 0.13f, h * 0.23f)
+                        close()
+                    }
+                    drawPath(shield, accent.copy(alpha = 0.16f))
+                    drawPath(shield, accent, style = line)
+                    val tick = Path().apply {
+                        moveTo(w * 0.31f, h * 0.5f)
+                        lineTo(w * 0.45f, h * 0.64f)
+                        lineTo(w * 0.71f, h * 0.35f)
+                    }
+                    drawPath(tick, accent, style = line)
+                }
+                IDENTITY_AUTH -> {
+                    // 机架：外置登录背后是一台认证服务器
+                    drawRoundRect(
+                        accent.copy(alpha = 0.16f),
+                        topLeft = Offset(w * 0.16f, h * 0.15f),
+                        size = Size(w * 0.68f, h * 0.7f),
+                        cornerRadius = CornerRadius(w * 0.1f),
+                    )
+                    drawRoundRect(
+                        accent,
+                        topLeft = Offset(w * 0.16f, h * 0.15f),
+                        size = Size(w * 0.68f, h * 0.7f),
+                        cornerRadius = CornerRadius(w * 0.1f),
+                        style = line,
+                    )
+                    // 中间两道隔板 + 每格左侧一个指示点，读起来像「一台服务器上的几层」
+                    drawLine(
+                        accent,
+                        Offset(w * 0.16f, h * 0.38f),
+                        Offset(w * 0.84f, h * 0.38f),
+                        strokeWidth = w * 0.04f,
+                        cap = StrokeCap.Round,
+                    )
+                    drawLine(
+                        accent,
+                        Offset(w * 0.16f, h * 0.62f),
+                        Offset(w * 0.84f, h * 0.62f),
+                        strokeWidth = w * 0.04f,
+                        cap = StrokeCap.Round,
+                    )
+                    listOf(0.265f, 0.5f, 0.735f).forEach { y ->
+                        drawCircle(accent, radius = w * 0.035f, center = Offset(w * 0.28f, h * y))
+                    }
+                }
+                else -> {
+                    // 人形：没有账号，只有你自己起的一个名字
+                    drawCircle(accent.copy(alpha = 0.16f), radius = w * 0.17f, center = Offset(w * 0.5f, h * 0.31f))
+                    drawCircle(accent, radius = w * 0.17f, center = Offset(w * 0.5f, h * 0.31f), style = line)
+                    drawArc(
+                        accent.copy(alpha = 0.16f),
+                        195f,
+                        150f,
+                        useCenter = false,
+                        topLeft = Offset(w * 0.17f, h * 0.55f),
+                        size = Size(w * 0.66f, h * 0.66f),
+                        style = Stroke(width = w * 0.28f, cap = StrokeCap.Round),
+                    )
+                    drawArc(
+                        accent,
+                        195f,
+                        150f,
+                        useCenter = false,
+                        topLeft = Offset(w * 0.17f, h * 0.55f),
+                        size = Size(w * 0.66f, h * 0.66f),
+                        style = line,
+                    )
+                }
+            }
+        }
+        Text(
+            title,
+            style = MaterialTheme.typography.labelLarge,
+            fontWeight = FontWeight.SemiBold,
+            color = accent,
+        )
+        Text(
+            detail,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            textAlign = TextAlign.Center,
+        )
+    }
 }
 
 @Composable

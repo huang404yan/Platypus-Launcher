@@ -1,6 +1,7 @@
 package io.github.huang404yan.platypus.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -9,9 +10,11 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -26,9 +29,16 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.StrokeJoin
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.Dp
 import io.github.huang404yan.platypus.core.Brand
 import io.github.huang404yan.platypus.core.download.DownloadPreference
 import io.github.huang404yan.platypus.core.download.DownloadSource
@@ -260,72 +270,180 @@ fun App(
 }
 
 /**
- * 顶部横排五个一级项（照 PCL 的 FormMain.xaml:123-131 那一排 MyRadioButton）。
+ * 顶部一排五个一级项（照 PCL 的 FormMain.xaml:123-131 那一排 MyRadioButton）。
+ *
+ * 两处按用户口径改过（preview.19）：
+ *  1. 五项**放大并均分**整条宽度。原来是靠左挤着排的一串小字，五个项加起来还没顶栏一半宽，
+ *     右边一大片空着 —— 均分之后每一项都是一个大按钮，手指（触屏）与鼠标都好点。
+ *  2. 左右两端**可折叠**，收起后各留一个代表标志。品牌名与版本号回答的是
+ *     「这是哪个启动器」，看一次就够了；折起来把宽度让给中间那排五分。
  *
  * 为什么顶栏而不是侧栏：横排五项在 16:9 的窗口里只占一行，横着排一眼全看见；
- * 竖排侧栏要吃掉 180"220dp 的宽度，还把「同一件事的入口」摊成好几个一级项。
- * PCL 右上是浮动的任务管理 / 关闭游戏，我们这儿放版本号，把右上角留给窗口按钮。
+ * 竖排侧栏要吃掉 180~220dp 的宽度，还把「同一件事的入口」摊成好几个一级项。
  */
 @Composable
 private fun TopBar(current: Page, onSelect: (Page) -> Unit) {
     val compact = LocalWindowInfo.current.containerSize.width < 1100
+    // 两端默认展开：第一次打开要让人知道自己用的是哪个启动器（孵化版）。
+    var brandOpen by remember { mutableStateOf(true) }
+    var versionOpen by remember { mutableStateOf(true) }
     Surface(color = MaterialTheme.colorScheme.surfaceVariant) {
         Row(
             Modifier
                 .fillMaxWidth()
-                .padding(horizontal = if (compact) 12.dp else 18.dp, vertical = 8.dp),
+                .height(if (compact) 54.dp else 60.dp)
+                .padding(horizontal = if (compact) 8.dp else 12.dp, vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Column {
-                Text(
-                    if (Brand.isPreview) Brand.PREVIEW_NAME_ZH else Brand.NAME_ZH,
-                    style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.SemiBold,
-                )
-                if (!compact) {
+            // 左端：标志 + 名字。点一下收起名字，只剩标志。
+            Row(
+                Modifier
+                    .clickable { brandOpen = !brandOpen }
+                    .padding(horizontal = 6.dp, vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                BrandMark(if (compact) 24.dp else 28.dp)
+                if (brandOpen) {
+                    Spacer(Modifier.width(8.dp))
+                    Column {
+                        Text(
+                            if (Brand.isPreview) Brand.PREVIEW_NAME_ZH else Brand.NAME_ZH,
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.SemiBold,
+                            maxLines = 1,
+                        )
+                        if (!compact) {
+                            Text(
+                                if (Brand.isPreview) Brand.PREVIEW_NAME_EN else Brand.NAME_EN,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                            )
+                        }
+                    }
+                }
+            }
+            Spacer(Modifier.width(if (compact) 4.dp else 8.dp))
+            // 中间：五项权重均分，把剩下的宽度全吃掉。
+            Row(Modifier.weight(1f).fillMaxHeight(), verticalAlignment = Alignment.CenterVertically) {
+                Page.entries.forEach { item ->
+                    TopTab(
+                        label = item.label,
+                        selected = item == current,
+                        modifier = Modifier.weight(1f).fillMaxHeight(),
+                    ) { onSelect(item) }
+                }
+            }
+            // 右端：版本号，点一下收起成一个小标。收起后那个标也照样能点回来。
+            Spacer(Modifier.width(if (compact) 4.dp else 8.dp))
+            Box(
+                Modifier
+                    .clickable { versionOpen = !versionOpen }
+                    .padding(horizontal = 6.dp, vertical = 4.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                if (versionOpen) {
                     Text(
-                        if (Brand.isPreview) Brand.PREVIEW_NAME_EN else Brand.NAME_EN,
+                        "v" + Brand.version,
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
                     )
+                } else {
+                    VersionDot(18.dp)
                 }
             }
-            Spacer(Modifier.width(if (compact) 14.dp else 28.dp))
-            Page.entries.forEach { item ->
-                val selected = item == current
-                Box(
-                    Modifier
-                        .padding(horizontal = 1.dp)
-                        .background(
-                            if (selected) {
-                                MaterialTheme.colorScheme.primary.copy(alpha = 0.14f)
-                            } else {
-                                Color.Transparent
-                            },
-                            MaterialTheme.shapes.small,
-                        )
-                        .clickable { onSelect(item) }
-                        .padding(horizontal = if (compact) 10.dp else 16.dp, vertical = 8.dp),
-                ) {
-                    Text(
-                        text = item.label,
-                        style = MaterialTheme.typography.titleSmall,
-                        fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
-                        color = if (selected) {
-                            MaterialTheme.colorScheme.primary
-                        } else {
-                            MaterialTheme.colorScheme.onSurfaceVariant
-                        },
-                    )
-                }
-            }
-            Spacer(Modifier.weight(1f))
-            Text(
-                "v" + Brand.version,
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+        }
+    }
+}
+
+/**
+ * 一个一级项：均分宽度、居中、选中时底色加底部一条高亮。
+ *
+ * 底部那条高亮是给「选中」加第二层信号的 —— 只有底色的话，在深色主题里
+ * primary 的 12% 透明度和 surfaceVariant 差别很小，一眼看不出来点在哪一项上。
+ */
+@Composable
+private fun TopTab(label: String, selected: Boolean, modifier: Modifier, onClick: () -> Unit) {
+    val accent = MaterialTheme.colorScheme.primary
+    Box(
+        modifier
+            .padding(horizontal = 2.dp)
+            .background(
+                if (selected) accent.copy(alpha = 0.12f) else Color.Transparent,
+                MaterialTheme.shapes.small,
+            )
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+            color = if (selected) accent else MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        if (selected) {
+            Box(
+                Modifier
+                    .align(Alignment.BottomCenter)
+                    .fillMaxWidth(0.46f)
+                    .height(2.5.dp)
+                    .background(accent, RoundedCornerShape(topStart = 2.dp, topEnd = 2.dp)),
             )
         }
+    }
+}
+
+/**
+ * 品牌标志：一颗蛋（鸭嘴兽是从蛋里孵出来的，「孵化版」也接着这层意思）。
+ *
+ * 自己用 Canvas 画而不是引图标库：ui 模块没有 material-icons 依赖，
+ * 为一个 24dp 的标志拉一整个图标库不划算。
+ */
+@Composable
+private fun BrandMark(size: Dp) {
+    val accent = MaterialTheme.colorScheme.primary
+    val crack = MaterialTheme.colorScheme.surfaceVariant
+    Canvas(Modifier.size(size)) {
+        val w = this.size.width
+        val h = this.size.height
+        val egg = Path().apply {
+            moveTo(w * 0.5f, h * 0.06f)
+            cubicTo(w * 0.86f, h * 0.15f, w * 0.93f, h * 0.62f, w * 0.5f, h * 0.96f)
+            cubicTo(w * 0.07f, h * 0.62f, w * 0.14f, h * 0.15f, w * 0.5f, h * 0.06f)
+            close()
+        }
+        drawPath(egg, accent)
+        // 一道裂纹：两点之间折一下，暗示「刚孵出来」。
+        val zig = Path().apply {
+            moveTo(w * 0.18f, h * 0.56f)
+            lineTo(w * 0.34f, h * 0.44f)
+            lineTo(w * 0.5f, h * 0.58f)
+            lineTo(w * 0.66f, h * 0.46f)
+            lineTo(w * 0.84f, h * 0.58f)
+        }
+        drawPath(
+            zig,
+            crack,
+            style = Stroke(width = w * 0.11f, cap = StrokeCap.Round, join = StrokeJoin.Round),
+        )
+    }
+}
+
+/** 版本号收起后的那个小标：一个空心圆加中心点，意思是「关于 / 版本」。 */
+@Composable
+private fun VersionDot(size: Dp) {
+    val color = MaterialTheme.colorScheme.onSurfaceVariant
+    Canvas(Modifier.size(size)) {
+        val w = this.size.width
+        val h = this.size.height
+        drawCircle(
+            color,
+            radius = w * 0.42f,
+            center = Offset(w * 0.5f, h * 0.5f),
+            style = Stroke(width = w * 0.11f),
+        )
+        drawCircle(color, radius = w * 0.13f, center = Offset(w * 0.5f, h * 0.5f))
     }
 }
 
