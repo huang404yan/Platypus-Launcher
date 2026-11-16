@@ -379,6 +379,13 @@ internal fun LaunchPage() {
         reloadJava(null)
     }
 
+    // 账号页那边登录/切换/移除之后会 bump 一次，这里跟着把名单重读一遍。
+    // 不加这一条，用户在账号页授权成功、切回启动页看到的还是进来时那份空名单
+    // （侧栏切 Tab 不会重建页面，页面在 Tab 之间是常驻的）。
+    LaunchedEffect(AccountRevision.value) {
+        if (AccountRevision.value > 0) loadIdentities()
+    }
+
     LaunchedEffect(selected?.directory) {
         prep = null
         exported = ""

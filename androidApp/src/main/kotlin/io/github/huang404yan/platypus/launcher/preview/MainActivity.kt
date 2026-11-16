@@ -424,6 +424,15 @@ private fun InstancePage() {
                     r.copy(instances = mergeInstances(listOf(saved), r.instances.filterNot { instanceKey(it) == instanceKey(saved) }))
                 }
             },
+            onDeleted = {
+                // 版本目录没了：退出详情页，重扫一遍把这条从列表里去掉。
+                // 不重扫的话 list 里还留着它，点进去会显示「正在读实例目录…」然后读到空目录。
+                selected = null
+                result = result?.let { r ->
+                    r.copy(instances = r.instances.filterNot { instanceKey(it) == instanceKey(open) })
+                }
+                scan()
+            },
         )
         return
     }

@@ -121,6 +121,8 @@ internal fun AccountPage() {
                 return@launch
             }
             activeUuid = uuid
+            // 启动页那边记着「这一局用谁」，名单与当前账号一变就得让它重读一次。
+            AccountRevision.bump()
             noticeIsError = false
             notice = if (uuid.isBlank()) "已改用离线模式。" else "启动游戏时会用这个账号。"
         }
@@ -161,6 +163,7 @@ internal fun AccountPage() {
                 )
                 withContext(Dispatchers.IO) { reload() }
                 // 刚登录的账号默认就是接下来要用的那个 —— 用户点「登录」的意图就是这个。
+                // 名单变化由 useAccount 里的 bump 通知出去，这里不用再补一次。
                 useAccount(stored.uuid)
                 notice = (if (relogin) "已重新登录：" else "已登录：") + stored.name +
                     "，接下来启动游戏就用这个账号。"
@@ -263,6 +266,7 @@ internal fun AccountPage() {
             }
             if (AccountBootstrap.matches(account, activeUuid)) useAccount("")
             withContext(Dispatchers.IO) { reload() }
+            AccountRevision.bump()
             noticeIsError = false
             notice = "已移除 " + account.name + "。"
         }

@@ -9,9 +9,11 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -29,12 +31,17 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import io.github.huang404yan.platypus.core.instance.DeletionPlan
 import io.github.huang404yan.platypus.core.instance.DirUsage
 import io.github.huang404yan.platypus.core.instance.Instance
+import io.github.huang404yan.platypus.core.instance.InstanceDeleter
 import io.github.huang404yan.platypus.core.instance.InstanceDetails
 import io.github.huang404yan.platypus.core.instance.InstanceDetailsLoader
 import io.github.huang404yan.platypus.core.instance.InstanceEditResult
 import io.github.huang404yan.platypus.core.instance.InstanceEdits
+import io.github.huang404yan.platypus.core.instance.InstanceIntegrity
+import io.github.huang404yan.platypus.core.instance.IntegrityReport
+import io.github.huang404yan.platypus.core.instance.IntegrityState
 import io.github.huang404yan.platypus.core.instance.MemoryDefaults
 import io.github.huang404yan.platypus.core.instance.JsonInstanceRepository
 import io.github.huang404yan.platypus.core.runtime.GameJavaRules
@@ -61,6 +68,8 @@ internal fun InstanceDetailScreen(
     gameRoot: String,
     onBack: () -> Unit,
     onSaved: (Instance) -> Unit,
+    /** 这个实例的版本目录已经被删掉了：调用方要退出详情页并重扫。 */
+    onDeleted: () -> Unit,
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -76,6 +85,19 @@ internal fun InstanceDetailScreen(
     var javaPath by remember(instance.directory, instance.javaPath) { mutableStateOf(instance.javaPath.orEmpty()) }
     var notice by remember(instance.directory) { mutableStateOf("") }
     var saving by remember(instance.directory) { mutableStateOf(false) }
+
+    // 完整性检查。core 里的 InstanceIntegrity 是纯 Kotlin、不碰平台，
+    // 桌面端「版本设置 → 总览」用的就是它，这里只是换一套 Compose 界面。
+    var integrity by remember(instance.directory) { mutableStateOf<IntegrityReport?>(null) }
+    var integrityChecking by remember(instance.directory) { mutableStateOf(false) }
+    var integrityProgress by remember(instance.directory) { mutableStateOf(0 to 0) }
+    var repairing by remember(instance.directory) { mutableStateOf(false) }
+    var repairText by remember(instance.directory) { mutableStateOf("") }
+
+    // 删除实例：先算计划（要遍历目录统计体积，放 IO），拿到数字才弹确认框。
+    var deletePlan by remember(instance.directory) { mutableStateOf<DeletionPlan?>(null) }
+    var deleteSavesToo by remember(instance.directory) { mutableStateOf(false) }
+    var deleting by remember(instance.directory) { mutableStateOf(false) }
 
     LaunchedEffect(instance.directory) {
         loading = true
@@ -105,6 +127,119 @@ internal fun InstanceDetailScreen(
         defaultMemoryMb = fallback
         // 跟随默认的实例：这一格要显示生效的那个数，而不是 instances.json 里写死的老数。
         if (instance.memoryFollowsDefault) memoryText = fallback.toString()
+    }
+
+    /**
+     * 按版本清单对一遍这个实例的文件。
+     *
+     * 只在本地读：拿 version json（含 inheritsFrom 合并）算出「应该有哪些文件」，
+     * 再逐个比大小与 sha1。不联网、不写盘。
+     *
+     * @param verifyHashes false 时只比大小，几秒钟能过几万个文件，但同样大小的坏文件发现不了。
+     */
+    fun checkIntegrity(verifyHashes: Boolean) {
+        if (integrityChecking || repairing) return
+        repairText = ""
+        integrityChecking = true
+        integrityProgress = 0 to 0
+        scope.launch {
+            val report = withContext(Dispatchers.IO) {
+                runCatching {
+                    InstanceIntegrity.inspect(instance, verifyHashes = verifyHashes) { done, total ->
+                        integrityProgress = done to total
+                    }
+                }.getOrElse { error ->
+                    IntegrityReport(
+                        versionId = instance.gameVersion,
+                        warnings = listOf("检查失败：" + describe(error)),
+                    )
+                }
+            }
+            integrity = report
+            integrityChecking = false
+        }
+    }
+
+    /** 把上一步查出来的问题文件补回来，补完立刻复检一遍（用与上次相同的方式）。 */
+    fun repairIntegrity() {
+        val report = integrity ?: return
+        if (repairing || integrityChecking) return
+        repairing = true
+        repairText = "正在补齐 " + report.problemFiles + " 个文件…"
+        scope.launch {
+            val verifyHashes = report.hashesChecked
+            val outcome = withContext(Dispatchers.IO) {
+                runCatching {
+                    InstanceIntegrity.repair(report) { progress ->
+                        repairText = "已补 " + progress.completedFiles + "/" + progress.totalFiles + " 个 · " +
+                            fmtBytes(progress.completedBytes) + " / " + fmtBytes(progress.totalBytes)
+                    }
+                }
+            }
+            val failure = outcome.exceptionOrNull()
+            repairing = false
+            if (failure != null) {
+                repairText = "补齐失败：" + describe(failure)
+                return@launch
+            }
+            val result = outcome.getOrNull()
+            repairText = if (result == null || result.ok) {
+                "补完了，正在复核…"
+            } else {
+                "补完了，但还有 " + result.failures.size + " 个文件没下来，复核一遍看看。"
+            }
+            val again = withContext(Dispatchers.IO) {
+                runCatching {
+                    InstanceIntegrity.inspect(instance, verifyHashes = verifyHashes) { done, total ->
+                        integrityProgress = done to total
+                    }
+                }.getOrNull()
+            }
+            if (again != null) integrity = again
+        }
+    }
+
+    /** 点「删除这个实例」：只算计划、弹确认框，不动磁盘。 */
+    fun prepareDelete() {
+        if (deletePlan != null || deleting) return
+        val root = details?.layout?.gameRoot ?: File(gameRoot.trim())
+        scope.launch {
+            val plan = withContext(Dispatchers.IO) {
+                InstanceDeleter.inspect(gameRoot = root, instanceId = instance.id)
+            }
+            deletePlan = plan
+            deleteSavesToo = false
+        }
+    }
+
+    /** 确认框里点「删除」：删版本目录，删完把 instances.json 里那条登记也移除，再退出详情页。 */
+    fun confirmDelete() {
+        val plan = deletePlan ?: return
+        if (!plan.deletable) {
+            notice = plan.refusalReason
+            deletePlan = null
+            return
+        }
+        deleting = true
+        val root = details?.layout?.gameRoot ?: File(gameRoot.trim())
+        scope.launch {
+            val outcome = withContext(Dispatchers.IO) {
+                InstanceDeleter.delete(plan, includeSaves = deleteSavesToo)
+            }
+            if (!outcome.ok) {
+                deleting = false
+                deletePlan = null
+                notice = outcome.summary
+                return@launch
+            }
+            // 文件没了，登记也必须跟着没：否则下次扫描会把「已登记却指向不存在的目录」留在列表里。
+            withContext(Dispatchers.IO) {
+                runCatching { JsonInstanceRepository(JsonInstanceRepository.defaultIndexFile(root)).remove(instance.id) }
+            }
+            deleting = false
+            deletePlan = null
+            onDeleted()
+        }
     }
 
     /**
@@ -246,6 +381,91 @@ internal fun InstanceDetailScreen(
             )
         }
 
+        // 放在「占了多少地方」之前：先看能不能跑，再看占多大。与桌面端同一个顺序。
+        DetailCard("检查文件完整性") {
+            Text(
+                "按版本清单（含父版本）对一遍：client jar、资源索引、库、资源对象。" +
+                    "只读本地，不联网；缺的坏的可以只补那几个，不用整份重下。",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            if (integrity == null && !integrityChecking) {
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    OutlinedButton(
+                        onClick = { checkIntegrity(verifyHashes = true) },
+                        enabled = !repairing,
+                    ) { Text("检查（逐个算 sha1）") }
+                    OutlinedButton(
+                        onClick = { checkIntegrity(verifyHashes = false) },
+                        enabled = !repairing,
+                    ) { Text("快速检查（只比大小）") }
+                }
+            }
+            if (integrityChecking) {
+                val (done, total) = integrityProgress
+                Text(
+                    if (total > 0) "正在检查 " + done + "/" + total + " 个文件…" else "正在读版本清单…",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            integrity?.let { report ->
+                DetailLine("清单条目", report.totalFiles.toString() + " 个文件")
+                DetailLine("结论", report.summary)
+                if (!report.healthy) {
+                    DetailLine("缺的文件", report.missing.size.toString() + " 个")
+                    DetailLine("对不上的文件", report.broken.size.toString() + " 个")
+                    if (report.missingBytes > 0L) {
+                        DetailLine("要补多少", fmtBytes(report.missingBytes))
+                    }
+                    // 只列前几个：几百条的时候全列出来会把页面撑爆，
+                    // 而用户真正要的是「点补齐」。
+                    report.problems.take(5).forEach { file ->
+                        DetailLine(
+                            if (file.state == IntegrityState.MISSING) "缺" else "坏",
+                            file.target.absolutePath,
+                        )
+                    }
+                    if (report.problems.size > 5) {
+                        Text(
+                            "还有 " + (report.problems.size - 5) + " 个没列出来。",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+                if (!report.hashesChecked) {
+                    Text(
+                        "这次只比了大小，同样大小的坏文件发现不了；想查细一点用「检查（逐个算 sha1）」。",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                report.warnings.forEach {
+                    Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    if (!report.healthy) {
+                        Button(
+                            onClick = { repairIntegrity() },
+                            enabled = !repairing && !integrityChecking,
+                        ) { Text(if (repairing) "正在补齐…" else "补齐这 " + report.problemFiles + " 个文件") }
+                    }
+                    OutlinedButton(
+                        onClick = { integrity = null; repairText = "" },
+                        enabled = !repairing && !integrityChecking,
+                    ) { Text("清掉结果") }
+                }
+                if (repairText.isNotBlank()) {
+                    Text(
+                        repairText,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+        }
+
         DetailCard("占了多少地方") {
             d.dirs.forEach { DirLine(it) }
             Text(
@@ -263,6 +483,21 @@ internal fun InstanceDetailScreen(
             }
         }
 
+        // 删除放在最下面，且不是那个主按钮：这是唯一会真的删掉磁盘文件的地方，
+        // 手滑点到的代价比「多滑一屏」大得多。
+        DetailCard("删掉这个实例") {
+            Text(
+                "会删掉版本目录 " + d.versionDir.absolutePath + " 里的文件，并把 instances.json 里那条登记一起移除。" +
+                    "共享的 libraries/ 与 assets/ 不动。删掉之后只能重新下载。",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            OutlinedButton(
+                onClick = { prepareDelete() },
+                enabled = !deleting && !saving,
+            ) { Text(if (deleting) "正在删除…" else "删除这个实例…") }
+        }
+
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             Button(onClick = { save() }, enabled = !saving) { Text(if (saving) "保存中…" else "保存") }
             if (notice.isNotBlank()) {
@@ -273,6 +508,56 @@ internal fun InstanceDetailScreen(
                 )
             }
         }
+    }
+
+    deletePlan?.let { plan ->
+        AlertDialog(
+            onDismissRequest = { if (!deleting) deletePlan = null },
+            title = { Text("删除实例文件？") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    if (!plan.deletable) {
+                        Text(plan.refusalReason, color = MaterialTheme.colorScheme.error)
+                    } else {
+                        Text(plan.versionDir.absolutePath, style = MaterialTheme.typography.bodySmall)
+                        Text(
+                            plan.fileCount.toString() + " 个文件，" + fmtBytes(plan.totalBytes) + "。",
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                        if (plan.hasSaves) {
+                            Text(
+                                "存档 " + plan.savesFileCount + " 个文件（" + fmtBytes(plan.savesBytes) +
+                                    "）默认保留，会搬到 <游戏目录>/platypus/saves-backup/ 下。",
+                                style = MaterialTheme.typography.bodySmall,
+                            )
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Checkbox(
+                                    checked = deleteSavesToo,
+                                    onCheckedChange = { deleteSavesToo = it },
+                                    enabled = !deleting,
+                                )
+                                Text("连存档一起删掉", style = MaterialTheme.typography.bodySmall)
+                            }
+                        }
+                        Text(
+                            "会直接从磁盘删掉，不进回收站。删掉之后要重新下载。",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.error,
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                if (plan.deletable) {
+                    Button(onClick = { confirmDelete() }, enabled = !deleting) {
+                        Text(if (deleting) "删除中…" else "删除")
+                    }
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { if (!deleting) deletePlan = null }, enabled = !deleting) { Text("算了") }
+            },
+        )
     }
 }
 
