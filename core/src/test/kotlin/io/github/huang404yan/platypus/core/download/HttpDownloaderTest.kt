@@ -20,10 +20,15 @@ class HttpDownloaderTest {
     private lateinit var tmpDir: File
     private val hits = AtomicInteger(0)
 
+    /** 记录每次请求带的 Range 头，用来证明分段真的发出去了。 */
+    private val rangeRequests = java.util.Collections.synchronizedList(mutableListOf<String>())
+
     private val bodies: Map<String, ByteArray> = mapOf(
         "/a.txt" to "alpha-content".toByteArray(),
         "/b.txt" to ByteArray(200 * 1024) { (it % 251).toByte() },
         "/c.txt" to "gamma".toByteArray(),
+        // 体积超过分段阈值（8 MB），且故意多出 3 字节：最后一段要吃余数
+        "/d.bin" to ByteArray(16 * 1024 * 1024 + 3) { (it % 251).toByte() },
     )
 
     private val downloader = HttpDownloader(parallelism = 4, retries = 0)
@@ -69,25 +74,31 @@ class HttpDownloaderTest {
         exchange.responseBody.use { it.write(body) }
     }
 
-    /** 认 Range 的源：带 `Range: bytes=<n>-` 就回 206 + Content-Range，否则回整份 200。 */
+    /**
+     * 认 Range 的源：带 `Range: bytes=<start>-<end>` 就回 206 + Content-Range，否则回整份 200。
+     *
+     * 两种写法都支持：`bytes=100-` （到结尾，断点续传用的）与 `bytes=100-199`（闭区间，分段下载用的）。
+     */
     private fun respondRangeAware(exchange: HttpExchange, path: String, body: ByteArray) {
         val range = exchange.requestHeaders.getFirst("Range")
-        val start = if (rangeSupport && range != null && range.startsWith("bytes=")) {
-            range.removePrefix("bytes=").substringBefore("-").trim().toLongOrNull()
-        } else {
-            null
-        }
-
-        if (start != null) {
-            if (start >= body.size) {
-                exchange.responseHeaders.add("Content-Range", "bytes */${body.size}")
-                respond(exchange, 416, ByteArray(0))
+        if (rangeSupport && range != null && range.startsWith("bytes=")) {
+            val spec = range.removePrefix("bytes=")
+            val start = spec.substringBefore("-").trim().toLongOrNull()
+            val endText = spec.substringAfter("-", "").trim()
+            val end = if (endText.isEmpty()) body.size - 1L else endText.toLongOrNull() ?: -1L
+            if (start != null && end >= 0L) {
+                rangeRequests.add(spec)
+                if (start >= body.size) {
+                    exchange.responseHeaders.add("Content-Range", "bytes */" + body.size)
+                    respond(exchange, 416, ByteArray(0))
+                    return
+                }
+                val last = minOf(end, body.size - 1L)
+                val slice = body.copyOfRange(start.toInt(), (last + 1).toInt())
+                exchange.responseHeaders.add("Content-Range", "bytes " + start + "-" + last + "/" + body.size)
+                send(exchange, 206, slice, path)
                 return
             }
-            val slice = body.copyOfRange(start.toInt(), body.size)
-            exchange.responseHeaders.add("Content-Range", "bytes $start-${body.size - 1}/${body.size}")
-            send(exchange, 206, slice, path)
-            return
         }
         send(exchange, 200, body, path)
     }
@@ -334,6 +345,68 @@ class HttpDownloaderTest {
         assertTrue(report.ok)
         assertFalse(part.exists(), "目标已完成时 .part 是垃圾，应清掉")
     }
+
+    @Test
+    fun `单文件大文件会拆成几段并发下，拼回来与原文逐字节一致`() = runBlocking {
+        val bytes = bodies.getValue("/d.bin")
+        var progress = 0L
+
+        val report = downloader.download(
+            listOf(DownloadItem(url("/d.bin"), target("d.bin"), sha1 = sha1(bytes), size = bytes.size.toLong())),
+        ) { progress = it.completedBytes }
+
+        assertTrue(report.ok, "分段下载应成功：" + report.failures)
+        assertTrue(File(target("d.bin")).readBytes().contentEquals(bytes), "拼回来的内容必须与原文逐字节一致")
+
+        val closed = closedRanges()
+        assertTrue(closed.size >= 2, "16 MB 的文件应被拆成多段，实际只发了：" + closed)
+        assertEquals(bytes.size.toLong(), progress, "进度应报完整大小")
+        assertFalse(File(target("d.bin") + ".part").exists(), "转正后不应残留 .part")
+        assertFalse(File(target("d.bin") + ".part.0").exists(), "分段临时文件应清掉")
+    }
+
+    @Test
+    fun `服务器不认 Range 时大文件退回单连接仍然下完`() = runBlocking {
+        rangeSupport = false
+        val bytes = bodies.getValue("/d.bin")
+
+        val report = downloader.download(
+            listOf(DownloadItem(url("/d.bin"), target("d2.bin"), sha1 = sha1(bytes), size = bytes.size.toLong())),
+        )
+
+        assertTrue(report.ok, "不认 Range 的源也必须能下完：" + report.failures)
+        assertTrue(File(target("d2.bin")).readBytes().contentEquals(bytes))
+    }
+
+    @Test
+    fun `小文件不拆段，一条连接就够`() = runBlocking {
+        val bytes = bodies.getValue("/b.txt")
+
+        val report = downloader.download(
+            listOf(DownloadItem(url("/b.txt"), target("b.txt"), sha1 = sha1(bytes), size = bytes.size.toLong())),
+        )
+
+        assertTrue(report.ok)
+        assertTrue(closedRanges().isEmpty(), "200 KB 不该拆段：" + closedRanges())
+    }
+
+    @Test
+    fun `已有半成品时优先续传，不重新拆段`() = runBlocking {
+        val bytes = bodies.getValue("/d.bin")
+        File(target("d.bin") + ".part").writeBytes(bytes.copyOfRange(0, 8 * 1024 * 1024))
+
+        val report = downloader.download(
+            listOf(DownloadItem(url("/d.bin"), target("d.bin"), sha1 = sha1(bytes), size = bytes.size.toLong())),
+        )
+
+        assertTrue(report.ok, "续传应成功：" + report.failures)
+        assertTrue(File(target("d.bin")).readBytes().contentEquals(bytes))
+        assertTrue(closedRanges().isEmpty(), "有半成品时应续传，不该再拆段：" + closedRanges())
+    }
+
+    /** 去掉探针用的 `0-0` 与续传用的开区间，只留分段请求的闭区间。 */
+    private fun closedRanges(): List<String> =
+        rangeRequests.filter { it != "0-0" && it.substringAfter("-", "").isNotBlank() }
 
     private fun sha1(bytes: ByteArray): String =
         MessageDigest.getInstance("SHA-1").digest(bytes)

@@ -9,6 +9,7 @@ import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import java.io.File
 import java.io.FileOutputStream
+import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.URL
 import java.nio.file.Files
@@ -81,6 +82,11 @@ class HttpDownloader(
         }
 
         val gate = Semaphore(parallelism)
+        // 分段下载的名额：整个批次只让一个条目拆段。
+        // 16 路文件级并行已经吃满带宽时再给每个文件各开 4 段，对端多半开始限流；
+        // 但原版安装里常有一个几十 MB 的大 jar，它一个人就占了总量的多半，
+        // 让它单独走分段比「全都单连接」快得多。
+        val segmentSlots = AtomicInteger(SEGMENT_SLOTS_PER_BATCH)
         emit(force = true)
 
         items.map { item ->
@@ -92,7 +98,11 @@ class HttpDownloader(
                         emit(force = true)
                         return@withPermit
                     }
-                    val outcome = fetch(item) { delta ->
+                    // 够大 + 占总量过半（或整批就这一个文件）才有资格拆段，并且要抢到名额
+                    val bigEnough = item.size >= SEGMENT_THRESHOLD_BYTES &&
+                        (totalFiles == 1 || item.size.toDouble() / totalBytes.coerceAtLeast(1L) >= 0.5)
+                    val allowSegment = bigEnough && segmentSlots.getAndUpdate { if (it > 0) it - 1 else it } > 0
+                    val outcome = fetch(item, allowSegment = allowSegment) { delta ->
                         completedBytes.addAndGet(delta)
                         emit(force = false)
                     }
@@ -134,6 +144,9 @@ class HttpDownloader(
         return if (length > 0) length else item.size.coerceAtLeast(0L)
     }
 
+    /** 分段下载用到的一段：自己的临时文件 + 闭区间 [start, end]。 */
+    private data class Segment(val file: File, val start: Long, val end: Long)
+
     /** 单个条目的下载结果：reason 为 null 表示成功，resumedBytes 表示这次有多少字节是接着上次下的。 */
     private data class FetchOutcome(val reason: String?, val resumedBytes: Long = 0L) {
         val ok: Boolean get() = reason == null
@@ -144,7 +157,11 @@ class HttpDownloader(
      *
      * [onBytes] 之外的副作用只有磁盘上的 `<target>.part` 与最终的目标文件。
      */
-    private fun fetch(item: DownloadItem, onBytes: (Long) -> Unit): FetchOutcome {
+    private suspend fun fetch(
+        item: DownloadItem,
+        allowSegment: Boolean = false,
+        onBytes: (Long) -> Unit,
+    ): FetchOutcome {
         val target = File(item.target)
         target.parentFile?.let { parent ->
             try {
@@ -163,6 +180,19 @@ class HttpDownloader(
         // 空壳包里地址全是空串，候选表必然为空 —— 这时给一句「去填镜像」比「没有可用的下载地址」有用。
         if (candidates.isEmpty()) {
             return FetchOutcome(if (!Endpoints.serviceReady()) Endpoints.SHELL_HINT else "没有可用的下载地址")
+        }
+
+        // 大文件先试分段：一条连接在丢包链路上跑不满带宽，拆成几段并发更接近实际带宽。
+        // 只在「单文件下载」时启用（allowSegment），否则会和文件级并行叠加把服务端打限流。
+        // 已经有半成品 .part 时也不分段 —— 接着老进度续传比重新拆段更省。
+        if (allowSegment && item.size >= SEGMENT_THRESHOLD_BYTES) {
+            val part = File(target.path + PART_SUFFIX)
+            if (!part.isFile || part.length() <= 0L) {
+                for (candidate in candidates) {
+                    val segmented = trySegments(candidate, item, target, onBytes)
+                    if (segmented != null && segmented.ok) return segmented
+                }
+            }
         }
 
         var lastReason = "下载失败"
@@ -308,6 +338,160 @@ class HttpDownloader(
         }
     }
 
+    /**
+     * 试着把 [item] 拆成几段并发下。
+     *
+     * 返回 null 表示「这条地址干不了分段」（服务器不给 Content-Length、不认 Range、体积不够切），
+     * 调用方应当退回单连接路径 —— 那是保底，断点续传语义在那边。
+     *
+     * 成功时已经把文件拼进 `<target>.part` 并转正，失败时删掉所有分段临时文件并退回已报的字节数。
+     */
+    private suspend fun trySegments(
+        url: String,
+        item: DownloadItem,
+        target: File,
+        onBytes: (Long) -> Unit,
+    ): FetchOutcome? = coroutineScope {
+        val probe = probeSegmented(url) ?: return@coroutineScope null
+        val total = if (item.size > 0) item.size else probe
+        if (total < SEGMENT_THRESHOLD_BYTES) return@coroutineScope null
+
+        val count = (total / SEGMENT_MIN_BYTES).coerceIn(2L, SEGMENT_COUNT.toLong()).toInt()
+        if (count < 2) return@coroutineScope null
+        val chunk = total / count
+        val segments = (0 until count).map { index ->
+            val start = index.toLong() * chunk
+            // 最后一段兜到底：total 除不尽时余数全给最后一段，否则会漏字节
+            val end = if (index == count - 1) total - 1 else start + chunk - 1
+            Segment(File(target.path + PART_SUFFIX + "." + index), start, end)
+        }
+
+        var charged = 0L
+        val chargedLock = Any()
+        fun charge(delta: Long) {
+            synchronized(chargedLock) { charged += delta }
+            onBytes(delta)
+        }
+
+        try {
+            coroutineScope {
+                segments.map { segment ->
+                    async(Dispatchers.IO) { downloadSegment(url, segment) { charge(it) } }
+                }.awaitAll()
+            }
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            // 用户点了取消：清掉分段文件后原样往上抛，不能当成「这条地址不行」
+            segments.forEach { it.file.takeIf { f -> f.isFile }?.delete() }
+            throw e
+        } catch (e: Exception) {
+            segments.forEach { it.file.takeIf { f -> f.isFile }?.delete() }
+            if (charged > 0) onBytes(-charged)
+            // 分段炸了不等于这个文件下不了：退回单连接（.part 都没有，等于从头下）
+            return@coroutineScope null
+        }
+
+        val part = File(target.path + PART_SUFFIX)
+        val merged = try {
+            FileOutputStream(part, false).use { output ->
+                for (segment in segments) {
+                    segment.file.inputStream().use { input -> input.copyTo(output, BUFFER_SIZE) }
+                }
+                output.fd.sync()
+            }
+            true
+        } catch (e: Exception) {
+            false
+        }
+        segments.forEach { it.file.takeIf { f -> f.isFile }?.delete() }
+        if (!merged) {
+            part.takeIf { it.isFile }?.delete()
+            if (charged > 0) onBytes(-charged)
+            return@coroutineScope null
+        }
+
+        if (item.size >= 0 && part.length() != item.size) {
+            part.delete()
+            if (charged > 0) onBytes(-charged)
+            return@coroutineScope null
+        }
+        if (!item.sha1.isNullOrBlank() && !sha1Of(part).equals(item.sha1, ignoreCase = true)) {
+            part.delete()
+            if (charged > 0) onBytes(-charged)
+            return@coroutineScope null
+        }
+        val promoteError = promote(part, target)
+        if (promoteError != null) {
+            if (charged > 0) onBytes(-charged)
+            return@coroutineScope null
+        }
+        FetchOutcome(reason = null)
+    }
+
+    /** 探一下这条地址能不能分段：能返回整份长度，不能返回 null。只发一个 Range 0-0 的小请求。 */
+    private fun probeSegmented(url: String): Long? {
+        var connection: HttpURLConnection? = null
+        return try {
+            val conn = (URL(url).openConnection() as HttpURLConnection).apply {
+                requestMethod = "GET"
+                connectTimeout = connectTimeoutMs
+                readTimeout = readTimeoutMs
+                instanceFollowRedirects = true
+                setRequestProperty("User-Agent", userAgent)
+                setRequestProperty("Accept-Encoding", "identity")
+                setRequestProperty("Range", "bytes=0-0")
+            }
+            connection = conn
+            val code = conn.responseCode
+            if (code != HttpURLConnection.HTTP_PARTIAL) return null
+            val range = conn.getHeaderField("Content-Range") ?: return null
+            val total = range.substringAfter('/', "").trim().toLongOrNull() ?: return null
+            if (total <= 0L) null else total
+        } catch (e: Exception) {
+            null
+        } finally {
+            connection?.disconnect()
+        }
+    }
+
+    /** 下一段。任何异常都往外抛，由 [trySegments] 统一收尾。 */
+    private fun downloadSegment(url: String, segment: Segment, onBytes: (Long) -> Unit) {
+        val conn = (URL(url).openConnection() as HttpURLConnection).apply {
+            requestMethod = "GET"
+            connectTimeout = connectTimeoutMs
+            readTimeout = readTimeoutMs
+            instanceFollowRedirects = true
+            setRequestProperty("User-Agent", userAgent)
+            setRequestProperty("Accept-Encoding", "identity")
+            setRequestProperty("Range", "bytes=" + segment.start + "-" + segment.end)
+        }
+        try {
+            val code = conn.responseCode
+            if (code != HttpURLConnection.HTTP_PARTIAL) {
+                // 服务端这次不认 Range 了：整条路作废，让上层退回单连接
+                throw IOException("分段请求没有拿到 206（HTTP " + code + "）")
+            }
+            val expected = segment.end - segment.start + 1
+            var got = 0L
+            conn.inputStream.use { input ->
+                FileOutputStream(segment.file, false).use { output ->
+                    val buffer = ByteArray(BUFFER_SIZE)
+                    while (got < expected) {
+                        val want = minOf(buffer.size.toLong(), expected - got).toInt()
+                        val read = input.read(buffer, 0, want)
+                        if (read < 0) break
+                        output.write(buffer, 0, read)
+                        got += read
+                        onBytes(read.toLong())
+                    }
+                    output.fd.sync()
+                }
+            }
+            if (got != expected) throw IOException("这一段只收到 " + got + " / " + expected + " 字节")
+        } finally {
+            conn.disconnect()
+        }
+    }
+
     /** 把 `.part` 转正成目标文件。成功返回 null，失败返回中文原因。 */
     private fun promote(part: File, target: File): String? {
         if (target.exists() && !target.delete()) {
@@ -364,6 +548,18 @@ class HttpDownloader(
         private const val EMIT_INTERVAL_MS = 80L
         private const val BUFFER_SIZE = 64 * 1024
         private const val PART_SUFFIX = ".part"
+
+        /** 小于这个体积不值得拆段：切开再合并的磁盘开销会盖过并发收益。 */
+        private const val SEGMENT_THRESHOLD_BYTES = 8L * 1024 * 1024
+
+        /** 每段至少这么大，否则连接建立与握手的开销占比太高。 */
+        private const val SEGMENT_MIN_BYTES = 4L * 1024 * 1024
+
+        /** 最多拆几段。再多对端通常开始限速，收益反而下降。 */
+        private const val SEGMENT_COUNT = 4
+
+        /** 一个批次里允许几个条目走分段。见 download() 里的说明。 */
+        private const val SEGMENT_SLOTS_PER_BATCH = 1
 
         /** HttpURLConnection 没有这个常量，416 自己写。 */
         private const val HTTP_RANGE_NOT_SATISFIABLE = 416
