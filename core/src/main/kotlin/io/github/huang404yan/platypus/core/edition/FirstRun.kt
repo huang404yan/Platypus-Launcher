@@ -1,5 +1,6 @@
 package io.github.huang404yan.platypus.core.edition
 
+import io.github.huang404yan.platypus.core.Endpoints
 import io.github.huang404yan.platypus.core.auth.ClientIds
 import io.github.huang404yan.platypus.core.settings.LauncherSettings
 
@@ -13,7 +14,12 @@ import io.github.huang404yan.platypus.core.settings.LauncherSettings
  *   的 `GET /entitlements/mcstore`），通过了才算数，之后不再重复问。
  * - **孵化版**（0.x-preview.N）就是开源版，谁都能自己编一份、把这几行判断改掉。
  *   对着一份能随手改的源码强制登录没有意义，反而把「想先看看界面长什么样」的人挡在门外。
- *   所以它只弹一次窗，讲清「要玩正版得自己申请一个应用 ID」与怎么申请，然后放行。
+ *   所以它只弹一次窗，然后放行。
+ *
+ * **发出去的孵化版是空壳**（[Endpoints.shell]，构建开关 `-Pplatypus.shell`）：包里不带任何
+ * 下载与搜索服务地址。这种包的弹窗不能再讲「不强制正版、离线也能玩」—— 那句话是拿一份
+ * 有完整服务端的构建说的；对着一个连版本清单都拉不下来的包讲它，用户照着做只会撞空。
+ * 空壳包的弹窗改成讲「这个包需要你填一个镜像根地址」，而这件事在「设置 → 下载」里做。
  *
  * **验证为什么按账号记、而不是按机器记**：只记「这台机器走过引导没有」的话，换个微软
  * 账号再开程序照样放行 —— 那验证就是形同虚设。现在认的是「当前选中的这个微软账号，
@@ -50,6 +56,7 @@ object FirstRun {
         signedIn: Boolean = false,
         accountsLoaded: Boolean = false,
         accountOwnsGame: Boolean = false,
+        shell: Boolean = Endpoints.shell,
     ): FirstRunState {
         // 包自带 ID（正式版由构建方注入）时这里恒为 null：用户不需要填任何东西。
         // 只有一份都没有时才给出「还没有填 Client ID」那句话。
@@ -63,6 +70,7 @@ object FirstRun {
             clientProblem = clientProblem,
             activeAccountUuid = settings.activeAccountUuid,
             accountOwnsGame = accountOwnsGame,
+            shell = shell,
         )
     }
 
@@ -87,6 +95,13 @@ data class FirstRunState(
     val activeAccountUuid: String = "",
     /** 当前选中的那个账号自己过没过所有权校验。 */
     val accountOwnsGame: Boolean = false,
+    /**
+     * 这是不是空壳包（构建时开 -Pplatypus.shell，见 [Endpoints.shell]）。
+     *
+     * 只影响文案：空壳包里没有任何下载与搜索服务地址，那套「不强制正版、离线也能玩」
+     * 的话对它是误导 —— 用户照着做完发现下载页还是空的。空壳包改讲「去填一个镜像根地址」。
+     */
+    val shell: Boolean = false,
 ) {
     /** 这一版要不要正版账号。 */
     val requiresSignIn: Boolean get() = edition == Edition.FORMAL
@@ -119,7 +134,12 @@ data class FirstRunState(
             else -> "欢迎使用鸭嘴兽·孵化版"
         }
 
-    /** 正文：正式版讲清为什么不让跳过，孵化版讲清要玩正版得先做什么。 */
+    /**
+     * 正文。
+     *
+     * 正式版讲清为什么不让跳过；有完整服务端的孵化版讲清要玩正版得先做什么；
+     * 空壳包（[shell]）既不用正版也不用申请 ID，它缺的是服务地址，所以只讲那一件事。
+     */
     val body: String
         get() = when {
             requiresSignIn && blocked && signedIn ->
@@ -130,6 +150,15 @@ data class FirstRunState(
                     "确实拥有 Minecraft，通过之后一直记着，之后打开不会再问。" +
                     "点下面的「去登录」，在「设置 → 账号」里填一个应用 ID，再用微软账号登录。"
             requiresSignIn -> "这一版要求用正版账号进游戏。验证只做一次，之后打开不会再问。"
+            // 空壳包先讲：它既不用正版、也不用申请应用 ID，缺的是服务地址。
+            // 把孵化版那段「不强制正版、离线也能玩」照抄进空壳包是误导 —— 用户照做之后
+            // 打开下载页还是一片空白，会当成坏了。
+            shell ->
+                "这个包是孵化版的空壳：包里不带任何下载与搜索服务地址，版本清单、加载器、" +
+                    "模组搜索都得先有个地址才拉得下来。" +
+                    "去「设置 → 下载 → 服务地址」填一个镜像根（http:// 或 https:// 开头），" +
+                    "填完立刻生效，以后一直用。没填之前，界面照旧能看、本机已有的实例照旧能改，" +
+                    "只是下载页与模组搜索是空的 —— 那不是坏了。"
             else ->
                 "孵化版不要求正版账号，离线也能进游戏。想用正版账号的话，得先自己申请一个" +
                     "微软应用 ID（微软不发放通用的，随安装包带出去的 ID 等于所有下载者共用一份别人的注册）。" +
@@ -145,8 +174,18 @@ data class FirstRunState(
      */
     val canProceed: Boolean get() = !requiresSignIn || (signedIn && accountOwnsGame)
 
-    /** 次要按钮上的字；null 表示不显示次要按钮。 */
-    val secondaryLabel: String? get() = if (dismissible) "先随便看看" else null
+    /**
+     * 次要按钮上的字；null 表示不显示次要按钮。
+     *
+     * 空壳包不说「先随便看看」：这个包里本来就没什么可看的（下载与搜索都是空的），
+     * 那句话会让人以为关掉就完事了。改成「稍后去填」，把它指回设置页。
+     */
+    val secondaryLabel: String?
+        get() = when {
+            !dismissible -> null
+            shell -> "稍后去填"
+            else -> "先随便看看"
+        }
 
     /** 主按钮上的字。 */
     val primaryLabel: String

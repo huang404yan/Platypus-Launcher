@@ -37,6 +37,7 @@ import io.github.huang404yan.platypus.core.instance.InstanceEditResult
 import io.github.huang404yan.platypus.core.instance.InstanceEdits
 import io.github.huang404yan.platypus.core.instance.JsonInstanceRepository
 import io.github.huang404yan.platypus.core.runtime.GameJavaRules
+import io.github.huang404yan.platypus.core.settings.JsonSettingsRepository
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -66,6 +67,10 @@ internal fun InstanceDetailScreen(
     var details by remember(instance.directory) { mutableStateOf<InstanceDetails?>(null) }
     var loading by remember(instance.directory) { mutableStateOf(true) }
     var memoryText by remember(instance.directory, instance.memoryMb) { mutableStateOf(instance.memoryMb.toString()) }
+    // 设置页的「默认内存」。跟随默认的实例，这一格显示的是生效值而不是 instances.json 里存的老数
+    // （规则见 [Instance.effectiveMemoryMb]，与桌面详情页同一套）。
+    // 它要读一次 settings.json，是异步的，所以下面另有 LaunchedEffect 回填。
+    var defaultMemoryMb by remember { mutableStateOf(Instance.DEFAULT_MEMORY_MB) }
     var jvmArgsText by remember(instance.directory) { mutableStateOf(instance.extraJvmArgs.joinToString("\n")) }
     var javaPath by remember(instance.directory, instance.javaPath) { mutableStateOf(instance.javaPath.orEmpty()) }
     var notice by remember(instance.directory) { mutableStateOf("") }
@@ -80,6 +85,19 @@ internal fun InstanceDetailScreen(
         } finally {
             loading = false
         }
+    }
+
+    LaunchedEffect(instance.directory, gameRoot) {
+        val settingsRoot = File(gameRoot.trim().ifBlank { defaultGameRoot() })
+        val stored = withContext(Dispatchers.IO) {
+            runCatching {
+                JsonSettingsRepository(JsonSettingsRepository.defaultFile(settingsRoot)).load()
+            }.getOrNull()
+        } ?: return@LaunchedEffect
+        val fallback = Instance.clampMemoryMb(stored.defaultMemoryMb)
+        defaultMemoryMb = fallback
+        // 跟随默认的实例：这一格要显示生效的那个数，而不是 instances.json 里写死的老数。
+        if (instance.memoryFollowsDefault) memoryText = fallback.toString()
     }
 
     /**
@@ -97,7 +115,11 @@ internal fun InstanceDetailScreen(
             }
             is InstanceEditResult.Ok -> edited
         }
-        val updated = result.instance
+        // 填的数等于「跟随默认」时的生效值 → 继续跟随；填成别的数就脱离。
+        // 与桌面详情页、启动页同一条口径，三处不能各判一套。
+        val following = instance.memoryFollowsDefault &&
+            result.instance.memoryMb == Instance.effectiveMemoryMb(instance, defaultMemoryMb)
+        val updated = result.instance.copy(memoryFollowsDefault = following)
         val memoryMb = updated.memoryMb
         val root = details?.layout?.gameRoot ?: File(gameRoot.trim())
         saving = true
@@ -112,10 +134,11 @@ internal fun InstanceDetailScreen(
                 notice = "保存失败：" + (error.message ?: error.toString())
                 return@launch
             }
-            notice = if (result.memoryWasClamped) {
-                "已按允许范围（" + Instance.MIN_MEMORY_MB + "–" + Instance.MAX_MEMORY_MB + " MB）改成 " + memoryMb + " MB。"
-            } else {
-                InstanceEdits.savedMessage(result)
+            notice = when {
+                result.memoryWasClamped ->
+                    "已按允许范围（" + Instance.MIN_MEMORY_MB + "–" + Instance.MAX_MEMORY_MB + " MB）改成 " + memoryMb + " MB。"
+                following -> "已保存：这一版跟随设置里的默认内存（" + memoryMb + " MB）。"
+                else -> InstanceEdits.savedMessage(result)
             }
             onSaved(updated)
         }
@@ -205,7 +228,12 @@ internal fun InstanceDetailScreen(
                 minLines = 2,
             )
             Text(
-                "只在桌面端启动时生效；手机端现在不启动游戏。",
+                if (instance.memoryFollowsDefault) {
+                    "这一版现在跟随设置里的默认内存（" + Instance.effectiveMemoryMb(instance, defaultMemoryMb) +
+                        " MB）。填回这个数、或者干脆不动它，保存后就继续跟随；填成别的数就只对这一版生效。"
+                } else {
+                    "只在桌面端启动时生效；手机端现在不启动游戏。"
+                },
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )

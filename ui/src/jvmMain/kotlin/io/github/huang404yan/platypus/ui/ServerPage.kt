@@ -363,8 +363,10 @@ fun ServerPage(initialGameRoot: String? = null, backend: LauncherBackend? = null
         )
         Text(
             "下一个能直接开的服务端，顺手写好 eula.txt 和双击就能开的启动脚本。" +
-                "五种都支持：原版走 Mojang 的 server.jar、Paper 走 fill.papermc.io、" +
+                "五种都支持：原版走 Mojang 的 server.jar、Paper 走它自己的构建站、" +
                 "Fabric 用 meta 现成的 server jar、Forge 与 NeoForge 跑各自的 installer（要几分钟）。",
+  // 这里不点域名：空壳包里所有上游都会被换成用户自己填的镜像根，写死一个站名只会让人
+  // 以为「这个站一定是通的」。具体走哪条路由 Endpoints 决定。
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )

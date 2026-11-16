@@ -30,9 +30,18 @@ class FirstRunTest {
         accountOwnsGame = ownsGame,
     )
 
+    /** 有完整服务端的孵化版（本地就是这样构建的）。shell 显式传 false，别让构建开关左右断言。 */
     private fun preview(firstRunAt: Long = 0L) = FirstRun.state(
         settings(firstRunAt = firstRunAt),
         edition = Edition.PREVIEW,
+        shell = false,
+    )
+
+    /** 空壳包：-Pplatypus.shell 构建，包里没有任何下载与搜索服务地址。 */
+    private fun previewShell(firstRunAt: Long = 0L) = FirstRun.state(
+        settings(firstRunAt = firstRunAt),
+        edition = Edition.PREVIEW,
+        shell = true,
     )
 
     @Test
@@ -179,5 +188,41 @@ class FirstRunTest {
         val state = formal(clientId = "00000000-0000-0000-0000-000000000000")
         assertTrue(state.clientIdReady)
         assertEquals(null, state.clientProblem)
+    }
+
+    @Test
+    fun `空壳包的提示要讲清自己缺的是服务地址`() {
+        // 空壳包里没有下载与搜索服务，照抄孵化版那句「不强制正版、离线也能玩」是误导：
+        // 用户照着做完打开下载页还是一片空白，会当成坏了。
+        val state = previewShell()
+        assertEquals("欢迎使用鸭嘴兽·孵化版", state.title)
+        val body = state.body
+        assertTrue(body.contains("空壳"), body)
+        assertTrue(body.contains("服务地址"), body)
+        assertTrue(body.contains("设置 → 下载"), body)
+    }
+
+    @Test
+    fun `空壳包不再推销申请应用ID`() {
+        val body = previewShell().body
+        assertFalse(body.contains("应用 ID"), body)
+        assertFalse(body.contains("离线也能进游戏"), body)
+    }
+
+    @Test
+    fun `空壳包仍然只弹一次并且能关掉`() {
+        val state = previewShell()
+        assertTrue(state.needed)
+        assertFalse(state.blocked)
+        assertTrue(state.dismissible)
+        assertEquals("知道了", state.primaryLabel)
+        assertEquals("稍后去填", state.secondaryLabel)
+    }
+
+    @Test
+    fun `有完整服务端的孵化版不显示空壳文案`() {
+        val body = preview().body
+        assertFalse(body.contains("空壳"), body)
+        assertEquals("先随便看看", preview().secondaryLabel)
     }
 }

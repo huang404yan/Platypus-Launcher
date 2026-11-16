@@ -24,6 +24,7 @@ import io.github.huang404yan.platypus.core.Brand
 import io.github.huang404yan.platypus.core.Credit
 import io.github.huang404yan.platypus.core.CreditKind
 import io.github.huang404yan.platypus.core.Credits
+import io.github.huang404yan.platypus.core.Endpoints
 
 /**
  * 关于页。免责声明必须在这里完整出现一次，
@@ -59,7 +60,23 @@ fun AboutPage() {
         HorizontalDivider()
 
         InfoRow("版本", Brand.version)
-        InfoRow("通道", if (Brand.isPreview) "孵化版（Platypus Preview）" else "正式版（Platypus Launcher）")
+        InfoRow(
+            "通道",
+            when {
+                // 空壳包要单独说出来：它看着和完整版一模一样，只有下载页是空的，
+                // 不在这里写明「这个包不带服务地址」，用户只会以为它坏了。
+                Endpoints.shell -> "孵化版 · 开源版（空壳，不含下载与搜索服务地址）"
+                Brand.isPreview -> "孵化版（Platypus Preview）"
+                else -> "正式版（Platypus Launcher）"
+            },
+        )
+        if (Endpoints.shell) {
+            Text(
+                Endpoints.SHELL_HINT,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
         InfoRow("协议", "Apache-2.0")
         InfoRow("仓库", Brand.HOMEPAGE)
 

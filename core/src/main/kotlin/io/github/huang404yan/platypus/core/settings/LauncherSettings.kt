@@ -93,20 +93,10 @@ data class LauncherSettings(
      * 但保留字段可以避免「存回去就把用户原来的值丢了」）；不要在新代码里读它。
      */
     val memoryAuto: Boolean = true,
-    /**
-     * 内存优化开关：勾上之后才去动 JVM 的堆参数（G1 / 新生代比例等）。
-     *
-     * 默认关：优化参数是「这台机器上跑这一版」调出来的，换版本就可能变成负优化；
-     * 而它一旦打开就会改写用户的启动参数，出了问题很难归因到「是那个勾」。
-     */
-    val memoryOptimize: Boolean = false,
-    /**
-     * 用户已经对「内存优化」这类会改启动参数的开关说过「以后都这样」。
-     *
-     * 存布尔而不是每次弹窗：同一个提示反复弹是骚扰，但第一次必须说清楚
-     *（它改的是 JVM 参数，不是界面偏好）。点过「以后都这样」就不再问。
-     */
-    val memoryAskSkipped: Boolean = false,
+    // 这里原来还有 memoryOptimize（内存优化）与 memoryAskSkipped（「以后都这样」）两格，
+    // 2026-11-16 一并删了：前者在设置页有个勾选框，但启动链从没读过它 —— -Xmx 只认实例上的
+    // memoryMb，勾了也不会往 JVM 参数里加任何东西；后者全仓库没有任何读取方，是个纯存储位。
+    // 删字段不会让旧 settings.json 读失败：Json 配了 ignoreUnknownKeys，多出来的键直接丢掉。
     /**
      * 上次真正启动过的实例（[io.github.huang404yan.platypus.core.instance.instanceKey] 的写法）。
      *

@@ -171,10 +171,6 @@ fun SettingsPage(
      */
     var base by remember { mutableStateOf(LauncherSettings()) }
 
-    // 内存优化（默认关）。「自动分配」开关 2026-11-16 删了：core 里没人读它，
-    // -Xmx 只认实例上的 memoryMb，留着就是个假的开关。
-    var memoryOptimize by remember { mutableStateOf(false) }
-
     LaunchedEffect(Unit) {
         val settings = withContext(Dispatchers.IO) {
             runCatching { repository.load() }.getOrDefault(LauncherSettings())
@@ -190,7 +186,6 @@ fun SettingsPage(
         autoBackupKeep = settings.autoBackupKeep.toString()
         curseForgeKey = settings.curseForgeApiKey
         serverBase = settings.serverBase
-        memoryOptimize = settings.memoryOptimize
         base = settings
         loaded = true
         loadedFrom = (repository as? JsonSettingsRepository)?.path.orEmpty()
@@ -239,7 +234,6 @@ fun SettingsPage(
                         autoBackupKeep = clampedKeep,
                         curseForgeApiKey = curseForgeKey,
                         serverBase = serverBase,
-                        memoryOptimize = memoryOptimize,
                     ),
                 )
             }
@@ -315,7 +309,6 @@ fun SettingsPage(
                         autoBackupKeep = backupPolicyNow().keep,
                         curseForgeApiKey = curseForgeKey,
                         serverBase = serverBase,
-                        memoryOptimize = memoryOptimize,
                     ),
                 )
             }
@@ -361,7 +354,6 @@ fun SettingsPage(
                         autoBackupKeep = backupPolicyNow().keep,
                         curseForgeApiKey = curseForgeKey,
                         serverBase = serverBase,
-                        memoryOptimize = memoryOptimize,
                     ),
                 )
             }
@@ -400,7 +392,6 @@ fun SettingsPage(
                         autoBackupKeep = backupPolicyNow().keep,
                         curseForgeApiKey = curseForgeKey,
                         serverBase = serverBase,
-                        memoryOptimize = memoryOptimize,
                     ),
                 )
             }.onSuccess { stored ->
@@ -425,7 +416,6 @@ fun SettingsPage(
         autoBackupEnabled = AutoBackupPolicy.DEFAULT.enabled
         autoBackupHours = AutoBackupPolicy.DEFAULT.intervalHours.toString()
         autoBackupKeep = AutoBackupPolicy.DEFAULT.keep.toString()
-        memoryOptimize = false
         noticeIsError = false
         notice = "已填回默认值，点「保存」才生效。"
     }
@@ -460,7 +450,6 @@ fun SettingsPage(
                         autoBackupKeep = backupPolicyNow().keep,
                         curseForgeApiKey = cleaned,
                         serverBase = serverBase,
-                        memoryOptimize = memoryOptimize,
                     ),
                 )
             }.onSuccess {
@@ -510,7 +499,6 @@ fun SettingsPage(
                         autoBackupHours = backupPolicyNow().intervalHours,
                         autoBackupKeep = backupPolicyNow().keep,
                         curseForgeApiKey = curseForgeKey,
-                        memoryOptimize = memoryOptimize,
                     ),
                 )
             }.onSuccess {
@@ -548,7 +536,6 @@ fun SettingsPage(
                         autoBackupKeep = backupPolicyNow().keep,
                         curseForgeApiKey = curseForgeKey,
                         serverBase = serverBase,
-                        memoryOptimize = memoryOptimize,
                     ),
                 )
             }.onSuccess {
@@ -623,8 +610,6 @@ fun SettingsPage(
                     onGameRootChange = { gameRoot = it },
                     memoryText = memoryText,
                     onMemoryChange = { memoryText = it },
-                    memoryOptimize = memoryOptimize,
-                    onMemoryOptimizeChange = { memoryOptimize = it },
                     loaded = loaded,
                 )
                 // Java 运行时就跟着启动项放：“这个版本要用哪个 Java”与
@@ -663,7 +648,11 @@ fun SettingsPage(
  *
  * 内存这一块只有一条滑条加一排常用档位（2026-11-16 改）：内存就是「给多少」一个数，
  * 而「自动分配」从来没接进 JVM 参数（core 里没人读 memoryAuto，-Xmx 只认实例上的
- * memoryMb），留着开关只会让人以为它在起作用。内存优化仍是独立勾选。
+ * memoryMb），留着开关只会让人以为它在起作用。
+ *
+ * 「内存优化」那个勾选框也删了（同一天，后一手）：它在 core 里同样没有任何读取方，
+ * 勾上不会往 JVM 参数里加哪怕一条 —— 一个勾了没反应的勾比没有更糟。真要做优化参数，
+ * 得先让启动链认它，再回来加界面。
  */
 @Composable
 private fun LaunchTab(
@@ -671,8 +660,6 @@ private fun LaunchTab(
     onGameRootChange: (String) -> Unit,
     memoryText: String,
     onMemoryChange: (String) -> Unit,
-    memoryOptimize: Boolean,
-    onMemoryOptimizeChange: (Boolean) -> Unit,
     loaded: Boolean,
 ) {
     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -711,17 +698,6 @@ private fun LaunchTab(
                 onChange = { onMemoryChange(it.toString()) },
                 enabled = loaded,
             )
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
-                Checkbox(checked = memoryOptimize, onCheckedChange = onMemoryOptimizeChange, enabled = loaded)
-                Column(Modifier.weight(1f).padding(top = 12.dp)) {
-                    Text("内存优化", style = MaterialTheme.typography.bodyLarge)
-                    Text(
-                        "往 JVM 参数里加几条（堆与新生代的初始占比、G1 的停顿目标）。只影响启动参数，不动实例文件。",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-            }
             Text(
                 "范围 " + Instance.MIN_MEMORY_MB + "–" + Instance.MAX_MEMORY_MB + " MB，按 128 MB 一档；" +
                     "上限再看本机物理内存收窄（留 1 GB 给系统）。下面那排是常停的几档，点一下就跳过去。",
@@ -812,9 +788,16 @@ private fun DownloadTab(
                 "镜像给的东西对不上就会被判失败并退回官方源，不会装上一个坏文件。",
         ) {
             Text(
-                "现在用的镜像是 BMCLAPI（bmclapi2.bangbang93.com）：游戏本体、libraries、assets " +
-                    "都走它。模组与整合包本来就是从 Modrinth / CurseForge 直接下，没有国内镜像可用，" +
-                    "这一项对它们没有影响。",
+                if (Endpoints.shell) {
+                    // 空壳包里不能点名任何现成镜像：那一份是别人的机器，随包发出去等于让所有
+                    // 下载者共用别人的带宽与配额 —— 正是这一版要断掉的事。这里只说「填进去的那个」。
+                    "游戏本体、libraries、assets 都走上面填的那个根。模组与整合包本来就是从 " +
+                        "Modrinth / CurseForge 直接下，这一项对它们没有影响。"
+                } else {
+                    "游戏本体、libraries、assets 都走上面选的那条源。" +
+                        "模组与整合包本来就是从 Modrinth / CurseForge 直接下，没有国内镜像可用，" +
+                        "这一项对它们没有影响。"
+                },
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )

@@ -178,7 +178,8 @@ object ServerInstaller {
         val builds = PaperMeta.parseBuilds(text)
         if (builds.isEmpty()) {
             throw IOException(
-                "Paper 没有 " + gameVersion + " 的构建：fill.papermc.io 返回了空列表。" +
+                // 不写死域名：空壳包里这个上游会被换成用户自己填的镜像根，点名一个站会把人带偏。
+                "Paper 没有 " + gameVersion + " 的构建：构建站返回了空列表。" +
                     "换个游戏版本，或者先用原版服务端。",
             )
         }
