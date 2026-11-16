@@ -1,5 +1,6 @@
 package io.github.huang404yan.platypus.core.auth
 
+import io.github.huang404yan.platypus.core.Endpoints
 import io.github.huang404yan.platypus.core.download.DownloadItem
 import io.github.huang404yan.platypus.core.download.HttpDownloader
 import io.github.huang404yan.platypus.core.download.DownloadPreference
@@ -48,11 +49,12 @@ data class AuthlibInjectorBuild(
  */
 object AuthlibInjector {
 
-    /** 官方发布入口。 */
-    const val LATEST_URL = "https://authlib-injector.yushi.moe/artifact/latest.json"
+    /** 官方发布入口。空壳包里是用户填的镜像根，没填就是空串。 */
+    val LATEST_URL: String get() = Endpoints.join(Endpoints.authlibInjector(), "/artifact/latest.json")
 
     /** BMCLAPI 的镜像。实测与本文件的 sha256 完全一致（2026-11-15 核对）。 */
-    const val LATEST_URL_MIRROR = "https://bmclapi2.bangbang93.com/mirrors/authlib-injector/artifact/latest.json"
+    val LATEST_URL_MIRROR: String
+        get() = Endpoints.join(Endpoints.bmclapi(), "/mirrors/authlib-injector/artifact/latest.json")
 
     /** jar 文件名。故意不带版本号：启动参数里写死了路径，换版本时不该改参数。 */
     const val JAR_NAME = "authlib-injector.jar"
@@ -91,7 +93,9 @@ object AuthlibInjector {
 
     /** 拉最新版本信息；官方源失败时退到镜像。 */
     suspend fun latest(): AuthlibInjectorBuild = withContext(Dispatchers.IO) {
-        val urls = mutableListOf(LATEST_URL, LATEST_URL_MIRROR)
+        // 空壳包里两个地址都可能是空串（没填镜像根时），过滤掉再试，否则会去 openConnection("")。
+        val urls = listOf(LATEST_URL, LATEST_URL_MIRROR).filter { it.isNotBlank() }.distinct()
+        if (urls.isEmpty()) throw YggdrasilException(Endpoints.SHELL_HINT)
         var last: Exception? = null
         for (url in urls) {
             try {
@@ -205,10 +209,12 @@ object AuthlibInjector {
     }
 
     /** 主地址的镜像写法；不是官方地址就返回空串。 */
-    private fun mirrorOf(url: String): String = when {
-        url.startsWith("https://authlib-injector.yushi.moe/") ->
-            LATEST_URL_MIRROR.substringBefore("/artifact/latest.json") + url.removePrefix("https://authlib-injector.yushi.moe")
-        else -> ""
+    private fun mirrorOf(url: String): String {
+        val official = Endpoints.authlibInjector()
+        if (official.isEmpty() || !url.startsWith(official + "/")) return ""
+        val mirrorRoot = Endpoints.join(Endpoints.bmclapi(), "/mirrors/authlib-injector")
+        if (mirrorRoot.isEmpty()) return ""
+        return mirrorRoot + url.removePrefix(official)
     }
 
     private fun fetchText(url: String): String {

@@ -1,5 +1,6 @@
 package io.github.huang404yan.platypus.core.loader
 
+import io.github.huang404yan.platypus.core.Endpoints
 import io.github.huang404yan.platypus.core.download.DownloadItem
 import io.github.huang404yan.platypus.core.version.DownloadPlanner
 import io.github.huang404yan.platypus.core.version.Library
@@ -22,24 +23,29 @@ import java.io.File
  */
 object FabricMeta {
 
-    const val BASE_URL: String = "https://meta.fabricmc.net"
+    /**
+     * Fabric 元数据的根，不带末尾斜杠。空壳发布包里是用户填的镜像根。
+     *
+     * 这里是 val 而不是 const val：地址随包与用户设置变，不能在编译期写死。
+     */
+    val BASE_URL: String get() = Endpoints.fabricMeta()
 
-    /** Fabric 自家 maven；profile json 里 url 缺省时的默认仓库之一。 */
-    const val FABRIC_MAVEN: String = "https://maven.fabricmc.net/"
+    /** Fabric 自家 maven（带末尾斜杠）；profile json 里 url 缺省时的默认仓库之一。 */
+    val FABRIC_MAVEN: String get() = Endpoints.dir(Endpoints.fabricMaven())
 
-    /** Mojang 官方库仓库；非 Fabric 组件的兜底仓库。 */
-    const val MOJANG_LIBRARIES: String = "https://libraries.minecraft.net/"
+    /** Mojang 官方库仓库（带末尾斜杠）；非 Fabric 组件的兜底仓库。 */
+    val MOJANG_LIBRARIES: String get() = Endpoints.dir(Endpoints.mojangLibraries())
 
     /** Fabric 生成的服务端/客户端入口类，用来判断 profile json 是否像样。 */
     const val MAIN_CLASS: String = "net.fabricmc.loader.impl.launch.knot.KnotClient"
 
-    /** GET 这个地址拿到该游戏版本可用的 loader 列表。 */
+    /** GET 这个地址拿到该游戏版本可用的 loader 列表。空壳包没填镜像根时是空串。 */
     fun loaderListUrl(gameVersion: String): String =
-        "$BASE_URL/v2/versions/loader/$gameVersion"
+        Endpoints.join(BASE_URL, "/v2/versions/loader/" + gameVersion)
 
-    /** GET 这个地址拿到可直接启动的完整版本 json。 */
+    /** GET 这个地址拿到可直接启动的完整版本 json。空壳包没填镜像根时是空串。 */
     fun profileUrl(gameVersion: String, loaderVersion: String): String =
-        "$BASE_URL/v2/versions/loader/$gameVersion/$loaderVersion/profile/json"
+        Endpoints.join(BASE_URL, "/v2/versions/loader/" + gameVersion + "/" + loaderVersion + "/profile/json")
 
     /**
      * 安装后的版本号，与 PCL 习惯一致：<原版号>-fabric-<loader 版本>。
@@ -241,6 +247,8 @@ object FabricLibraries {
             group.startsWith("net.fabricmc") || group.startsWith("org.quiltmc") -> FabricMeta.FABRIC_MAVEN
             else -> FabricMeta.MOJANG_LIBRARIES
         }
+        // 空壳包没填镜像根时 base 是空串 —— 宁可返回 null 让调用方跳过，也不返回半截地址。
+        if (base.isEmpty()) return null
         return base + path
     }
 

@@ -1,5 +1,6 @@
 package io.github.huang404yan.platypus.core.mods
 
+import io.github.huang404yan.platypus.core.Endpoints
 import io.github.huang404yan.platypus.core.download.DownloadItem
 import io.github.huang404yan.platypus.core.download.DownloadReport
 import io.github.huang404yan.platypus.core.download.HttpDownloader
@@ -128,6 +129,8 @@ object ModInstaller {
      * 用不到完整的序列化框架。响应体大小有限（只回命中的那些），30 秒读超时够。
      */
     internal fun postJson(url: String, body: String): String {
+        // 空壳包没填镜像根时 url 是空串，直接给中文说明，不要拿空地址去 openConnection。
+        if (url.isBlank()) throw IOException(Endpoints.SHELL_HINT)
         val connection = try {
             @Suppress("DEPRECATION")
             java.net.URL(url).openConnection() as java.net.HttpURLConnection
@@ -157,6 +160,7 @@ object ModInstaller {
     }
 
     internal fun fetchText(url: String): String {
+        if (url.isBlank()) throw IOException(Endpoints.SHELL_HINT)
         val connection = try {
             @Suppress("DEPRECATION")
             java.net.URL(url).openConnection() as java.net.HttpURLConnection

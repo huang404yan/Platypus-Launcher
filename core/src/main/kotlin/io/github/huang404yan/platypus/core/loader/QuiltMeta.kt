@@ -1,5 +1,6 @@
 package io.github.huang404yan.platypus.core.loader
 
+import io.github.huang404yan.platypus.core.Endpoints
 import io.github.huang404yan.platypus.core.version.VersionJson
 import io.github.huang404yan.platypus.core.version.VersionJsonFormat
 import kotlinx.serialization.Serializable
@@ -22,21 +23,25 @@ import kotlinx.serialization.Serializable
  */
 object QuiltMeta {
 
-    const val BASE_URL: String = "https://meta.quiltmc.org"
+    /** Quilt 元数据的根，不带末尾斜杠。空壳发布包里是用户填的镜像根。 */
+    val BASE_URL: String get() = Endpoints.quiltMeta()
 
-    /** Quilt 自家 maven。profile json 里每个库都自带 url，这里只是兜底与文档用。 */
-    const val QUILT_MAVEN: String = "https://maven.quiltmc.org/repository/release/"
+    /** Quilt 自家 maven（带末尾斜杠）。profile json 里每个库都自带 url，这里只是兜底与文档用。 */
+    val QUILT_MAVEN: String get() = Endpoints.dir(Endpoints.quiltMaven()) + "repository/release/"
 
     /** Quilt 生成的客户端入口类，用来判断 profile json 是否像样。 */
     const val MAIN_CLASS: String = "org.quiltmc.loader.impl.launch.knot.KnotClient"
 
-    /** GET 这个地址拿到该游戏版本可用的 loader 列表。 */
+    /** GET 这个地址拿到该游戏版本可用的 loader 列表。空壳包没填镜像根时是空串。 */
     fun loaderListUrl(gameVersion: String): String =
-        BASE_URL + "/v3/versions/loader/" + gameVersion.trim()
+        Endpoints.join(BASE_URL, "/v3/versions/loader/" + gameVersion.trim())
 
-    /** GET 这个地址拿到可直接启动的完整版本 json。 */
-    fun profileUrl(gameVersion: String, loaderVersion: String): String =
-        loaderListUrl(gameVersion) + "/" + loaderVersion.trim() + "/profile/json"
+    /** GET 这个地址拿到可直接启动的完整版本 json。空壳包没填镜像根时是空串。 */
+    fun profileUrl(gameVersion: String, loaderVersion: String): String {
+        val base = loaderListUrl(gameVersion)
+        if (base.isEmpty()) return ""
+        return base + "/" + loaderVersion.trim() + "/profile/json"
+    }
 
     /**
      * 安装后的版本号：<原版号>-quilt-<loader 版本>，与 Fabric 那边的

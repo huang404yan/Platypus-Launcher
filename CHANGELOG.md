@@ -19,7 +19,7 @@ GitHub Release 的说明也从这里取对应小节。
 
 | 版本 | 日期 | 一句话 |
 |---|---|---|
-| 0.8.0-preview.20 | 未发布 | 侧栏顺序重排、模组清单带图标、内存只留设置页一条连续滑条、下载页只下载、默认游戏目录搬出 C 盘、Java 自动补与可删、孵化版启动门禁 |
+| 0.8.0-preview.20 | 未发布 | 侧栏顺序重排、模组清单带图标、内存只留设置页一条连续滑条、下载页只下载、默认游戏目录搬出 C 盘、Java 自动补与可删、孵化版启动门禁、正式版按账号验一次、开源版可打空壳包 |
 | 0.8.0-preview.19 | 未发布 | 侧栏身份标志、顶栏五项均分与两端可折叠、启动参数下移 |
 | 0.8.0-preview.18 | 未发布 | 副页面不再叠字、启动页身份三格与版本卡片网格、目录与 Java 收成可折叠 |
 | 0.8.0-preview.17 | 未发布 | 桌面改成顶部五项 + 左栏二级、启动页身份三格与内存三态、版本设置七个分区、联机分两栏 |
@@ -39,7 +39,7 @@ GitHub Release 的说明也从这里取对应小节。
 
 ## 0.8.0-preview.20（未发布）
 
-> 本节把两轮改动并在一起记：先是侧栏顺序与模组图标，接着是内存与模组的两摊重做。
+> 本节把几轮改动并在一起记：先是侧栏顺序与模组图标，接着是内存与模组的两摊重做，最后是正式版验证口径与开源版的空壳开关。
 
 preview.19 把配置项挪到侧栏底部之后，顺序反过来别扭了：上面先是身份，中间夹着启动参数，「启动游戏」这个大按钮却被推到了它们中间。这一版调顺序，顺带把「模组一行行小字」换成有图的样子。
 
@@ -66,9 +66,12 @@ preview.19 把配置项挪到侧栏底部之后，顺序反过来别扭了：上
 - **一份 Java 都没有时，启动器自己补一份 Java 17**。安装包和便携版都不带 JRE —— 便携版解压出来就一个文件夹，往里塞 150 MB 的运行时说不过去；安装版多出来的体积也没人愿意白付。所以这件事放在运行时做：探测完一次，本机一份 Java 都找不到就静默下 Java 17，进度走同一个提示位，装好自动出现在 Java 列表里。为什么是 17 而不是更新的：1.18–1.20.4 全要 17，整合包绝大多数也停在这条线上；1.21.9+ 才要 25，那些版本的用户列表里会有别的 Java。失败（断网、Mojang 清单拉不到）不把整页打成错误态，回头点「自动补 Java N」还能重试。
 - **托管 Java 挪到启动器自己的目录下，并且能删了**（设置 → 启动 → 「本机已经找到的 Java」）。以前下在 `<游戏目录>/runtime/`：换一个游戏目录就找不到自己下过的 Java，卸载启动器时那份运行时反而留在用户盘上。现在落盘位置是 `<启动器目录>/java/<组件名>/` —— 安装版是 exe 所在的那层，便携版是解压出来的那个文件夹。叫 `java/` 而不是 `runtime/` 是有原因的：jpackage 打出来的包里，`<启动器目录>/runtime/` 本来就是启动器自己的那个 JRE，把用户下的运行时装进去会跟程序自带的混成一层，升级覆盖时互相牵连。旁边多一个「删除」按钮，只对「启动器下的、且路径确实在这几个 runtime 根里」的那些画出来：`DesktopJavaRuntimeService.detect` 会把 JAVA_HOME、PATH、注册表、别的启动器的 runtime 全扫进来，只信数据里那个 managed 标记的话，一次标记错误就会去删 `C:\Program Files\Java\jdk-17`。删除沿用实例删除那套「先改名成 `.deleting-<时间戳>` 再递归删、删一半失败改名回来」，文件被占用（游戏还开着）时给一句「关掉之后再试」，不进回收站。老版本下在游戏目录 `runtime/` 的那份也认，升级上来的用户两种都在盘上。
 - **孵化版没填 Client ID 时「启动游戏」灰掉，旁边多一个「测试启动」**。仓库公开之后安装包里不带微软的 Client ID（那一份从来就不该进仓库），孵化版发出去的用户十有八九没填过 —— 结果是点正版登录报错、点启动倒是能起来，两个入口的说法互相矛盾。现在孵化版检测不到 ID 就把启动按钮灰掉，并在按钮上方写明缺什么、去「设置 → 账号」哪一页填；想先跑起来看别的功能，就勾左栏的「测试启动」（跳过 ID 检查，只跳过这一道 —— 登录该失败还是失败）。正式版不受影响：构建方注入 ID，这道门禁根本不出现。
+- **正式版只验一次账号，但验得比原来实**。以前「要不要登录」只看 `firstRunAt` 这一个时间戳，写过一次就永远放行 —— 换一个号、或者那号其实没买过游戏，也照样过。现在判定改成按**当前选中的那个账号**：`StoredAccount` 多一个 `entitledAt`，只有登录时向微软 `GET /entitlements/mcstore` 确认过持有记录才会写进去（那句请求本来就在 `MicrosoftAuthClient.authenticate` 里，只是以前没落盘）。所以「验过一次」这句话现在有据可查，而不是「弹过一次窗」。老账号文件里没有这个字段，用 `lastLoginAt` 兜底 —— 那个年代登录同样走了同一条校验，不兜底等于让老用户白挨一次关门。为什么只验一次而不是每次启动：PCL-CE、HMCL 都是这个口径，启动器不该变成每天要掏一次的东西；加强的部分放在「验什么」上（真的查持有记录），不放在「验几次」上。
+- **开源版可以打成一个不带下载服务的空壳包**（构建时加 `-Pplatypus.shell`，或环境变量 `PLATYPUS_SHELL=true`）。仓库公开之后，谁都能编出一个带全套下载地址的包，镜像与 maven 全指到别人的机器上；所以给发布方留一个开关：打开之后包里**根本不含可用的服务地址**，界面照旧，版本清单、加载器列表、在线安装、整合包、Modrinth 搜索与自动下载全部显示「这个包不带下载与搜索服务。去「设置 → 下载」填一个镜像地址」。设置 → 下载 里多一组「服务地址」，填一个镜像根（`https://你的镜像/`）就整页复活 —— 约定是根替代所有官方主机、路径照抄 BMCLAPI 布局（`/mc/game/version_manifest_v2.json`、`/<sha1 前两位>/<sha1>`）。为什么用构建开关而不是运行期判断版本：运行期判断的话地址还躺在 jar 里，改一行常量就绕过去了；空壳包连常量都只有一份真值在 `Endpoints`，业务类全部从取值器拼。本机调试与自助构建不加这个开关，一切照旧。
 
 ### 修了什么
 
+- **在设置页点任何一次「保存」，都会把「欢迎窗弹过没有」和「上次玩的是哪一版」冲掉**。设置页那 6 个「保存某一项」的入口（保存账号、改应用 ID、换配色、存 CurseForge 密钥、切下载源、存服务地址）原先都是 `LauncherSettings(...)` 现造一份新的再写盘，构造时只填这一页认识的字段，`firstRunAt` 与 `lastInstanceKey` 落到默认值 0 和空串 —— 结果：改一次配色，下次启动欢迎窗又弹一次、启动页也不再记得上次那版。现在这 6 处一律改成 `base.copy(...)`，没动到的字段原样带回去。
 - **启动按钮灰着、页面上不说为什么，修掉了**。「启动游戏」能不能点是 `canLaunch = selected != null && selectedJava != null`，也就是只认「选了版本」和「选中了 Java」两件事 —— 跟有没有填微软那串 client ID 没关系（那个只拦正版登录，不拦启动）。可真缺 Java 的时候，界面上只有一个灰按钮：检测 Java 的入口藏在「游戏目录与 Java（点开改）」这个默认折起来的块里，用户第一反应是「是不是要买号 / 是不是要配 ID」。现在按钮上方会写明这一次缺的是什么：「还没选版本」「本机一个 Java 都没有」「需要一个 Java 21 才能启动」，并且指路到哪个折叠块里补。刚进页面还在探测 Java 的那几百毫秒不写，免得一闪而过地误报缺 Java。
 - **「登记」完回到主页看不到那个版本，修掉了**。启动页的实例清单是在页面第一次显示时读一次 `instances.json`，「管理版本…」那边登记只写盘、不通知启动页，回来时页面还停在打开副页面之前的那份快照上 —— 于是「明明登记成功了，版本卡片里没有」。现在副页面关闭会带一个计数回给启动页，加一就重扫。
 - **启动游戏移到侧栏最下面，并且钉在栏底**。现在从上到下是：身份三格 → 身份标志 → 离线用户名 → 启动游戏。理由是「配好参数 → 一键开」符合手指往下落的顺序：先看用哪个身份、再确认这一版的参数，最后那个大按钮就在拇指够得到的最下面。这一版又把侧栏拆成两层：上面那截内容自己滚、`weight(1f)` 把剩余高度全吃掉，按钮固定在外层底部 —— 以前整栏一个 `Column` 从头排到底，内容不满时按钮悬在离栏底一百多像素的地方，手指要往下找。
@@ -97,13 +100,18 @@ preview.19 把配置项挪到侧栏底部之后，顺序反过来别扭了：上
 - 删托管 Java 是直接把目录删掉，不进回收站（和删实例、删模组一样：项目零第三方依赖，走回收站要 COM 或 JNA）。删除前有确认框，且只对启动器自己下的那些出现。
 - 「测试启动」只跳过 Client ID 检查，正版登录该失败还是失败；它不会给微软登录凭空造一个 ID。
 - 自动补 Java 只在本机**一份 Java 都探测不到**时触发。已经有别的 Java（哪怕版本对不上当前实例）不会自动再下一份，仍要手动点「自动补 Java N」。
+- 正式版的那次验证只在引导没走过时发生。走完之后换一个没用过的号，不会再拦一次（这是刻意的：PCL-CE 与 HMCL 都是「说过一次就够」）。真换了没买过游戏的号，进服务器在下线时会被挡，不会在这里被挡。
+- 空壳包（`-Pplatypus.shell`）里，微软正版登录、离线登录、外置登录（authlib-injector）照常能用 —— 那几条链路走的是微软官方端点与用户自己填的地址，不属于「下载服务」。真正停用的只有版本清单、加载器列表、在线安装、整合包、Modrinth 搜索与自动下载。
+- 空壳包的「服务地址」要按 BMCLAPI 的布局填（同一个根替代所有官方主机，路径保持原样）。填一个只镜像了版本清单的地址，能拉到版本列表，但装到一半会失败在 `libraries` 或 `assets` 那一步。
 
 ### 校验
 
 - `gradlew :core:test :ui:jvmTest :app-desktop:compileKotlin :app-desktop:createDistributable -PskipWix` → `BUILD SUCCESSFUL`，0 条 `e: `、0 条 FAILED。
-- 全量单测 **85 个类 1037 个用例，0 失败 0 错误 0 跳过**（core 80 类 991 例 + ui 5 类 46 例）。本轮新增 14 例全在 `ManagedJavaTest` —— 托管根就是启动器目录下的 java、托管根不叫 runtime 免得和 jpackage 自带的 JRE 撞车、老位置是游戏目录下的 runtime、老位置那份也删得掉、认出组件目录里的 java、bin 名大小写、系统 JDK 推不出托管目录、可执行文件不在 bin 下不认、组件名不能是双点、多代托管根都能认、非托管不给删、托管且路径在根里才给删、目录没了画不出按钮、没有托管根不给删。界面上的滑条手感、竖条动画、行点击没有可断言的口径，靠编译与手动验收。
+- 全量单测 **86 个类 1057 个用例，0 失败 0 错误 0 跳过**（core 81 类 1011 例 + ui 5 类 46 例）。其中 14 例在 `ManagedJavaTest` —— 托管根就是启动器目录下的 java、托管根不叫 runtime 免得和 jpackage 自带的 JRE 撞车、老位置是游戏目录下的 runtime、老位置那份也删得掉、认出组件目录里的 java、bin 名大小写、系统 JDK 推不出托管目录、可执行文件不在 bin 下不认、组件名不能是双点、多代托管根都能认、非托管不给删、托管且路径在根里才给删、目录没了画不出按钮、没有托管根不给删。界面上的滑条手感、竖条动画、行点击没有可断言的口径，靠编译与手动验收。
 - 图标、滑条、行点击的**肉眼验收由用户手动做**：桌面端点击验证不由智能体代劳。
-- 桌面免安装目录按本轮代码重建过：`app-desktop/build/compose/binaries/main/app/Platypus Preview/` 整目录 135,608,841 字节（202 个文件），`Platypus Preview.exe` 597,504 字节（17:18:19 生成）。解包复核新代码进包：`ui-jvm-0.8.0-preview.20-3b3dd026f472292d174d1afb27f18391.jar` 共 525 条目，里面的 `LaunchPageKt$LaunchPage$installJavaSilently$1.class` 与 `LaunchPageKt$LaunchPage$detectJava$1.class` 都在（自动补 Java 的实证），`LaunchPageKt.class` 常量池里有 `testLaunch` / `showTestLaunch`（测试启动的实证），`JavaTabKt.class` 里有 `pendingDelete`（删除按钮的实证）；`core-0.8.0-preview.20-a8ee484186fd9d618f298a9b29d0b.jar` 共 670 条目，`core/runtime/ManagedJava.class` 里有 `legacyRootOf` / `homeIn`；`app-desktop-0.8.0-preview.20-eb45f8b6e5a18f69625bf508edd6.jar` 的 `runtime/DesktopJavaRuntimeService.class` 里有 `remove` / `lastRemoveError` / `launcherDir`。
+- 桌面免安装目录按本轮代码重建过：`app-desktop/build/compose/binaries/main/app/Platypus Preview/` 整目录 135,630,960 字节（202 个文件），`Platypus Preview.exe` 597,504 字节（18:14 生成）。解包复核新代码进包：`ui-jvm-0.8.0-preview.20-8e2eba74ef65f018769f92ab3e93479f.jar` 共 526 条目，`LaunchPageKt$LaunchPage$installJavaSilently$1.class` 与 `LaunchPageKt$LaunchPage$detectJava$1.class` 都在（自动补 Java 的实证），`LaunchPageKt.class` 常量池里有 `testLaunch` / `showTestLaunch`（测试启动的实证），`JavaTabKt.class` 里有 `pendingDelete`（删除按钮的实证），`SettingsPageKt.class` 里有 `serverBase` / `saveServerBase`（服务地址输入框的实证）；`core-0.8.0-preview.20-4fa95d289c11c75860eec2eb2b66dc23.jar` 共 671 条目，`core/Endpoints.class` 与 `core/BuildInfo.class` 都在，`core/runtime/ManagedJava.class` 里有 `legacyRootOf` / `homeIn`；`app-desktop-0.8.0-preview.20-1ee0ef464aee984b9053a77ad6764f9.jar` 的 `runtime/DesktopJavaRuntimeService.class` 里有 `remove` / `lastRemoveError` / `launcherDir`。
+- **空壳开关实跑过**：`-Pplatypus.shell=true` 下 `:core:compileKotlin`、`:ui:compileKotlinJvm :app-desktop:compileKotlin`、`:core:jar` 全部 EXIT=0、0 条 `e: `，生成的 `BuildInfo.kt` 里 `const val SHELL: Boolean = true`；随后不带开关重跑恢复 `false`（工作区当前状态）。扫空壳 jar 的 `.class` 字节串核对地址残留：`piston-meta.mojang.com`、`api.modrinth.com`、`maven.neoforged.net`、`api.curseforge.com` 只在 `Endpoints.class` 里出现，`bmclapi2.bangbang93.com` 在 `Endpoints.class` 与 `DownloadSources.class`，`fill.papermc.io` 在 `Endpoints.class` 与 `ServerInstaller.class` —— 业务类已全部改成从取值器拼，不存在「改一行常量就复活」的第二处。
+- 本轮新增的 `EndpointsTest` 15 例：完整版原样返回、完整版 `serviceReady` 恒真、`normalizeBase` 去空格与尾斜杠、接受引号包裹、只认 http(s)、只写协议头不算地址、认不出的主机不改（外置登录地址）、官方主机换根保留路径、`launchermeta` 不会被 `launcher` 前缀先吃掉、资源与库也走镜像、没填根时官方地址变空串、**没填根也不该动用户自己填的地址**、`join` 根空返回空串、`join` 容忍两边斜杠、`dir` 给老代码留带尾斜杠的根。最后那条「不该动用户地址」在初版实现上是红的：`rewriteHost` 先判「没填根」再判「认不认得出主机」，把外置登录地址也清空了，实跑报 `expected:<[https://littleskin.cn/api/yggdrasil]> but was:<[]>`；顺序调过来才过。
 - `msi` / `zip` / `apk` 未按本轮代码重出 —— 发布时统一出三端，免得中间过程反复打包。
 - 安卓端只做了编译验证（`:androidApp:compileDebugKotlin` → 0 条 `e: `），本轮没有改安卓端界面。
 - 真实模组的图标覆盖率实测（本机 75 个 jar）：只有 56 个 jar 里带 `icon.png`，但按实现的候选顺序能出图 **73 / 75**；出不了图的只有 `bwncr` 与 `EMIProfessions` 两个。

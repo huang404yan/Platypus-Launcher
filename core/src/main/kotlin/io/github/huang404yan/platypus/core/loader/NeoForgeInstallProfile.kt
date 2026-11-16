@@ -1,5 +1,6 @@
 package io.github.huang404yan.platypus.core.loader
 
+import io.github.huang404yan.platypus.core.Endpoints
 import io.github.huang404yan.platypus.core.version.VersionJsonFormat
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
@@ -44,7 +45,8 @@ data class InstallerLibrary(
 object NeoForgeInstallProfile {
 
     /** BMCLAPI 的 Mojang 库镜像前缀（实测对 libraries.minecraft.net 的路径可用，会 302 到别的镜像）。 */
-    private const val MOJANG_MIRROR_PREFIX = "https://bmclapi2.bangbang93.com/libraries/"
+    private val MOJANG_MIRROR_PREFIX: String
+        get() = Endpoints.dir(Endpoints.join(Endpoints.bmclapi(), "/libraries"))
 
     /**
      * BMCLAPI 的备用直连镜像。
@@ -150,8 +152,9 @@ object NeoForgeInstallProfile {
      */
     fun downloadUrl(original: String): String {
         val url = original.trim()
-        if (url.startsWith(NeoForgeMeta.OFFICIAL_MAVEN)) {
-            return NeoForgeMeta.NEOFORGE_MAVEN + url.removePrefix(NeoForgeMeta.OFFICIAL_MAVEN)
+        val official = NeoForgeMeta.OFFICIAL_MAVEN
+        if (official.isNotEmpty() && url.startsWith(official)) {
+            return NeoForgeMeta.NEOFORGE_MAVEN + url.removePrefix(official)
         }
         return url
     }
@@ -168,14 +171,19 @@ object NeoForgeInstallProfile {
      */
     fun mirrorUrls(library: InstallerLibrary): List<String> {
         val official = library.url.trim()
+        val neoforgedOfficial = NeoForgeMeta.OFFICIAL_MAVEN
+        val mojangLibraries = NeoForgeMeta.MOJANG_LIBRARIES
         return when {
-            official.startsWith(NeoForgeMeta.OFFICIAL_MAVEN) -> {
-                val tail = official.removePrefix(NeoForgeMeta.OFFICIAL_MAVEN)
+            neoforgedOfficial.isNotEmpty() && official.startsWith(neoforgedOfficial) -> {
+                val tail = official.removePrefix(neoforgedOfficial)
                 // 先试落地镜像的直连（快，且绕开一次 302），再试 CreeperHost 补缺件，最后才是本机基本不通的官方地址
                 listOf(BMCLAPI_DIRECT_MIRROR + tail, CREEPERHOST_MIRROR + tail, official)
             }
-            official.startsWith(NeoForgeMeta.MOJANG_LIBRARIES) ->
-                listOf(MOJANG_MIRROR_PREFIX + official.removePrefix(NeoForgeMeta.MOJANG_LIBRARIES))
+            mojangLibraries.isNotEmpty() && official.startsWith(mojangLibraries) -> {
+                val prefix = MOJANG_MIRROR_PREFIX
+                if (prefix.isEmpty()) emptyList()
+                else listOf(prefix + official.removePrefix(mojangLibraries))
+            }
             else -> emptyList()
         }
     }

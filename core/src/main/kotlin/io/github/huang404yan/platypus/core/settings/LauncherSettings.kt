@@ -1,5 +1,6 @@
 package io.github.huang404yan.platypus.core.settings
 
+import io.github.huang404yan.platypus.core.Endpoints
 import io.github.huang404yan.platypus.core.instance.Instance
 import io.github.huang404yan.platypus.core.saves.AutoBackupPolicy
 import kotlinx.serialization.Serializable
@@ -51,6 +52,14 @@ data class LauncherSettings(
      *（游戏本体、模组、整合包、Java、服务端），因为国内网络下官方源经常不是慢而是根本连不上。
      */
     val downloadSource: String = "auto",
+    /**
+     * 空壳发布包用的镜像根地址（见 [Endpoints]）；完整版这里是空串，根本不读。
+     *
+     * 为什么存进设置：空壳包里所有下载/搜索地址都从这个根拼出来（[Endpoints.use]），
+     * 用户填一次就整个会话有效，下次开程序还得能记住。只认 http/https 的完整地址，
+     * 填歪了一律当归零处理（[Endpoints.normalizeBase]），不在这里抛错。
+     */
+    val serverBase: String = "",
     /**
      * 存档自动备份开着没有。
      *
@@ -134,6 +143,7 @@ data class LauncherSettings(
             microsoftClientId = raw.microsoftClientId.trim().trim('"').trim(),
             theme = raw.theme.trim().lowercase(),
             downloadSource = raw.downloadSource.trim().lowercase(),
+            serverBase = Endpoints.normalizeBase(raw.serverBase),
             curseForgeApiKey = raw.curseForgeApiKey.trim().trim('"').trim(),
             lastInstanceKey = raw.lastInstanceKey.trim(),
             // 负数一律当没走过：时间戳只可能从 0 往上长，负值是手改文件或写坏的结果。

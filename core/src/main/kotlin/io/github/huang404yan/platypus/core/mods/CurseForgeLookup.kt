@@ -1,5 +1,6 @@
 package io.github.huang404yan.platypus.core.mods
 
+import io.github.huang404yan.platypus.core.Endpoints
 import io.github.huang404yan.platypus.core.modpack.ModpackExport
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -30,7 +31,14 @@ object CurseForgeLookup {
     /** Minecraft 在 CurseForge 里的游戏 ID，接口路径里写死这一个数。 */
     const val GAME_ID: Int = 432
 
-    const val FINGERPRINTS_URL: String = "https://api.curseforge.com/v1/fingerprints/432"
+    /**
+     * 指纹反查接口。空壳发布包里是用户填的镜像根 + /v1/fingerprints/432，没填就是空串。
+     *
+     * GAME_ID 写死在路径里（CurseForge 只认 432 = Minecraft）；Kotlin 的 const 拼不了
+     * 取值器，所以这里写成 val + getter，路径末尾仍与 GAME_ID 保持一致。
+     */
+    val FINGERPRINTS_URL: String
+        get() = Endpoints.join(Endpoints.curseForge(), "/v1/fingerprints/" + GAME_ID)
 
     /** CurseForge 用这个头收 Key，名字不是 Authorization。 */
     const val API_KEY_HEADER: String = "x-api-key"
@@ -113,8 +121,10 @@ object CurseForgeLookup {
     }
 
     private fun post(apiKey: String, body: String): String {
+        val url = FINGERPRINTS_URL
+        if (url.isEmpty()) throw IOException(Endpoints.SHELL_HINT)
         val text = body.toByteArray(StandardCharsets.UTF_8)
-        val connection = URL(FINGERPRINTS_URL).openConnection() as HttpURLConnection
+        val connection = URL(url).openConnection() as HttpURLConnection
         try {
             connection.requestMethod = "POST"
             connection.connectTimeout = CONNECT_TIMEOUT_MS

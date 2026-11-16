@@ -42,6 +42,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.Dp
 import io.github.huang404yan.platypus.core.Brand
+import io.github.huang404yan.platypus.core.Endpoints
 import io.github.huang404yan.platypus.core.download.DownloadPreference
 import io.github.huang404yan.platypus.core.download.DownloadSource
 import io.github.huang404yan.platypus.core.instance.Instance
@@ -79,6 +80,9 @@ fun App(
         // 下载源偏好是进程级全局量（见 DownloadPreference 的说明）：这里灌一次，
         // 之后所有新建的下载器都按它排序。设置页改的时候会就地覆写。
         DownloadPreference.source = DownloadSource.of(settings.downloadSource)
+        // 空壳包的镜像根同理：所有地址都从 Endpoints.serverBase 拼，开程序时灌一次，
+        // 设置页改完就地覆写。完整版这个字段恒为空串，setServerBase 也只会存空。
+        Endpoints.setServerBase(settings.serverBase)
     }
 
     LaunchedEffect(theme) { onThemeChanged(theme) }

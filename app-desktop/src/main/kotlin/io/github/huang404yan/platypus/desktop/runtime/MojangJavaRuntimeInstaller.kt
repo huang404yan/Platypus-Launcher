@@ -1,5 +1,6 @@
 package io.github.huang404yan.platypus.desktop.runtime
 
+import io.github.huang404yan.platypus.core.Endpoints
 import io.github.huang404yan.platypus.core.download.DownloadItem
 import io.github.huang404yan.platypus.core.download.DownloadProgress
 import io.github.huang404yan.platypus.core.download.HttpDownloader
@@ -157,6 +158,8 @@ class MojangJavaRuntimeInstaller(
     }
 
     private fun fetchText(url: String): String {
+        // 空壳包里清单地址是空串（没填镜像根）；这时候说清楚，别让 URI("") 抛一句看不懂的异常。
+        if (url.isBlank()) throw IOException(Endpoints.SHELL_HINT)
         var connection: HttpURLConnection? = null
         try {
             connection = (URI(url).toURL().openConnection() as HttpURLConnection).apply {

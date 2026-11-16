@@ -1,5 +1,6 @@
 package io.github.huang404yan.platypus.core.loader
 
+import io.github.huang404yan.platypus.core.Endpoints
 import io.github.huang404yan.platypus.core.version.VersionJsonFormat
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -20,14 +21,15 @@ import java.io.File
  */
 object ForgeMeta {
 
-    /** Forge 自家 maven：安装器与所有 Forge 库都在这儿。 */
-    const val FORGE_MAVEN: String = "https://maven.minecraftforge.net/"
+    /** Forge 自家 maven（带末尾斜杠）：安装器与所有 Forge 库都在这儿。空壳包里是镜像根。 */
+    val FORGE_MAVEN: String get() = Endpoints.dir(Endpoints.forgeMaven())
 
     /**
      * 版本推荐清单（4 KB 左右的小 json）。结构：
      * {"homepage":..., "promos":{"<原版号>-recommended":"<forge 版本>","<原版号>-latest":"..."}}
      */
-    const val PROMOTIONS_URL: String = "https://files.minecraftforge.net/net/minecraftforge/forge/promotions_slim.json"
+    val PROMOTIONS_URL: String
+        get() = Endpoints.join(Endpoints.forgeFiles(), "/net/minecraftforge/forge/promotions_slim.json")
 
     /** Forge 生成的服务端/客户端入口类，用来判断装出来的版本 json 是否像样。 */
     const val MAIN_CLASS: String = "cpw.mods.bootstraplauncher.BootstrapLauncher"
@@ -46,7 +48,8 @@ object ForgeMeta {
     /** 例：https://maven.minecraftforge.net/net/minecraftforge/forge/1.20.1-47.4.0/forge-1.20.1-47.4.0-installer.jar */
     fun installerUrl(gameVersion: String, forgeVersion: String): String {
         val artifact = artifactVersion(gameVersion, forgeVersion)
-        return FORGE_MAVEN + "net/minecraftforge/forge/" + artifact + "/forge-" + artifact + "-installer.jar"
+        val relative = "/net/minecraftforge/forge/" + artifact + "/forge-" + artifact + "-installer.jar"
+        return Endpoints.join(Endpoints.forgeMaven(), relative)
     }
 
     /** 落盘文件名，与官方 installer 下载下来的名字一致。 */

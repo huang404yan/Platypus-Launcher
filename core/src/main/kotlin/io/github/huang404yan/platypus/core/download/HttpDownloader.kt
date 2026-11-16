@@ -1,5 +1,6 @@
 package io.github.huang404yan.platypus.core.download
 
+import io.github.huang404yan.platypus.core.Endpoints
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -159,7 +160,10 @@ class HttpDownloader(
         // 候选顺序由进程级的下载源偏好决定：用户选了「优先国内镜像」时镜像排前面，
         // 否则维持「官方源在前、失败再换镜像」的老行为。
         val candidates = DownloadSources.order(item.url, item.mirrors, DownloadPreference.source)
-        if (candidates.isEmpty()) return FetchOutcome("没有可用的下载地址")
+        // 空壳包里地址全是空串，候选表必然为空 —— 这时给一句「去填镜像」比「没有可用的下载地址」有用。
+        if (candidates.isEmpty()) {
+            return FetchOutcome(if (!Endpoints.serviceReady()) Endpoints.SHELL_HINT else "没有可用的下载地址")
+        }
 
         var lastReason = "下载失败"
         for (candidate in candidates) {

@@ -1,5 +1,6 @@
 package io.github.huang404yan.platypus.core.runtime
 
+import io.github.huang404yan.platypus.core.Endpoints
 import io.github.huang404yan.platypus.core.download.DownloadItem
 import io.github.huang404yan.platypus.core.version.OsFamily
 import io.github.huang404yan.platypus.core.version.VersionJsonFormat
@@ -15,10 +16,14 @@ import kotlinx.serialization.json.JsonPrimitive
  * 完整文件树清单）和它对应的版本名。整份清单里没有「Java 主版本」字段，组件 id 才是
  * 权威标识（java-runtime-gamma = 17 之类由 Mojang 自己维护）。
  *
- * 该索引文件的 URL 里含 Mojang 自己写死的 hash 段，换版本时地址会变，所以按常量维护。
+ * 该索引文件的 URL 里含 Mojang 自己写死的 hash 段，换版本时地址会变，所以把 path 写死在这里。
+ * 主机部分走 [Endpoints]：空壳包里这个地址是空串，调用方据此显示「先填镜像地址」而不是去发请求。
  */
-const val MOJANG_RUNTIME_INDEX_URL =
-    "https://launchermeta.mojang.com/v1/products/java-runtime/2ec0cc96c44e5a76b9c8b7c39df7210883d12871/all.json"
+val MOJANG_RUNTIME_INDEX_URL: String
+    get() = Endpoints.join(
+        Endpoints.launcherMeta(),
+        "/v1/products/java-runtime/2ec0cc96c44e5a76b9c8b7c39df7210883d12871/all.json",
+    )
 
 /** 单个运行时组件在某个平台上的一个版本条目。 */
 data class JavaRuntimeEntry(

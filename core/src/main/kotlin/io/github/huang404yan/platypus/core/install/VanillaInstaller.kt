@@ -1,5 +1,6 @@
 package io.github.huang404yan.platypus.core.install
 
+import io.github.huang404yan.platypus.core.Endpoints
 import io.github.huang404yan.platypus.core.download.DownloadItem
 import io.github.huang404yan.platypus.core.download.DownloadProgress
 import io.github.huang404yan.platypus.core.download.DownloadReport
@@ -28,11 +29,13 @@ import java.net.URL
  */
 object VanillaInstaller {
 
-    const val MANIFEST_URL: String = "https://piston-meta.mojang.com/mc/game/version_manifest_v2.json"
-    const val MANIFEST_MIRROR_URL: String = "https://bmclapi2.bangbang93.com/mc/game/version_manifest_v2.json"
+    // 这几个原来是 const val，现在全部走 [Endpoints]：空壳发布包里它们会是空串，
+    // 于是「拉清单」这条路在这个包上根本发不出请求（而不是把地址留在 jar 里改一行就绕过去）。
+    val MANIFEST_URL: String get() = Endpoints.join(Endpoints.pistonMeta(), "/mc/game/version_manifest_v2.json")
+    val MANIFEST_MIRROR_URL: String get() = Endpoints.join(Endpoints.bmclapi(), "/mc/game/version_manifest_v2.json")
 
-    private const val BMCL = "https://bmclapi2.bangbang93.com"
-    private const val PISTON_META = "https://piston-meta.mojang.com"
+    private val BMCL: String get() = Endpoints.bmclapi()
+    private val PISTON_META: String get() = Endpoints.pistonMeta()
     private const val CONNECT_TIMEOUT_MS = 15_000
     private const val READ_TIMEOUT_MS = 60_000
     private const val USER_AGENT =
@@ -55,9 +58,11 @@ object VanillaInstaller {
     }
 
     /** 版本清单（version_manifest_v2.json）。官方源失败时用 BMCLAPI 镜像。 */
-    fun loadManifest(): VersionManifest = parseVersionManifest(
-        fetchText(listOf(MANIFEST_URL, MANIFEST_MIRROR_URL)),
-    )
+    fun loadManifest(): VersionManifest {
+        // 空壳包里两个地址会归并成同一个（都从用户填的镜像根拼），先去重再试。
+        val urls = listOf(MANIFEST_URL, MANIFEST_MIRROR_URL).filter { it.isNotBlank() }.distinct()
+        return parseVersionManifest(fetchText(urls))
+    }
 
     /**
      * 生成安装清单。
@@ -138,14 +143,20 @@ object VanillaInstaller {
             urls += mirrorsFor(entry.url)
         }
         // 手填的版本号可能不在清单里（或被过滤掉了），BMCLAPI 的单版本接口能兜住。
-        urls += BMCL + "/version/" + id + "/json"
+        if (BMCL.isNotEmpty()) urls += BMCL + "/version/" + id + "/json"
         return urls.filter { it.isNotBlank() }.distinct()
     }
 
     /** Mojang 源 → BMCLAPI 镜像。只作为备选，不改变主地址。 */
-    fun mirrorsFor(url: String): List<String> = when {
-        url.startsWith(PISTON_META) -> listOf(BMCL + url.removePrefix(PISTON_META))
-        else -> DownloadPlanner.mirrorOf(url)
+    fun mirrorsFor(url: String): List<String> {
+        // 空壳包里 PISTON_META / BMCL 都是空串，不能拿 startsWith 去比（空前缀恒成立，
+        // 会把任何地址都当成 Mojang 源的）。这时只走 DownloadPlanner 那条前缀表。
+        val pistonMeta = PISTON_META
+        if (pistonMeta.isNotEmpty() && url.startsWith(pistonMeta)) {
+            val mirror = Endpoints.use(pistonMeta)
+            if (mirror.isNotEmpty()) return listOf(mirror + url.removePrefix(pistonMeta))
+        }
+        return DownloadPlanner.mirrorOf(url)
     }
 
     private fun fetchText(url: String): String = fetchText(listOf(url))
@@ -158,6 +169,8 @@ object VanillaInstaller {
      * 构建列表）同样会被墙住，只给文件下载做偏好、清单还走官方源是说不通的。
      */
     fun fetchText(urls: List<String>): String {
+        // 空壳包还没填镜像根：这里一个请求都不该发，直接给用户一句能看懂的话。
+        if (!Endpoints.serviceReady()) throw IOException(Endpoints.SHELL_HINT)
         val tried = mutableListOf<String>()
         for (url in DownloadSources.orderAll(urls, DownloadPreference.source)) {
             if (url.isBlank()) continue

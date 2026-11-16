@@ -1,5 +1,6 @@
 package io.github.huang404yan.platypus.core.install
 
+import io.github.huang404yan.platypus.core.Endpoints
 import io.github.huang404yan.platypus.core.loader.FabricMeta
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
@@ -73,13 +74,17 @@ data class PaperBuild(
  */
 object PaperMeta {
 
-    const val BASE_URL: String = "https://fill.papermc.io/v3"
+    /** Paper 的接口根（带 /v3）。空壳发布包里是用户填的镜像根 + /v3。 */
+    val BASE_URL: String get() = Endpoints.join(Endpoints.paper(), "/v3")
 
     const val PROJECT: String = "paper"
 
     /** GET 这个地址拿到某个游戏版本的所有构建（新的在前）。 */
     fun buildsUrl(gameVersion: String): String =
-        BASE_URL + "/projects/" + PROJECT + "/versions/" + gameVersion.trim() + "/builds"
+        Endpoints.join(
+            BASE_URL,
+            "/projects/" + PROJECT + "/versions/" + gameVersion.trim() + "/builds",
+        )
 
     /**
      * 解析构建列表。
@@ -131,7 +136,7 @@ object PaperMeta {
 object FabricServer {
 
     /** GET 这个地址拿到 installer 版本列表，第一项通常就是最新稳定版。 */
-    fun installerListUrl(): String = FabricMeta.BASE_URL + "/v2/versions/installer"
+    fun installerListUrl(): String = Endpoints.join(FabricMeta.BASE_URL, "/v2/versions/installer")
 
     /** 解析 installer 版本列表，取最新稳定版。解析不出来返回 null（让调用方报「元数据形状变了」）。 */
     fun parseInstallerVersion(text: String): String? {
@@ -145,8 +150,11 @@ object FabricServer {
 
     /** 可直接启动的 Fabric 服务端 jar。 */
     fun serverJarUrl(gameVersion: String, loaderVersion: String, installerVersion: String): String =
-        FabricMeta.BASE_URL + "/v2/versions/loader/" + gameVersion.trim() + "/" +
-            loaderVersion.trim() + "/" + installerVersion.trim() + "/server/jar"
+        Endpoints.join(
+            FabricMeta.BASE_URL,
+            "/v2/versions/loader/" + gameVersion.trim() + "/" +
+                loaderVersion.trim() + "/" + installerVersion.trim() + "/server/jar",
+        )
 
     /** 缓存用的文件名：换 loader 版本不会互相覆盖。 */
     fun serverJarName(gameVersion: String, loaderVersion: String): String =

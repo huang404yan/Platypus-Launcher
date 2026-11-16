@@ -1,5 +1,6 @@
 package io.github.huang404yan.platypus.core.version
 
+import io.github.huang404yan.platypus.core.Endpoints
 import io.github.huang404yan.platypus.core.download.DownloadItem
 import kotlinx.serialization.Serializable
 import java.io.File
@@ -12,16 +13,26 @@ import java.io.File
  */
 object DownloadPlanner {
 
-    private const val ASSET_OBJECT_BASE = "https://resources.download.minecraft.net"
-    private const val ASSET_OBJECT_MIRROR = "https://bmclapi2.bangbang93.com/assets"
-
-    /** Mojang 源 → BMCLAPI 镜像前缀。镜像只作为备选，不改变主地址。 */
-    private val MIRROR_PREFIXES = listOf(
-        "https://piston-data.mojang.com" to "https://bmclapi2.bangbang93.com",
-        "https://launcher.mojang.com" to "https://bmclapi2.bangbang93.com",
-        "https://libraries.minecraft.net" to "https://bmclapi2.bangbang93.com/maven",
-        "https://resources.download.minecraft.net" to "https://bmclapi2.bangbang93.com/assets",
-    )
+    /**
+     * Mojang 源 → BMCLAPI 镜像前缀。镜像只作为备选，不改变主地址。
+     *
+     * 前缀表按当前包现算：空壳发布包里 [Endpoints] 的主机是空的，表也就是空的
+     * （镜像根本身已经是用户填的那个，不需要再换一层）。
+     */
+    private fun mirrorPrefixes(): List<Pair<String, String>> {
+        val bmcl = Endpoints.bmclapi()
+        val pistonData = Endpoints.pistonData()
+        val launcher = Endpoints.launcherCdn()
+        val libraries = Endpoints.mojangLibraries()
+        val resources = Endpoints.resources()
+        if (bmcl.isEmpty()) return emptyList()
+        return listOf(
+            pistonData to bmcl,
+            launcher to bmcl,
+            libraries to bmcl + "/maven",
+            resources to bmcl + "/assets",
+        ).filter { (from, to) -> from.isNotEmpty() && to.isNotEmpty() }
+    }
 
     fun versionDir(gameDir: File, versionId: String): File = File(gameDir, "versions/$versionId")
 
@@ -98,21 +109,26 @@ object DownloadPlanner {
             .distinctBy { it.hash }
             .map { obj ->
                 val prefix = obj.hash.substring(0, 2)
+                val relative = "$prefix/${obj.hash}"
+                // 空壳包里 resources() 是空串，拼出来的 url 也就空 —— HttpDownloader 会把它当成
+                // 「没有可用的下载地址」，不会拿半截地址去发请求。
                 DownloadItem(
-                    url = "$ASSET_OBJECT_BASE/$prefix/${obj.hash}",
+                    url = Endpoints.join(Endpoints.resources(), relative),
                     target = File(root, "objects/$prefix/${obj.hash}").path,
                     sha1 = obj.hash,
                     size = obj.size,
-                    mirrors = listOf("$ASSET_OBJECT_MIRROR/$prefix/${obj.hash}"),
+                    mirrors = listOf(Endpoints.join(Endpoints.join(Endpoints.bmclapi(), "/assets"), relative))
+                        .filter { it.isNotEmpty() },
                 )
             }
     }
 
     fun mirrorOf(url: String): List<String> {
-        val mirror = MIRROR_PREFIXES.firstOrNull { url.startsWith(it.first) }
+        if (url.isBlank()) return emptyList()
+        val mirror = mirrorPrefixes().firstOrNull { url.startsWith(it.first) }
             ?.let { (from, to) -> to + url.removePrefix(from) }
             ?: return emptyList()
-        return listOf(mirror).filter { it != url }
+        return listOf(mirror).filter { it.isNotEmpty() && it != url }
     }
 }
 

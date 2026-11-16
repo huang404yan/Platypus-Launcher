@@ -1,5 +1,6 @@
 package io.github.huang404yan.platypus.core.loader
 
+import io.github.huang404yan.platypus.core.Endpoints
 import io.github.huang404yan.platypus.core.version.VersionJsonFormat
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
@@ -31,7 +32,7 @@ object NeoForgeMeta {
      * （curl: (35) Recv failure: Connection was reset），加 -4 也一样；
      * 镜像 https://bmclapi2.bangbang93.com/maven/ 正常返回 200。
      */
-    const val NEOFORGE_MAVEN: String = "https://bmclapi2.bangbang93.com/maven/"
+    val NEOFORGE_MAVEN: String get() = Endpoints.dir(Endpoints.join(Endpoints.bmclapi(), "/maven"))
 
     /** 版本清单在 maven 里的相对路径。 */
     const val MAVEN_METADATA_PATH: String = "net/neoforged/neoforge/maven-metadata.xml"
@@ -45,11 +46,11 @@ object NeoForgeMeta {
     /** installer jar 根目录的安装描述文件：依赖库清单、processor 链、以及要 patch 的坐标。 */
     const val INSTALLER_PROFILE_JSON: String = "install_profile.json"
 
-    /** 官方 maven 前缀，installer 会在 install_profile.json 里把依赖库写成这个前缀。 */
-    const val OFFICIAL_MAVEN = "https://maven.neoforged.net/releases/"
+    /** 官方 maven 前缀（带末尾斜杠），installer 会在 install_profile.json 里把依赖库写成这个前缀。 */
+    val OFFICIAL_MAVEN: String get() = Endpoints.dir(Endpoints.neoForgeMaven()) + "releases/"
 
-    /** Mojang 官方库前缀。 */
-    const val MOJANG_LIBRARIES = "https://libraries.minecraft.net/"
+    /** Mojang 官方库前缀（带末尾斜杠）。 */
+    val MOJANG_LIBRARIES: String get() = Endpoints.dir(Endpoints.mojangLibraries())
 
     /**
      * 安装器要求目标目录里有 launcher_profiles.json，否则不报错、退出码 0、什么都不装。
@@ -57,15 +58,18 @@ object NeoForgeMeta {
      */
     const val LAUNCHER_PROFILES_JSON: String = ForgeMeta.LAUNCHER_PROFILES_JSON
 
-    /** 版本清单地址。 */
-    fun metadataUrl(): String = NEOFORGE_MAVEN + MAVEN_METADATA_PATH
+    /** 版本清单地址。空壳包没填镜像根时是空串。 */
+    fun metadataUrl(): String = if (NEOFORGE_MAVEN.isEmpty()) "" else NEOFORGE_MAVEN + MAVEN_METADATA_PATH
 
     /**
      * 安装器地址。注意 NeoForge 的 maven 坐标只有一段：net/neoforged/neoforge/<版本>/。
      * 例：https://bmclapi2.bangbang93.com/maven/net/neoforged/neoforge/21.1.265/neoforge-21.1.265-installer.jar
      */
     fun installerUrl(neoforgeVersion: String): String =
-        NEOFORGE_MAVEN + "net/neoforged/neoforge/" + neoforgeVersion + "/neoforge-" + neoforgeVersion + "-installer.jar"
+        Endpoints.join(
+            Endpoints.join(Endpoints.bmclapi(), "/maven"),
+            "/net/neoforged/neoforge/" + neoforgeVersion + "/neoforge-" + neoforgeVersion + "-installer.jar",
+        )
 
     /** 落盘文件名，与官方 installer 下载下来的名字一致。 */
     fun installerFileName(neoforgeVersion: String): String = "neoforge-" + neoforgeVersion + "-installer.jar"

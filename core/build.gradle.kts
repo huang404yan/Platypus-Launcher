@@ -29,13 +29,25 @@ val msClientIdValue = providers.gradleProperty("platypus.msClientId")
     .getOrElse("")
     .trim()
 
+// 空壳发布包开关：默认完整（本机调试、自用构建都走完整版），
+// 只有出「开源版对外发布包」时才加 -Pplatypus.shell=。。。 见下方注释。
+// 为什么用构建开关而不是运行期判 Edition：空壳要保证**包里根本不含**可用的下载地址，
+// 运行期再判断的话地址还在 jar 里，改一行常量就绕过去了。
+val shellValue = providers.gradleProperty("platypus.shell")
+    .orElse(providers.environmentVariable("PLATYPUS_SHELL"))
+    .getOrElse("false")
+    .trim()
+    .toBoolean()
+
 val generateBuildInfo = tasks.register("generateBuildInfo") {
     val versionValue = project.version.toString()
     val groupValue = project.group.toString()
     val clientIdValue = msClientIdValue
+    val shell = shellValue
     inputs.property("version", versionValue)
     inputs.property("group", groupValue)
     inputs.property("msClientId", clientIdValue)
+    inputs.property("shell", shell.toString())
     outputs.dir(buildInfoDir)
     doLast {
         val file = buildInfoDir.get().file("io/github/huang404yan/platypus/core/BuildInfo.kt").asFile
@@ -51,6 +63,15 @@ val generateBuildInfo = tasks.register("generateBuildInfo") {
 
                 /** 这个包自带的微软应用 ID；空串表示没带（孵化版就是空串）。 */
                 const val MS_CLIENT_ID: String = "$clientIdValue"
+
+                /**
+                 * 空壳包：默认没有任何可用的下载/搜索服务地址，用户得自己去设置里填一个镜像根地址。
+                 *
+                 * 只有**对外发布的开源版**打这个包（构建时加 -Pplatypus.shell）。本机调试、
+                 * 自用构建、正式版都不打。空壳包里的界面与完整版一模一样，只是数据区
+                 * 没有内容，并且在设置 → 下载 里多一组「服务地址」输入框。
+                 */
+                const val SHELL: Boolean = $shell
             }
             """.trimIndent() + "\n",
         )

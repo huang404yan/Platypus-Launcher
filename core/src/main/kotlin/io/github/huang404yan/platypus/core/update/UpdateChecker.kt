@@ -1,6 +1,7 @@
 package io.github.huang404yan.platypus.core.update
 
 import io.github.huang404yan.platypus.core.Brand
+import io.github.huang404yan.platypus.core.Endpoints
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
@@ -71,9 +72,17 @@ object UpdateChecker {
 
     const val REPOSITORY: String = "huang404yan/Platypus-Launcher"
 
-    /** 一次拿 30 条：一个通道一年也发不到这么多，够挑最新了。 */
-    const val RELEASES_URL: String =
-        "https://api.github.com/repos/huang404yan/Platypus-Launcher/releases?per_page=30"
+    /**
+     * 一次拿 30 条：一个通道一年也发不到这么多，够挑最新了。
+     *
+     * 空壳包里是用户填的镜像根 + 同一段路径，没填就是空串 —— 检查更新会直接失败，
+     * 但那只影响「有没有新版」的提示，不影响启动与游戏。
+     */
+    val RELEASES_URL: String
+        get() = Endpoints.join(
+            Endpoints.gitHubApi(),
+            "/repos/" + REPOSITORY + "/releases?per_page=30",
+        )
 
     private const val CONNECT_TIMEOUT_MS = 15_000
     private const val READ_TIMEOUT_MS = 20_000
@@ -203,6 +212,7 @@ object UpdateChecker {
     }
 
     private fun fetch(url: String): String {
+        if (url.isBlank()) throw IOException(Endpoints.SHELL_HINT)
         var connection: HttpURLConnection? = null
         try {
             connection = (URL(url).openConnection() as HttpURLConnection).apply {

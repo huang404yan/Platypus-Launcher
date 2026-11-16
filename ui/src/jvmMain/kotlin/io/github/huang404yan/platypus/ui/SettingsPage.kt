@@ -37,6 +37,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import io.github.huang404yan.platypus.core.Brand
+import io.github.huang404yan.platypus.core.Endpoints
 import io.github.huang404yan.platypus.core.download.DownloadPreference
 import io.github.huang404yan.platypus.core.download.DownloadSource
 import io.github.huang404yan.platypus.core.instance.Instance
@@ -157,12 +158,15 @@ fun SettingsPage(
     var autoBackupHours by remember { mutableStateOf(AutoBackupPolicy.DEFAULT.intervalHours.toString()) }
     var autoBackupKeep by remember { mutableStateOf(AutoBackupPolicy.DEFAULT.keep.toString()) }
     var curseForgeKey by remember { mutableStateOf("") }
+    /** 空壳包的镜像根；完整版恒为空串，界面上也不显示这一格。 */
+    var serverBase by remember { mutableStateOf("") }
     /**
      * 这一页读过的那份设置，**原样留着**，保存时在它上面 copy。
      *
      * 原来六处落盘全是 `LauncherSettings(...)` 新建，新建会把这一页不认识的字段一并
      * 写成默认值 —— firstRunAt 与 lastInstanceKey 就是这么被冲掉的：用户在设置页点一次
-     * 「保存」，欢迎窗下次启动又弹一遍，上次玩的版本也忘了。两处都实测踩过。
+     * 「保存」，欢迎窗下次启动又弹一遍，上次玩的版本也忘了 —— 在设置页改一次配色就能
+     * 复现这两件事。
      * 改成 copy 之后，以后再加字段不用回来挨个补。
      */
     var base by remember { mutableStateOf(LauncherSettings()) }
@@ -185,6 +189,7 @@ fun SettingsPage(
         autoBackupHours = settings.autoBackupHours.toString()
         autoBackupKeep = settings.autoBackupKeep.toString()
         curseForgeKey = settings.curseForgeApiKey
+        serverBase = settings.serverBase
         memoryOptimize = settings.memoryOptimize
         base = settings
         loaded = true
@@ -233,6 +238,7 @@ fun SettingsPage(
                         autoBackupHours = clampedHours,
                         autoBackupKeep = clampedKeep,
                         curseForgeApiKey = curseForgeKey,
+                        serverBase = serverBase,
                         memoryOptimize = memoryOptimize,
                     ),
                 )
@@ -308,6 +314,7 @@ fun SettingsPage(
                         autoBackupHours = backupPolicyNow().intervalHours,
                         autoBackupKeep = backupPolicyNow().keep,
                         curseForgeApiKey = curseForgeKey,
+                        serverBase = serverBase,
                         memoryOptimize = memoryOptimize,
                     ),
                 )
@@ -353,6 +360,7 @@ fun SettingsPage(
                         autoBackupHours = backupPolicyNow().intervalHours,
                         autoBackupKeep = backupPolicyNow().keep,
                         curseForgeApiKey = curseForgeKey,
+                        serverBase = serverBase,
                         memoryOptimize = memoryOptimize,
                     ),
                 )
@@ -391,6 +399,7 @@ fun SettingsPage(
                         autoBackupHours = backupPolicyNow().intervalHours,
                         autoBackupKeep = backupPolicyNow().keep,
                         curseForgeApiKey = curseForgeKey,
+                        serverBase = serverBase,
                         memoryOptimize = memoryOptimize,
                     ),
                 )
@@ -450,6 +459,7 @@ fun SettingsPage(
                         autoBackupHours = backupPolicyNow().intervalHours,
                         autoBackupKeep = backupPolicyNow().keep,
                         curseForgeApiKey = cleaned,
+                        serverBase = serverBase,
                         memoryOptimize = memoryOptimize,
                     ),
                 )
@@ -464,6 +474,56 @@ fun SettingsPage(
             }.onFailure {
                 noticeIsError = true
                 notice = "保存失败：" + (it.message ?: it::class.simpleName)
+            }
+        }
+    }
+
+    /**
+     * 存空壳包的镜像根。跟下载源、CurseForge Key 一样是「点完立刻落盘」，不走底部保存按钮。
+     *
+     * 存完还要就地更新 [Endpoints.serverBase]：进程里所有地址都从它拼，等到下次开程序
+     * 才生效的话，用户点完「保存」回去点下载还是空壳状态，会当成没存上。
+     */
+    fun saveServerBase(raw: String) {
+        val cleaned = Endpoints.normalizeBase(raw)
+        if (raw.isNotBlank() && cleaned.isEmpty()) {
+            noticeIsError = true
+            notice = "这个地址不认：要写成 http:// 或 https:// 开头的完整地址，例如 https://你的镜像/。"
+            return
+        }
+        serverBase = cleaned
+        Endpoints.setServerBase(cleaned)
+        val parsedMemory = memoryText.trim().toIntOrNull() ?: Instance.DEFAULT_MEMORY_MB
+        scope.launch {
+            runCatching {
+                repository.save(
+                    base.copy(
+                        offlineUsername = normalizeOfflineUsername(username),
+                        defaultGameRoot = gameRoot.trim(),
+                        defaultMemoryMb = Instance.clampMemoryMb(parsedMemory),
+                        activeAccountUuid = activeAccountUuid,
+                        microsoftClientId = microsoftClientId,
+                        theme = theme.id,
+                        downloadSource = downloadSource,
+                        serverBase = cleaned,
+                        autoBackupEnabled = autoBackupEnabled,
+                        autoBackupHours = backupPolicyNow().intervalHours,
+                        autoBackupKeep = backupPolicyNow().keep,
+                        curseForgeApiKey = curseForgeKey,
+                        memoryOptimize = memoryOptimize,
+                    ),
+                )
+            }.onSuccess {
+                savedAt = it.updatedAt
+                noticeIsError = false
+                notice = if (cleaned.isEmpty()) {
+                    "已清空服务地址。下载与搜索都停用，界面照旧能看，只是没有内容。"
+                } else {
+                    "服务地址已保存：" + cleaned + "。下载与搜索从这一刻起走它。"
+                }
+            }.onFailure {
+                noticeIsError = true
+                notice = "服务地址没能存下来：" + (it.message ?: it::class.simpleName)
             }
         }
     }
@@ -487,6 +547,7 @@ fun SettingsPage(
                         autoBackupHours = backupPolicyNow().intervalHours,
                         autoBackupKeep = backupPolicyNow().keep,
                         curseForgeApiKey = curseForgeKey,
+                        serverBase = serverBase,
                         memoryOptimize = memoryOptimize,
                     ),
                 )
@@ -530,6 +591,10 @@ fun SettingsPage(
                 curseKey = curseForgeKey,
                 onCurseKeyChange = { curseForgeKey = it },
                 onSaveCurseKey = { saveCurseKey(it) },
+                serverBase = serverBase,
+                serviceReady = Endpoints.serviceReady(),
+                onServerBaseChange = { serverBase = it },
+                onSaveServerBase = { saveServerBase(it) },
             )
             SETTINGS_TAB_SAVES -> SavesTab(
                 enabled = autoBackupEnabled,
@@ -682,8 +747,53 @@ private fun DownloadTab(
     curseKey: String,
     onCurseKeyChange: (String) -> Unit,
     onSaveCurseKey: (String) -> Unit,
+    serverBase: String,
+    serviceReady: Boolean,
+    onServerBaseChange: (String) -> Unit,
+    onSaveServerBase: (String) -> Unit,
 ) {
     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        // 空壳包才显示这一格：完整版的地址在包里写死，用户没有可填的东西。
+        if (Endpoints.shell) {
+            SettingCard(
+                "服务地址",
+                "这个包不带下载与搜索服务。填一个镜像根地址，版本清单、加载器、模组搜索都从它拼。",
+            ) {
+                Row(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    OutlinedTextField(
+                        value = serverBase,
+                        onValueChange = onServerBaseChange,
+                        modifier = Modifier.weight(1f),
+                        label = { Text("镜像根地址") },
+                        singleLine = true,
+                        textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+                        placeholder = { Text("例如 https://你的镜像/") },
+                    )
+                    Button(onClick = { onSaveServerBase(serverBase) }) { Text("保存地址") }
+                    if (serverBase.isNotBlank()) {
+                        OutlinedButton(onClick = { onSaveServerBase("") }) { Text("清掉") }
+                    }
+                }
+                Text(
+                    "约定：这个根替代所有官方主机，路径照抄 BMCLAPI 的布局。填 https://mirror.example.com，" +
+                        "版本清单就取 /mc/game/version_manifest_v2.json，资源文件取 /<前两位>/<sha1>。" +
+                        "也就是说填的人要自备一个能代理这些上游站的镜像，不填就什么都下载不了。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                if (!serviceReady) {
+                    Text(
+                        "现在还没填，所以下载页与模组搜索都是空的 —— 这不是坏了。",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                }
+            }
+        }
         SettingCard(
             "下载源",
             "影响所有下载：游戏本体、模组、整合包、Java、服务端。改完立刻生效，下次下载就按新顺序走。",

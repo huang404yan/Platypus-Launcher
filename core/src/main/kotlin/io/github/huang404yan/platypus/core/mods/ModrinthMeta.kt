@@ -1,5 +1,6 @@
 package io.github.huang404yan.platypus.core.mods
 
+import io.github.huang404yan.platypus.core.Endpoints
 import io.github.huang404yan.platypus.core.instance.LoaderKind
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
@@ -79,7 +80,12 @@ fun <T> ModrinthParse<T>.reasonOrNull(): String? = (this as? ModrinthParse.Failu
  */
 object ModrinthMeta {
 
-    const val BASE_URL: String = "https://api.modrinth.com/v2"
+    /**
+     * Modrinth 的 v2 接口根。空壳发布包里是用户填的镜像根 + /v2，没填就是空串。
+     *
+     * 这里是 val 而不是 const val：地址随包与用户设置变。
+     */
+    val BASE_URL: String get() = Endpoints.join(Endpoints.modrinth(), "/v2")
 
     /** Modrinth 要求带能标识调用方的 User-Agent；用户配置里会换成带仓库地址的。 */
     const val DEFAULT_USER_AGENT: String = "PlatypusLauncher/0.1 (https://github.com/huang404yan/Platypus-Launcher)"
@@ -114,7 +120,9 @@ object ModrinthMeta {
         facets += "[\"project_type:" + projectType + "\"]"
         loaderName(loader)?.let { facets += "[\"categories:" + it + "\"]" }
         gameVersion?.trim()?.takeIf { it.isNotEmpty() }?.let { facets += "[\"versions:" + it + "\"]" }
-        val sb = StringBuilder(BASE_URL)
+        val base = BASE_URL
+        if (base.isEmpty()) return ""
+        val sb = StringBuilder(base)
         sb.append("/search?query=").append(encode(query))
         sb.append("&limit=").append(limit.coerceIn(1, 100))
         sb.append("&offset=").append(offset.coerceAtLeast(0))
@@ -137,7 +145,9 @@ object ModrinthMeta {
         loader: LoaderKind,
         loaders: List<String>? = null,
     ): String {
-        val sb = StringBuilder(BASE_URL)
+        val base = BASE_URL
+        if (base.isEmpty()) return ""
+        val sb = StringBuilder(base)
         sb.append("/project/").append(encode(slug.trim())).append("/version")
         val params = mutableListOf<String>()
         gameVersion?.trim()?.takeIf { it.isNotEmpty() }?.let {
@@ -159,12 +169,12 @@ object ModrinthMeta {
      * Modrinth 收 `{"hashes": [...], "algorithm": "sha1"}`，返回一个以 sha1 为键的对象。
      * 一次能问多少：官方文档没写死，实践中一两百个没问题；界面按 100 个一批发。
      */
-    fun versionFilesUrl(): String = BASE_URL + "/version_files"
+    fun versionFilesUrl(): String = Endpoints.join(BASE_URL, "/version_files")
 
     /** 用 project_id 批量换 slug / 标题（缺依赖与检查更新都要把 id 变成人话）。 */
     fun projectsUrl(ids: List<String>): String {
         val clean = ids.map { it.trim() }.filter { it.isNotEmpty() }.distinct()
-        return BASE_URL + "/projects?ids=" + encode("[" + clean.joinToString(",") { "\"" + it + "\"" } + "]")
+        return Endpoints.join(BASE_URL, "/projects?ids=" + encode("[" + clean.joinToString(",") { "\"" + it + "\"" } + "]"))
     }
 
     /** 拿某个模组最新版本的查询串要带游戏版本与加载器，否则会挑到给别的版本编译的构建。 */
