@@ -531,12 +531,58 @@ fun resolveIcon(preferred: String, fallback: String): java.io.File? {
     return null
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// 许可文件跟着产物走
+//
+// 以前 LICENSE 与 NOTICE 只躺在仓库根：装到用户机器上以后，安装目录里一个字的许可
+// 都找不到，NOTICE 里那份「本产品包含哪些第三方东西」也就没人看得到。
+//
+// 走 appResourcesRootDir 而不是 licenseFile：
+//   - licenseFile 只有 msi 安装向导里那一步能看到，装完就没了，绿色版（zip）更没有；
+//   - appResourcesRootDir 下的 common/ 会被整份复制进 app/resources/，两种形态都在包里。
+//
+// 只到 app/resources/ 还不够：绿色版用户解压后第一眼看的是贴 exe 那层根目录，不会往
+// app/resources/ 里翻，所以下面再给 createDistributable 补一次复制到根目录。
+//
+// 不设平台子目录（windows/ linux/ macos/），两个文件对所有平台一致。
+// ─────────────────────────────────────────────────────────────────────────────
+val legalResourcesDir = layout.buildDirectory.dir("legal-resources/common")
+
+val syncLegalResources = tasks.register<Sync>("syncLegalResources") {
+    group = "build"
+    description = "把仓库根的 LICENSE 与 NOTICE 收进 app image 根目录"
+    from(rootProject.file("LICENSE"))
+    from(rootProject.file("NOTICE"))
+    into(legalResourcesDir)
+}
+
+// prepareAppResources 会把 appResourcesRootDir 当输入读，但它不知道内容是谁写的，
+// 所以显式挂上依赖（不挂的话 Gradle 会报「未声明依赖」，也可能读到旧内容）。
+tasks.matching { it.name == "prepareAppResources" }.configureEach { dependsOn(syncLegalResources) }
+
+// jpackage 只会把 appResourcesRootDir 的内容放进 app/resources/，产物根目录（贴 exe 那层）
+// 拿不到。用户解压绿色版第一眼看的就是根目录，所以在打包结束后再复制一份到根。
+tasks.matching { it.name == "createDistributable" }.configureEach {
+    doLast {
+        val appRoot = layout.buildDirectory.dir("compose/binaries/main/app/" + brand.nameEn).get().asFile
+        if (appRoot.isDirectory) {
+            listOf("LICENSE", "NOTICE").forEach { name ->
+                val src = legalResourcesDir.get().asFile.resolve(name)
+                if (src.isFile) src.copyTo(appRoot.resolve(name), overwrite = true)
+            }
+        }
+    }
+}
+
 compose.desktop {
     application {
         mainClass = "io.github.huang404yan.platypus.desktop.MainKt"
 
         // 原生包用 jpackage 打。产物在 app-desktop/build/compose/binaries/main/ 下。
         nativeDistributions {
+            // LICENSE 与 NOTICE 复制进 app image 根目录（见上面 syncLegalResources）。
+            appResourcesRootDir.set(layout.buildDirectory.dir("legal-resources"))
+
             // 目标格式跟着构建机走，不能写死 Linux 格式：
             //   Windows → Msi（需要 WiX Toolset；没有 WiX 时用 -PskipWix 跳过下载，
             //             代价是出不了 msi，只能出 createDistributable 的 app-image）
