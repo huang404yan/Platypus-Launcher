@@ -53,7 +53,7 @@
 应用注册，被限流、被收紧、被认定滥用，都不是拿到包的人能处理的。仓库里那一份永远是空串，
 取值顺序在 `core/auth/ClientIds.kt`。
 
-两边的实现与理由写在 `docs/57-liangtiao-tongdao.md`。
+两边的实现与理由见 `core/Endpoints.kt`（地址的唯一出口）与 `core/edition/`（两条通道的差异）。
 
 ## 孵化版不占正式版版本号
 
@@ -133,7 +133,7 @@ set PLATYPUS_WIX_DIR=D:\ruanjian\kaifa\wix314                                   
   等于让所有下载者共用同一份配额、共享同一个被随时关闭的风险。孵化版出包时既不能传
   `-Pplatypus.msClientId` 也不能设 `PLATYPUS_MS_CLIENT_ID`，`BuildInfo.MS_CLIENT_ID` 与
   `MicrosoftEndpoints.DEFAULT_CLIENT_ID` 都必须是空串，正版登录由用户自己注册
-  （步骤见 `docs/41-zishen-client-id.md`，界面「设置 → 账号」第一张卡里也有一份缩写）。
+  （步骤在界面「设置 → 账号」第一张卡里，取值顺序见 `core/auth/ClientIds.kt`）。
   **正式版是另一回事**：由构建方在自己机器上注册并注入，那份 ID 属于发行方，不随源码走。
   三条路的优先级见 `core/auth/ClientIds.kt`。
 - **空壳包还要确认真的没有服务地址**：`-Pplatypus.shell=true` 出包后，
@@ -141,7 +141,7 @@ set PLATYPUS_WIX_DIR=D:\ruanjian\kaifa\wix314                                   
 - **不带任何隐私内容**：真实账号 / UUID / refresh_token、本机路径与用户名、
   诊断页导出的现场、日志文件、`settings.json`、`accounts.json`、`.minecraft` 里的任何东西。
 - **不留申请指引的缺口**：Release 说明必须有一段讲「正版登录要先自己填一个应用 ID」，
-  并指向 `docs/41-zishen-client-id.md`。指引只写在仓库里不算 —— 用户拿到的是附件。
+  并写清去哪儿填（界面「设置 → 账号」第一张卡）。指引只写在仓库里不算 —— 用户拿到的是附件。
 
 出包前自检（改完代码到打包之间跑一次）：
 

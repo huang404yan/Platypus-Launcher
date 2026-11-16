@@ -59,4 +59,22 @@ class CreditsTest {
         assertTrue(Credits.INTRO_ZH.contains("使用了代码"), "得让用户知道哪一类才真的搬了代码")
         assertTrue(Credits.INTRO_EN.contains("attributed"), "英文说明也要提到标注")
     }
+
+    @Test
+    fun `漏报过的两个编译期依赖现在都在册`() {
+        // XZ for Java 与 JNA 一直是编译进包的依赖（core 用前者解 .tar.xz，app-desktop 用后者调
+        // Win32 API 画标题栏），NOTICE 里却漏了很久。这条用例钉住它们，免得下次改版本目录时又漏。
+        val names = Credits.items.joinToString("\n") { it.name }
+        assertTrue(names.contains("XZ for Java"), "XZ for Java 是编译进包的依赖，必须列进致谢")
+        assertTrue(names.contains("JNA"), "JNA 只被桌面端用，但同样随包分发，必须列进致谢")
+    }
+
+    @Test
+    fun `随包分发的 Java 运行时与只在运行时下载的资产分开记`() {
+        // 这两类容易混：Oracle JDK 25 裁剪版是 jpackage 打进 runtime/ 的，陶瓦则一个字节都不进包，
+        // 只在用户点「安装」时下到他自己盘上。它们的许可义务完全不同，所以都要各自有一条。
+        val items = Credits.items.filter { it.kind == CreditKind.LIBRARY }
+        assertTrue(items.any { it.license.contains("NFTC") }, "自带运行时按 Oracle NFTC 分发，得写清许可名")
+        assertTrue(items.any { it.name.contains("Terracotta") }, "陶瓦是运行时下载的 AGPL 资产，得单独记一条")
+    }
 }

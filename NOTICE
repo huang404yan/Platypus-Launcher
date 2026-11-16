@@ -13,9 +13,14 @@ Copyright 2026 Platypus contributors
 
 == 第三方库（编译进安装包，各自保留原版权与许可） ==
 
-  Kotlin / kotlinx-coroutines / kotlinx-serialization   Apache-2.0
-  Compose Multiplatform                                 Apache-2.0
-  AndroidX (core-ktx / activity-compose / Compose BOM)   Apache-2.0
+  Kotlin / kotlinx-coroutines / kotlinx-serialization     Apache-2.0
+  Compose Multiplatform                                   Apache-2.0
+  AndroidX (core-ktx / activity-compose / Compose BOM)    Apache-2.0
+  XZ for Java（org.tukaani:xz）                           0BSD
+  JNA（net.java.dev.jna:jna）                             LGPL-2.1-or-later 或 Apache-2.0，二选一
+
+  XZ for Java 只用来解 .tar.xz（安卓 JRE 与陶瓦安装包）；JNA 只用来调 Win32 API 画
+  Windows 标题栏的深色，两者都随安装包一起分发，各自保留原版权与许可全文。
 
 完整清单与版本号见 gradle/libs.versions.toml 与各模块 build.gradle.kts。
 
@@ -27,29 +32,71 @@ Copyright 2026 Platypus contributors
   MCBBS v2 整合包格式    社区约定（manifest.json + modpack.json + overrides）
   离线登录 UUID 规则     OfflinePlayer:<名字> 的 MD5 转 v3 UUID
   Microsoft 账号登录      OAuth 2.0 设备码授权 + Xbox Live / XSTS / Minecraft Services 的公开
-                          REST 接口。安装包内不内置任何 Client ID：OAuth 的 client_id 是
-                          应用注册者名下的配额，随包分发等于让所有下载者共用一个别人的注册，
-                          所以由使用者自己申请并填进本机设置（docs/41）。这与微软是否授权
-                          本项目无关，本项目与 Microsoft 无任何关联。
+                          REST 接口，实现见 core/auth/MicrosoftAuth.kt。client_id 由各发行方
+                          自己向 Azure 应用注册申请，不属于本仓库：
+
+                          · 正式版：内置由本发行方申请并合规使用的 Client ID，玩家装好点一下
+                            「微软登录」就能授权，不需要自己填任何东西。
+                          · 孵化版 / 开源版：不含任何 Client ID，也不含任何服务地址。想用正版登录
+                            就自己注册一个填进「设置 → 账号」（字段与取值顺序见
+                            core/auth/ClientIds.kt）。
+
+                          仓库里那两份恒为空串，谁出包谁注入 —— 一份随包分发的 ID 等于所有
+                          下载者共用同一个应用注册名下的配额，被限流、被关闭都不是拿到包的
+                          人能处理的。客户端 ID 不是密钥，但也不该替别人背这个风险。
+
+                          以上接口都是微软公开提供的，本项目与 Microsoft 无任何关联，
+                          未获其认可或赞助。
 
 == 设计参考（未使用其代码） ==
 
   PCL2（Plain Craft Launcher 2）  专有许可。下载页左侧栏分组、刷新按钮挂在菜单项、
-                                  启动页左栏放版本选择与启动按钮等交互形态参照了它。
-                                  其内置中文名数据库（WikiEntries.txt）未使用 —— 该项目
-                                  源码树未附带 LICENSE，许可状态不明。
+                                  启动页左栏放版本选择与启动按钮、模组条目的点行启停等
+                                  交互形态参照了它。其内置中文名数据库（WikiEntries.txt）
+                                  未使用 —— 该项目源码树未附带 LICENSE，许可状态不明。
+                                  将来若需要中文名映射，只采用社区公开授权的数据源，或由
+                                  用户自行导入，不打包来路不明的数据库。
   HMCL                             GPL-3.0。实例目录布局、离线命名、Java 挑选方式的公开文档。
   Prism Launcher                   GPL-3.0。实例隔离形态（每实例独立目录，共享 libraries/assets）。
   PCL2 · 微软登录部分               专有许可。七步链路里 XSTS 错误码的对照表、
                                   「先查持有记录再拿档案」的顺序参照了它，代码未取。
   FCL（FoldCraftLauncher）         GPL-3.0。安卓端 Java 页把「自己下几份常用运行时」作为主路径，
-                                   而不是扫描本机；实现为 Java + XML，代码未取。
+                                  而不是扫描本机；实现为 Java + XML，代码未取。
+  美西螈启动器（Axolotl）           GPL-3.0。设置页按「改了会影响什么」分组、把 Java 运行时
+                                  单独列成一张带已装标记的表的排版参照了它。它是 Rust + Vue
+                                  的桌面应用，技术栈与本项目完全不同，代码未取。
+                                  https://github.com/Axolotl-Launcher/Axolotl
 
-== 运行时资产（不进安装包，运行时下载） ==
+== 运行时资产：随安装包一起分发的 ==
 
-  安卓 JRE（FCL jreAssets）        OpenJDK 本体，GPL-2.0 with Classpath Exception。
-                                   APK 里不含 JRE；用户点「下载」时才从 FCL 仓库取
-                                   universal.tar.xz + bin-<abi>.tar.xz 解包到应用私有目录。
-                                   这两份包由 FCL 打包分发，本产品只提供下载与解包。
+  桌面自带的 Java 运行时   Oracle JDK 25（25.0.5.0.3）：jpackage 打出来的 app-image 在
+                           产物自己的 runtime/ 里带了一份，只保留 java.base、java.desktop、
+                           java.logging、java.xml、java.prefs、java.datatransfer、
+                           jdk.crypto.ec 七个模块。
+                           它是 Oracle 的 OpenJDK 构建，按 Oracle No-Fee Terms and Conditions
+                           （NFTC）分发，不是 GPL。许可与版权全文随产物一起在
+                           runtime/legal/<模块>/LICENSE 与 COPYRIGHT 里。再分发这个包时
+                           那份 legal/ 目录不能删，删掉就违反 NFTC 的声明保留要求。
+                           这份运行时是启动器自己跑起来用的，与游戏用的 Java 无关；
+                           游戏用哪份 Java 由用户在「设置 → Java」里决定。
+
+== 运行时资产：不进安装包，用户触发时才下载 ==
+
+  安卓 JRE（FCL jreAssets）  OpenJDK 本体，GPL-2.0 with Classpath Exception。
+                            APK 里不含 JRE；用户点「下载」时才取 universal.tar.xz +
+                            bin-<abi>.tar.xz 解包到应用私有目录。这两份包由 FCL 打包分发，
+                            本产品只提供下载与解包。
+                            下载地址是 FCL 仓库的 jreAssets 目录（raw.githubusercontent），
+                            前面挂两级 GitHub 反代当前置镜像（gh-proxy → ghfast → 原生域），
+                            一个源挂了还有下一个。地址集中在 core/runtime/AndroidJava.kt。
+                            上游若整体挪走，这里要跟着改或换成自建镜像 —— 这属于可用性
+                            风险，不是许可问题：GPL-2.0+CE 本身允许我们直接分发这份运行时。
+
+  陶瓦联机服务端（Terracotta）  AGPL-3.0，项目在 https://github.com/burningtnt/Terracotta。
+                            本项目是 Apache-2.0 且公开分发产物，把 AGPL 的二进制塞进分发
+                            包会触发它的传染条款。所以安装包里不含陶瓦的任何二进制：
+                            用户点「安装」时才从它的 GitHub Releases 下载到用户自己的盘上，
+                            由用户自己触发、自己持有，与我们的许可互不影响。
+                            联机页会检查官方 latest，有新版让用户更新。
 
 关于页「开源致谢」由 core/Credits.kt 驱动，内容与本节保持一致。

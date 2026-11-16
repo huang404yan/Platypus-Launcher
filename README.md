@@ -101,7 +101,7 @@ androidApp/      安卓端入口
 正版登录要用一串微软给的应用 ID。任何随安装包发出去的 ID 都等于让所有下载者共用一份别人名下的应用注册，被限流、被收紧、被认定滥用，都不是拿到包的人能处理的：
 
 - **正式版**由构建方自己注入（`-Pplatypus.msClientId=` 或 `PLATYPUS_MS_CLIENT_ID`），下载的人什么都不用填。
-- **孵化版**不内置，也不带服务地址。想用正版账号就自己去申请一个（免费，三分钟，步骤在 `docs/41-zishen-client-id.md` 与「设置 → 账号」第一张卡里），想下载就自己填一个镜像根。
+- **孵化版**不内置，也不带服务地址。想用正版账号就自己去申请一个（免费，三分钟，步骤在界面「设置 → 账号」第一张卡里，字段与取值顺序见 `core/auth/ClientIds.kt`），想下载就自己填一个镜像根。
 
 自己打一份孵化版：
 
@@ -109,7 +109,7 @@ androidApp/      安卓端入口
 ./gradlew :app-desktop:createDistributable -Pplatypus.shell=true
 ```
 
-两种包的边界与出包要求写在 `releases/README.md`，实现与理由在 `docs/57-liangtiao-tongdao.md`。
+两种包的边界与出包要求写在 `releases/README.md`，实现与理由见 `core/Endpoints.kt` 与 `core/edition/`。
 
 ## 许可与贡献
 

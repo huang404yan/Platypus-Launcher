@@ -25,8 +25,8 @@ enum class CreditKind(val label: String) {
     /** 只用到公开协议、数据格式或在线服务，不涉及对方代码。 */
     SPEC("格式与协议"),
 
-    /** 编译进安装包的第三方库。 */
-    LIBRARY("运行时依赖"),
+    /** 运行时依赖：有的编译进安装包，有的由用户触发下载到自己盘上，都在这组。 */
+    LIBRARY("运行时依赖与资产"),
 }
 
 /**
@@ -166,6 +166,40 @@ object Credits {
             kind = CreditKind.LIBRARY,
             license = "Apache-2.0",
             url = "https://developer.android.com/jetpack",
+        ),
+        Credit(
+            name = "XZ for Java（org.tukaani:xz）",
+            kind = CreditKind.LIBRARY,
+            license = "0BSD",
+            url = "https://tukaani.org/xz/java.html",
+            note = "解 .tar.xz 用 —— 安卓 JRE 与陶瓦安装包都是这种格式。0BSD 不要求保留署名，" +
+                "这里仍然写上，是因为用到的每个第三方库都该有个出处。",
+        ),
+        Credit(
+            name = "JNA（net.java.dev.jna:jna）",
+            kind = CreditKind.LIBRARY,
+            license = "LGPL-2.1-or-later 或 Apache-2.0（双许可，二选一）",
+            url = "https://github.com/java-native-access/jna",
+            note = "调 Win32 API 把 Windows 标题栏改成深色，只用到它调 DLL 的那层壳。" +
+                "它自己给了 LGPL 与 Apache 两个许可，本项目按 Apache-2.0 这条走。",
+        ),
+        Credit(
+            name = "桌面产物自带的 Java 运行时（Oracle JDK 25 裁剪版）",
+            kind = CreditKind.LIBRARY,
+            license = "Oracle No-Fee Terms and Conditions（NFTC）",
+            note = "jpackage 打出来的 app-image 在 runtime/ 里带了一份裁到七个模块的 Oracle JDK 25，" +
+                "启动器靠它跑起来；游戏用的 Java 是另一回事，由用户在设置里挑。" +
+                "NFTC 允许随应用分发，条件是把许可与版权声明一并带上 —— 产物里那份 " +
+                "runtime/legal/ 目录因此不能删。",
+        ),
+        Credit(
+            name = "陶瓦联机服务端（Terracotta）",
+            kind = CreditKind.LIBRARY,
+            license = "AGPL-3.0",
+            url = "https://github.com/burningtnt/Terracotta",
+            note = "跨网络的联机靠它打洞。它是 AGPL-3.0，本项目是 Apache-2.0 且公开分发产物，" +
+                "把它的二进制塞进安装包会触发传染条款 —— 所以安装包里没有它，" +
+                "只有用户点「安装 / 更新」时才从官方 Release 下到用户自己的盘上。",
         ),
     )
 

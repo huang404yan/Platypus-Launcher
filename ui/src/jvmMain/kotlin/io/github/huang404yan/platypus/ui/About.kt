@@ -110,7 +110,7 @@ fun AboutPage() {
 }
 
 /**
- * 开源致谢。按 CreditKind 分组（真的用了代码 / 设计参考 / 格式与协议 / 运行时依赖），
+ * 开源致谢。按 CreditKind 分组（真的用了代码 / 设计参考 / 格式与协议 / 运行时依赖与资产），
  * 每组都带一句「这一类是什么」，否则用户看到 GPL-3.0 会以为自己装了个 GPL 启动器。
  */
 @Composable
@@ -189,7 +189,7 @@ private fun kindExplanation(kind: CreditKind): String = when (kind) {
     CreditKind.CODE -> "这些项目的实现被用进了本项目，版权归原作者，按各自的许可使用；本项目的修改同样以 Apache-2.0 发布。"
     CreditKind.REFERENCE -> "只看过它们的文档、issue 与源码来理解问题怎么解，代码是自己重写的；上面这些项目的 GPL 或专有代码没有进入本项目。"
     CreditKind.SPEC -> "用的是公开的接口、数据格式或社区约定，没有链接也没有修改对方的代码。"
-    CreditKind.LIBRARY -> "编译进安装包的第三方库，各自保留原版权与许可。"
+    CreditKind.LIBRARY -> "运行时要用的第三方库与资产，各自保留原版权与许可；其中由用户自己触发的下载不进安装包。"
 }
 
 @Composable

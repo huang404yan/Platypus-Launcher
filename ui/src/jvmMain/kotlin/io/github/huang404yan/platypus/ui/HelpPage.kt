@@ -32,7 +32,7 @@ import io.github.huang404yan.platypus.core.Brand
 /**
  * 帮助页：给玩家看的说明书。
  *
- * 与 docs/ 下那五十多篇的区别：那些是**开发记录**，写给改代码的人看（为什么这么设计、
+ * 与本地那五十多篇开发记录（docs/，不进仓库）的区别：那些写给改代码的人看（为什么这么设计、
  * 当时差在哪、协议字段怎么排）；这一页写给**打开启动器的人**看，只回答「我要做这件事，
  * 该点哪里」。两份东西都必要，但不能互相替代 —— 开发记录里一句「parseMcbbs 第一步查
  * addons[game]」对玩家毫无意义，而「整合包装完在启动页的版本选择里」这句话在开发记录里又太浅。
@@ -381,7 +381,7 @@ fun HelpPage(onGo: (NavTarget) -> Unit = {}) {
     ) {
         Text("帮助", style = MaterialTheme.typography.headlineSmall)
         Text(
-            "每一章只讲「这件事该点哪里」。想知道为什么这么设计，去看仓库里的 docs/（那是写给改代码的人看的）。",
+            "每一章只讲「这件事该点哪里」。想知道为什么这么设计，去看源码里的注释（那是写给改代码的人看的）。",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
