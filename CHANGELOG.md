@@ -62,9 +62,11 @@ preview.19 把配置项挪到侧栏底部之后，顺序反过来别扭了：上
 - **内存超过物理内存时给提示**。滑条上限收到「物理内存减 1 GB」（PCL 也是按机器算的）；真的开到物理内存八成以上时，滑条下面红字写明「系统会开始换页，进游戏后大概率卡顿」。
 - **下载页与清单页之间有了双向通道**：版本设置的「Mod」「资源包与光影」两节各多一个「去下载 Mod / 去下载光影」按钮，跳过去时还会把当前实例带走（下载页自动选中它，不用再挑一遍）；模组清单那边同样有一个「去下载 Mod」回到搜索页（这一条后来搬进了「版本设置 → Mod」，见下）。
 - **下载页只剩「搜一个装进来」**。以前同一页挂着「已装 / 浏览」两个分栏：搜索栏在右边，已装清单在左边，装完一个模组想确认它到了没有，得手动切回去。现在这一页只负责搜索与安装，装了什么的清单跟具体实例走 —— 从某个版本的「版本设置 → Mod」进去，看到的天然就是这个实例的清单，不用再挑一遍实例。检查更新、多选更新、查冲突、搬隔离前的老模组也一起挪了过去，因为它们本来就是「这一版装了什么」的维护动作，不该和「去下载一个新的」混在一页。
+- **已停用的模组单独一个分组，摆在启用列表上面**（版本设置 → Mod）。停用只是改个后缀，条目还留在同一个清单里，而这份清单是按「启用 + 停用」两段拼出来的 —— 停用的天然沉到最底下，一百多个模组排下来，想重新启用刚关掉的那一个得滚到最后。现在停用的收进一张单独的卡：标题写「已停用 N 个」，默认摊开、点「收起」才折起来，底下仍然是一行说明「停用 = 文件名改成 .jar.disabled，游戏不会加载它」。为什么摆在上面而不是下面：停用的通常只有几个，而且正是用户回来要找的那几个 —— 摆上面不用滚，摆下面等于没分组。全部停用（一个启用的都不剩）时还会多一句提示，免得看着像清单空了。
 
 ### 修了什么
 
+- **启动按钮灰着、页面上不说为什么，修掉了**。「启动游戏」能不能点是 `canLaunch = selected != null && selectedJava != null`，也就是只认「选了版本」和「选中了 Java」两件事 —— 跟有没有填微软那串 client ID 没关系（那个只拦正版登录，不拦启动）。可真缺 Java 的时候，界面上只有一个灰按钮：检测 Java 的入口藏在「游戏目录与 Java（点开改）」这个默认折起来的块里，用户第一反应是「是不是要买号 / 是不是要配 ID」。现在按钮上方会写明这一次缺的是什么：「还没选版本」「本机一个 Java 都没有」「需要一个 Java 21 才能启动」，并且指路到哪个折叠块里补。刚进页面还在探测 Java 的那几百毫秒不写，免得一闪而过地误报缺 Java。
 - **「登记」完回到主页看不到那个版本，修掉了**。启动页的实例清单是在页面第一次显示时读一次 `instances.json`，「管理版本…」那边登记只写盘、不通知启动页，回来时页面还停在打开副页面之前的那份快照上 —— 于是「明明登记成功了，版本卡片里没有」。现在副页面关闭会带一个计数回给启动页，加一就重扫。
 - **启动游戏移到侧栏最下面，并且钉在栏底**。现在从上到下是：身份三格 → 身份标志 → 离线用户名 → 启动游戏。理由是「配好参数 → 一键开」符合手指往下落的顺序：先看用哪个身份、再确认这一版的参数，最后那个大按钮就在拇指够得到的最下面。这一版又把侧栏拆成两层：上面那截内容自己滚、`weight(1f)` 把剩余高度全吃掉，按钮固定在外层底部 —— 以前整栏一个 `Column` 从头排到底，内容不满时按钮悬在离栏底一百多像素的地方，手指要往下找。
 - **启动页那个「内存优化（会改 JVM 参数）」勾选删掉了**。它跟「自动分配」是同一种毛病：设置里存着 `memoryOptimize`，可 `LaunchPlanner` / `LaunchArguments` 从来没读过它，勾了不进 `-Xmx`、不改进程参数。留着只会让人以为勾上就变快了。字段留在数据类里不动（`@Serializable` 向后兼容，旧 settings.json 照常读），界面不再读写。
@@ -95,7 +97,7 @@ preview.19 把配置项挪到侧栏底部之后，顺序反过来别扭了：上
 - `gradlew :core:test :ui:jvmTest :app-desktop:compileKotlin :app-desktop:createDistributable -PskipWix` → `BUILD SUCCESSFUL`，0 条 `e: `、0 条 FAILED。
 - 全量单测 **84 个类 1023 个用例，0 失败 0 错误 0 跳过**（新增 14 例：8 例在 `ModIconsTest` —— 按 modId 找图、根目录图、无图返回 null、深路径兜底、二次命中缓存不再解压、缓存命中不联网、空地址、缓存目录自建；6 例在 `InstanceMemoryTest` —— 不跟随读自己的数、跟随读默认值、默认值越界夹到 512 与 32768、抄默认值只对跟随的实例动手、抄写时同样夹区间、旧数据没有这个字段时按不跟随处理）。界面上剩下的部分没有可断言的口径（滑条手感、竖条动画、行点击），靠编译与手动验收。
 - 图标、滑条、行点击的**肉眼验收由用户手动做**：桌面端点击验证不由智能体代劳。
-- 桌面免安装目录按本轮代码重建过：`app-desktop/build/compose/binaries/main/app/Platypus Preview/` 整目录 135,565,280 字节（202 个文件），`Platypus Preview.exe` 597,504 字节（15:54 生成）。解包复核新类进包：`ui-jvm-0.8.0-preview.20-885c86b7...` 共 518 条目，`InstalledModsSectionKt.class`、`ModsPageKt.class`、`InstanceDetailPanelKt.class`、`MemorySliderKt.class` 四个都在包里；`LaunchPageKt.class` 与 `AppKt.class` 的常量池里能搜到 `refreshTick`、`overlayTick`、`closeOverlay`（登记后不刷新那条修的实证）。
+- 桌面免安装目录按本轮代码重建过：`app-desktop/build/compose/binaries/main/app/Platypus Preview/` 整目录 135,578,211 字节（202 个文件），`Platypus Preview.exe` 597,504 字节（16:09:05 生成）。解包复核新类进包：`ui-jvm-0.8.0-preview.20-f3feb761b5a23c96335c44e266e2e5.jar` 共 521 条目，`InstalledModsSectionKt.class`、`ModsPageKt.class`、`InstanceDetailPanelKt.class`、`MemorySliderKt.class` 四个都在包里；`LaunchPageKt.class` 与 `AppKt.class` 的常量池里能搜到 `refreshTick`、`overlayTick`、`closeOverlay`（登记后不刷新那条修的实证）；`InstalledModsSectionKt.class` 的常量池里有 `DisabledModsGroup`、`ModList`、`onTogglePicked`，`LaunchPageKt.class` 里有 `blockedHint`（本轮两条的实证）。
 - `msi` / `zip` / `apk` 未按本轮代码重出 —— 发布时统一出三端，免得中间过程反复打包。
 - 安卓端只做了编译验证（`:androidApp:compileDebugKotlin` → 0 条 `e: `），本轮没有改安卓端界面。
 - 真实模组的图标覆盖率实测（本机 75 个 jar）：只有 56 个 jar 里带 `icon.png`，但按实现的候选顺序能出图 **73 / 75**；出不了图的只有 `bwncr` 与 `EMIProfessions` 两个。

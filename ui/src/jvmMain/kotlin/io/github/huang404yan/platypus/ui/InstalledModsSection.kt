@@ -458,8 +458,13 @@ internal fun InstalledModsSection(
             LegacyModsRow(snapshot = it, onAdopt = { scope.launch { adoptLegacy() } })
         }
 
-        val installed = snapshot?.let { it.scan.mods + it.scan.disabled }.orEmpty()
-        if (installed.isEmpty()) {
+        // 停用的模组单独归一段（2026-11-16 用户报：停用后掉到列表最下面，滚到底才找得回来）。
+        // 以前是 scan.mods + scan.disabled 直接拼成一条长列表，停用项天然沉底；现在拆成
+        // 「已停用 N 个」分组 + 启用列表，而且分组放在启用列表**上面** —— 停用项通常只有
+        // 几个、又正是用户回来要找的那几个，压在一百多个启用模组下面等于没做。
+        val enabledMods = snapshot?.scan?.mods.orEmpty()
+        val disabledMods = snapshot?.scan?.disabled.orEmpty()
+        if (enabledMods.isEmpty() && disabledMods.isEmpty()) {
             ModHint(
                 when {
                     snapshot == null -> "正在扫描 mods 目录…"
@@ -468,32 +473,45 @@ internal fun InstalledModsSection(
             )
         } else {
             val updateByFile = updates.associateBy { it.fileName }
-            Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                installed.forEach { entry ->
-                    val canPick = updateByFile[entry.fileName]?.let {
-                        it.status == ModUpdateStatus.OUTDATED && it.latest != null
-                    } == true
-                    InstalledModRow(
-                        entry = entry,
-                        update = updateByFile[entry.fileName],
-                        busy = updatingFile.isNotBlank(),
-                        updating = updatingFile == entry.fileName,
-                        pickMode = pickMode,
-                        picked = entry.fileName in pickedFiles,
-                        onTogglePicked = {
-                            if (canPick) {
-                                pickedFiles = if (entry.fileName in pickedFiles) {
-                                    pickedFiles - entry.fileName
-                                } else {
-                                    pickedFiles + entry.fileName
-                                }
-                            }
-                        },
-                        onToggleEnabled = { enabled -> scope.launch { setEnabled(entry, enabled) } },
-                        onDelete = { scope.launch { deleteMod(entry) } },
-                        onUpdate = { result -> scope.launch { updateOne(result) } },
+            val onPick: (String) -> Unit = { fileName ->
+                pickedFiles = if (fileName in pickedFiles) pickedFiles - fileName else pickedFiles + fileName
+            }
+            if (disabledMods.isNotEmpty()) {
+                DisabledModsGroup(
+                    entries = disabledMods,
+                    updateByFile = updateByFile,
+                    busy = updatingFile.isNotBlank(),
+                    updatingFile = updatingFile,
+                    pickMode = pickMode,
+                    pickedFiles = pickedFiles,
+                    onTogglePicked = onPick,
+                    onToggleEnabled = { entry, enabled -> scope.launch { setEnabled(entry, enabled) } },
+                    onDelete = { entry -> scope.launch { deleteMod(entry) } },
+                    onUpdate = { result -> scope.launch { updateOne(result) } },
+                )
+            }
+            if (enabledMods.isNotEmpty()) {
+                if (disabledMods.isNotEmpty()) {
+                    Text(
+                        "已启用 " + enabledMods.size + " 个",
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.SemiBold,
                     )
                 }
+                ModList(
+                    entries = enabledMods,
+                    updateByFile = updateByFile,
+                    busy = updatingFile.isNotBlank(),
+                    updatingFile = updatingFile,
+                    pickMode = pickMode,
+                    pickedFiles = pickedFiles,
+                    onTogglePicked = onPick,
+                    onToggleEnabled = { entry, enabled -> scope.launch { setEnabled(entry, enabled) } },
+                    onDelete = { entry -> scope.launch { deleteMod(entry) } },
+                    onUpdate = { result -> scope.launch { updateOne(result) } },
+                )
+            } else {
+                ModHint("这个实例的模组全部停用了。点上面分组里的条目或「启用」就能恢复。")
             }
         }
     }
@@ -526,6 +544,103 @@ private fun LegacyModsRow(snapshot: InstanceModsSnapshot, onAdopt: () -> Unit) {
                     modifier = Modifier.weight(1f),
                 )
                 OutlinedButton(onClick = onAdopt) { Text("搬进这个实例") }
+            }
+        }
+    }
+}
+
+/**
+ * 一串模组条目。启用区和停用分组共用它，免得两处各写一份 `InstalledModRow` 的参数。
+ */
+@Composable
+private fun ModList(
+    entries: List<ModEntry>,
+    updateByFile: Map<String, ModUpdateResult>,
+    busy: Boolean,
+    updatingFile: String,
+    pickMode: Boolean,
+    pickedFiles: Set<String>,
+    onTogglePicked: (String) -> Unit,
+    onToggleEnabled: (ModEntry, Boolean) -> Unit,
+    onDelete: (ModEntry) -> Unit,
+    onUpdate: (ModUpdateResult) -> Unit,
+) {
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        entries.forEach { entry ->
+            val update = updateByFile[entry.fileName]
+            // 多选只认真有新版可装的条目：勾上再一个个跳过，看着像坏了
+            val canPick = update != null &&
+                update.status == ModUpdateStatus.OUTDATED && update.latest != null
+            InstalledModRow(
+                entry = entry,
+                update = update,
+                busy = busy,
+                updating = updatingFile == entry.fileName,
+                pickMode = pickMode,
+                picked = entry.fileName in pickedFiles,
+                onTogglePicked = { if (canPick) onTogglePicked(entry.fileName) },
+                onToggleEnabled = { enabled -> onToggleEnabled(entry, enabled) },
+                onDelete = { onDelete(entry) },
+                onUpdate = onUpdate,
+            )
+        }
+    }
+}
+
+/**
+ * 「已停用」分组：单独一段、摆在启用列表**上面**、默认摊开。
+ *
+ * 2026-11-16 用户报：停用的是 `scan.disabled`，以前跟启用的一起拼成一条长列表，于是天然沉底，
+ * 一百多个模组里想把某个重新打开得滚到底。分组是对症的：停用的通常就几个，又正是回来要找的
+ * 那几个，放在顶上第一眼就看见。收起按钮是给「停用几十个」的人留的，收起来后仍显示数量。
+ */
+@Composable
+private fun DisabledModsGroup(
+    entries: List<ModEntry>,
+    updateByFile: Map<String, ModUpdateResult>,
+    busy: Boolean,
+    updatingFile: String,
+    pickMode: Boolean,
+    pickedFiles: Set<String>,
+    onTogglePicked: (String) -> Unit,
+    onToggleEnabled: (ModEntry, Boolean) -> Unit,
+    onDelete: (ModEntry) -> Unit,
+    onUpdate: (ModUpdateResult) -> Unit,
+) {
+    var expanded by remember { mutableStateOf(true) }
+    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
+        Column(Modifier.fillMaxWidth().padding(10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    "已停用 " + entries.size + " 个",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.weight(1f),
+                )
+                TextButton(onClick = { expanded = !expanded }) { Text(if (expanded) "收起" else "展开") }
+            }
+            Text(
+                "停用 = 文件名改成 .jar.disabled，游戏不会加载它。点条目或右边的「启用」就能恢复。",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            if (expanded) {
+                ModList(
+                    entries = entries,
+                    updateByFile = updateByFile,
+                    busy = busy,
+                    updatingFile = updatingFile,
+                    pickMode = pickMode,
+                    pickedFiles = pickedFiles,
+                    onTogglePicked = onTogglePicked,
+                    onToggleEnabled = onToggleEnabled,
+                    onDelete = onDelete,
+                    onUpdate = onUpdate,
+                )
             }
         }
     }

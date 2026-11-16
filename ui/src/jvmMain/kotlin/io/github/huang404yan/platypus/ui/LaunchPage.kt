@@ -627,6 +627,18 @@ fun LaunchPage(
             onIdentityTab = { identityTab = it },
             onOpenAccountPage = onOpenAccountPage,
             canLaunch = selected != null && selectedJava != null,
+            // 「按钮是灰的，为什么」——以前只在折叠块里才看得到缺 Java，用户以为是要先填 clientId。
+            blockedHint = when {
+                selected == null -> "还没选版本。在右边点一张版本卡片。"
+                selectedJava != null -> ""
+                // 刚进页面时 Java 还在探测、自动挑选还没发生：这时说「缺 Java」是误报，先等等
+                javaPhase is JavaPhase.Detecting || javaPhase is JavaPhase.Idle -> ""
+                requiredMajor == null -> "这个版本没读到要哪个 Java。展开下面「游戏目录与 Java」手选一个。"
+                (javaPhase as? JavaPhase.Done)?.runtimes?.isEmpty() == true ->
+                    "本机一个 Java 都没有。点下面「游戏目录与 Java（点开改）」，里面能一键补 Java。"
+                else -> "需要一个 Java " + requiredMajor + " 才能启动。点下面「游戏目录与 Java（点开改）」，" +
+                    "里面能一键补 Java " + requiredMajor + "。"
+            },
             onLaunch = { launchGame() },
             onStop = { stopGame() },
         )
@@ -1240,6 +1252,8 @@ private fun LaunchSidePanel(
     /** 「管理账号 →」要去哪里。 */
     onOpenAccountPage: () -> Unit,
     canLaunch: Boolean,
+    /** 不能启动时的一句话原因（空串 = 能启动）。只用来解释按钮为什么是灰的。 */
+    blockedHint: String,
     onLaunch: () -> Unit,
     onStop: () -> Unit,
 ) {
@@ -1313,6 +1327,9 @@ private fun LaunchSidePanel(
                     enabled = !busy,
                     supportingText = { Text("点「启动」会记住这个名字。") },
                 )
+            }
+            if (!canLaunch && blockedHint.isNotBlank() && !busy) {
+                SectionHint(blockedHint, error = true)
             }
             // 大号按钮照 PCL 的 54 高：它是这一页唯一的主要动作，不该和旁边的次要按钮一样大。
             Button(
