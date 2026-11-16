@@ -45,6 +45,9 @@ import io.github.huang404yan.platypus.core.instance.InstanceDetails
 import io.github.huang404yan.platypus.core.instance.InstanceDetailsLoader
 import io.github.huang404yan.platypus.core.instance.InstanceEditResult
 import io.github.huang404yan.platypus.core.instance.InstanceEdits
+import io.github.huang404yan.platypus.core.instance.InstanceIntegrity
+import io.github.huang404yan.platypus.core.instance.IntegrityReport
+import io.github.huang404yan.platypus.core.instance.IntegrityState
 import io.github.huang404yan.platypus.core.instance.InstanceLayouts
 import io.github.huang404yan.platypus.core.instance.InstanceMigration
 import io.github.huang404yan.platypus.core.instance.MemoryDefaults
@@ -188,6 +191,16 @@ internal fun InstanceDetailPanel(
     var instancePlan by remember(instance.directory) { mutableStateOf<DeletionPlan?>(null) }
     var instanceSavesToo by remember(instance.directory) { mutableStateOf(false) }
     var deletingInstance by remember(instance.directory) { mutableStateOf(false) }
+
+    // 完整性检查。「对照清单」是只读的本地核对（不看网络），「补齐」才会联网下那几个文件。
+    // 两者分开是因为检查一次可能要算几 GB 的 sha1：让它顺便把缺的补上是两件不同的事，
+    // 用户点「检查」时不该有任何写盘动作。
+    var integrity by remember(instance.directory) { mutableStateOf<IntegrityReport?>(null) }
+    var integrityChecking by remember(instance.directory) { mutableStateOf(false) }
+    // 已查完的文件数 / 总数。从 IO 线程写，Compose 的快照系统允许，界面下一帧就能读到。
+    var integrityProgress by remember(instance.directory) { mutableStateOf(0 to 0) }
+    var repairing by remember(instance.directory) { mutableStateOf(false) }
+    var repairText by remember(instance.directory) { mutableStateOf("") }
 
     val scope = rememberCoroutineScope()
 
@@ -377,6 +390,82 @@ internal fun InstanceDetailPanel(
             }
             onNotice(outcome.summary)
             onDeleted()
+        }
+    }
+
+    /**
+     * 按版本清单对一遍这个实例的文件。
+     *
+     * 只在本地读：拿 version json（含 inheritsFrom 合并）算出「应该有哪些文件」，
+     * 再逐个比大小与 sha1。不联网、不写盘，所以随时可以点。
+     *
+     * @param verifyHashes false 时只比大小，几秒钟能过几万个文件，但同样大小的坏文件发现不了。
+     */
+    fun checkIntegrity(verifyHashes: Boolean) {
+        if (integrityChecking || repairing) return
+        notice = ""
+        repairText = ""
+        integrityChecking = true
+        integrityProgress = 0 to 0
+        scope.launch {
+            val report = withContext(Dispatchers.IO) {
+                runCatching {
+                    InstanceIntegrity.inspect(instance, verifyHashes = verifyHashes) { done, total ->
+                        integrityProgress = done to total
+                    }
+                }.getOrElse { error ->
+                    IntegrityReport(
+                        versionId = instance.gameVersion,
+                        warnings = listOf("检查失败：" + (error.message ?: error.toString())),
+                    )
+                }
+            }
+            integrity = report
+            integrityChecking = false
+        }
+    }
+
+    /**
+     * 把上一步查出来的问题文件补回来。
+     *
+     * 交给 core 的下载器：它按 sha1 判断要不要重下，坏文件整份替换，好的一个字节都不碰。
+     * 补完立刻再查一遍（用与上次相同的方式），让界面上的数字是真的变好，而不是「应该好了」。
+     */
+    fun repairIntegrity() {
+        val report = integrity ?: return
+        if (repairing || integrityChecking) return
+        repairing = true
+        repairText = "正在补齐 " + report.problemFiles + " 个文件…"
+        scope.launch {
+            val verifyHashes = report.hashesChecked
+            val outcome = withContext(Dispatchers.IO) {
+                runCatching {
+                    InstanceIntegrity.repair(report) { progress ->
+                        repairText = "已补 " + progress.completedFiles + "/" + progress.totalFiles + " 个 · " +
+                            formatBytes(progress.completedBytes) + " / " + formatBytes(progress.totalBytes)
+                    }
+                }
+            }
+            val failure = outcome.exceptionOrNull()
+            repairing = false
+            if (failure != null) {
+                repairText = "补齐失败：" + (failure.message ?: failure.toString())
+                return@launch
+            }
+            val result = outcome.getOrNull()
+            repairText = if (result == null || result.ok) {
+                "补完了，正在复核…"
+            } else {
+                "补完了，但还有 " + result.failures.size + " 个文件没下来（网络或镜像的问题），复核一遍看看。"
+            }
+            val again = withContext(Dispatchers.IO) {
+                runCatching {
+                    InstanceIntegrity.inspect(instance, verifyHashes = verifyHashes) { done, total ->
+                        integrityProgress = done to total
+                    }
+                }.getOrNull()
+            }
+            if (again != null) integrity = again
         }
     }
 
@@ -742,6 +831,99 @@ internal fun InstanceDetailPanel(
                                     GameJavaRules.requiredMajor(instance.gameVersion)) +
                                     (d.javaComponent?.let { "（" + it + "）" } ?: ""),
                             )
+                        }
+                        // 「版本文件」只说有没有 json 与 client jar；真正启动不了往往是某个库或
+                        // assets 里的一个文件坏了，这一块才查得出来。放在「占了多少地方」之前：
+                        // 先看能不能跑，再看占多大。
+                        DetailCard("检查文件完整性") {
+                            Text(
+                                "按版本清单（含父版本）对一遍：client jar、资源索引、库、资源对象。" +
+                                    "只读本地，不联网；缺的坏的可以只补那几个，不用整份重下。",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                            if (integrity == null && !integrityChecking) {
+                                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                                    OutlinedButton(
+                                        onClick = { checkIntegrity(verifyHashes = true) },
+                                        enabled = !repairing,
+                                    ) { Text("检查（逐个算 sha1）") }
+                                    OutlinedButton(
+                                        onClick = { checkIntegrity(verifyHashes = false) },
+                                        enabled = !repairing,
+                                    ) { Text("快速检查（只比大小）") }
+                                }
+                            }
+                            if (integrityChecking) {
+                                val (done, total) = integrityProgress
+                                Text(
+                                    if (total > 0) "正在检查 " + done + "/" + total + " 个文件…" else "正在读版本清单…",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                            integrity?.let { report ->
+                                DetailLine("清单条目", report.totalFiles.toString() + " 个文件")
+                                DetailLine("结论", report.summary)
+                                if (!report.healthy) {
+                                    DetailLine("缺的文件", report.missing.size.toString() + " 个")
+                                    DetailLine("对不上的文件", report.broken.size.toString() + " 个")
+                                    if (report.missingBytes > 0L) {
+                                        DetailLine("要补多少", formatBytes(report.missingBytes))
+                                    }
+                                    // 只列前几个：几百条的时候全列出来会把页面撑爆，
+                                    // 而用户真正要的是「点补齐」。
+                                    report.problems.take(5).forEach { file ->
+                                        DetailLine(
+                                            if (file.state == IntegrityState.MISSING) "缺" else "坏",
+                                            file.target.absolutePath,
+                                        )
+                                    }
+                                    if (report.problems.size > 5) {
+                                        Text(
+                                            "还有 " + (report.problems.size - 5) + " 个没列出来。",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        )
+                                    }
+                                }
+                                if (!report.hashesChecked) {
+                                    Text(
+                                        "这次只比了大小，同样大小的坏文件发现不了；想查细一点用「检查（逐个算 sha1）」。",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
+                                report.warnings.forEach {
+                                    Text(
+                                        it,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.error,
+                                    )
+                                }
+                                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                                    if (!report.healthy) {
+                                        Button(
+                                            onClick = { repairIntegrity() },
+                                            enabled = !repairing && !integrityChecking,
+                                        ) { Text(if (repairing) "正在补齐…" else "补齐这 " + report.problemFiles + " 个文件") }
+                                    }
+                                    OutlinedButton(
+                                        onClick = {
+                                            integrity = null
+                                            repairText = ""
+                                        },
+                                        enabled = !repairing && !integrityChecking,
+                                    ) { Text("清掉结果") }
+                                }
+                                if (repairText.isNotBlank()) {
+                                    Text(
+                                        repairText,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
+                            }
                         }
                         DetailCard("占了多少地方") {
                             d.dirs.forEach { DirLine(it) }
