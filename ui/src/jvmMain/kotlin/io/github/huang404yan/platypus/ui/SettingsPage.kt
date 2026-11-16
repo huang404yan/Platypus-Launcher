@@ -157,6 +157,15 @@ fun SettingsPage(
     var autoBackupHours by remember { mutableStateOf(AutoBackupPolicy.DEFAULT.intervalHours.toString()) }
     var autoBackupKeep by remember { mutableStateOf(AutoBackupPolicy.DEFAULT.keep.toString()) }
     var curseForgeKey by remember { mutableStateOf("") }
+    /**
+     * 这一页读过的那份设置，**原样留着**，保存时在它上面 copy。
+     *
+     * 原来六处落盘全是 `LauncherSettings(...)` 新建，新建会把这一页不认识的字段一并
+     * 写成默认值 —— firstRunAt 与 lastInstanceKey 就是这么被冲掉的：用户在设置页点一次
+     * 「保存」，欢迎窗下次启动又弹一遍，上次玩的版本也忘了。两处都实测踩过。
+     * 改成 copy 之后，以后再加字段不用回来挨个补。
+     */
+    var base by remember { mutableStateOf(LauncherSettings()) }
 
     // 内存优化（默认关）。「自动分配」开关 2026-11-16 删了：core 里没人读它，
     // -Xmx 只认实例上的 memoryMb，留着就是个假的开关。
@@ -177,6 +186,7 @@ fun SettingsPage(
         autoBackupKeep = settings.autoBackupKeep.toString()
         curseForgeKey = settings.curseForgeApiKey
         memoryOptimize = settings.memoryOptimize
+        base = settings
         loaded = true
         loadedFrom = (repository as? JsonSettingsRepository)?.path.orEmpty()
     }
@@ -211,7 +221,7 @@ fun SettingsPage(
         scope.launch {
             val result = runCatching {
                 repository.save(
-                    LauncherSettings(
+                    base.copy(
                         offlineUsername = cleanedName,
                         defaultGameRoot = gameRoot.trim(),
                         defaultMemoryMb = clamped,
@@ -286,7 +296,7 @@ fun SettingsPage(
         scope.launch {
             val result = runCatching {
                 repository.save(
-                    LauncherSettings(
+                    base.copy(
                         offlineUsername = normalizeOfflineUsername(username),
                         defaultGameRoot = gameRoot.trim(),
                         defaultMemoryMb = Instance.clampMemoryMb(parsedMemory),
@@ -331,7 +341,7 @@ fun SettingsPage(
         scope.launch {
             val result = runCatching {
                 repository.save(
-                    LauncherSettings(
+                    base.copy(
                         offlineUsername = normalizeOfflineUsername(username),
                         defaultGameRoot = gameRoot.trim(),
                         defaultMemoryMb = Instance.clampMemoryMb(parsedMemory),
@@ -369,7 +379,7 @@ fun SettingsPage(
         scope.launch {
             runCatching {
                 repository.save(
-                    LauncherSettings(
+                    base.copy(
                         offlineUsername = normalizeOfflineUsername(username),
                         defaultGameRoot = gameRoot.trim(),
                         defaultMemoryMb = Instance.clampMemoryMb(parsedMemory),
@@ -428,7 +438,7 @@ fun SettingsPage(
         scope.launch {
             runCatching {
                 repository.save(
-                    LauncherSettings(
+                    base.copy(
                         offlineUsername = normalizeOfflineUsername(username),
                         defaultGameRoot = gameRoot.trim(),
                         defaultMemoryMb = Instance.clampMemoryMb(parsedMemory),
@@ -465,7 +475,7 @@ fun SettingsPage(
         scope.launch {
             runCatching {
                 repository.save(
-                    LauncherSettings(
+                    base.copy(
                         offlineUsername = normalizeOfflineUsername(username),
                         defaultGameRoot = gameRoot.trim(),
                         defaultMemoryMb = Instance.clampMemoryMb(parsedMemory),

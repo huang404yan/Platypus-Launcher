@@ -7,11 +7,17 @@ import io.github.huang404yan.platypus.core.settings.LauncherSettings
  * 首次启动时该拦住什么、该提示什么。
  *
  * 两条通道的规矩不一样，而且这个差别是产品决定、不是实现细节：
- * - **正式版**（1.0.0 起）要求先登录一个正版账号。它发布的是编好的应用、源码不随包走；
- *   这种情况下允许离线进游戏，等于给盗版留一条明面上的入口。
+ * - **正式版**（1.0.0 起）要求先登录一个买过 Minecraft 的正版账号，验证一次就够。
+ *   它发布的是编好的应用、源码不随包走；这种情况下允许离线进游戏，等于给盗版留一条
+ *   明面上的入口。验证放在登录里做（[io.github.huang404yan.platypus.core.auth.MicrosoftAuthClient.authenticate]
+ *   的 `GET /entitlements/mcstore`），通过了才算数，之后不再重复问。
  * - **孵化版**（0.x-preview.N）就是开源版，谁都能自己编一份、把这几行判断改掉。
  *   对着一份能随手改的源码强制登录没有意义，反而把「想先看看界面长什么样」的人挡在门外。
  *   所以它只弹一次窗，讲清「要玩正版得自己申请一个应用 ID」与怎么申请，然后放行。
+ *
+ * **验证为什么按账号记、而不是按机器记**：只记「这台机器走过引导没有」的话，换个微软
+ * 账号再开程序照样放行 —— 那验证就是形同虚设。现在认的是「当前选中的这个微软账号，
+ * 自己过没过所有权校验」。
  *
  * 判定全是纯函数：读设置、看有没有账号、给一段中文，不碰网络也不碰界面。
  */
@@ -31,8 +37,10 @@ object FirstRun {
     /**
      * 算出这次的引导状态。
      *
-     * [signedIn] 表示当前是否已经选着一个正版账号（accounts.json 里有 kind=microsoft 的记录，
-     * 且设置里选中了它）。[accountsLoaded] 为假时一律当「还不知道」，此时正式版**不**拦 ——
+     * [signedIn] 表示当前是否选着一个微软账号（accounts.json 里有 kind=microsoft 的记录，
+     * 且设置里选中了它）。[accountOwnsGame] 表示那个账号本身过没过所有权校验
+     *（[io.github.huang404yan.platypus.core.auth.StoredAccount.ownsGame]）。
+     * [accountsLoaded] 为假时一律当「还不知道」，此时正式版**不**拦 ——
      * 读账号是磁盘操作，第一帧还没读出来，按「没有账号」处理会让每个正式版用户先看到一堵墙，
      * 半秒后它又自己消失。
      */
@@ -41,6 +49,7 @@ object FirstRun {
         edition: Edition = Edition.current(),
         signedIn: Boolean = false,
         accountsLoaded: Boolean = false,
+        accountOwnsGame: Boolean = false,
     ): FirstRunState {
         // 包自带 ID（正式版由构建方注入）时这里恒为 null：用户不需要填任何东西。
         // 只有一份都没有时才给出「还没有填 Client ID」那句话。
@@ -52,6 +61,8 @@ object FirstRun {
             accountsLoaded = accountsLoaded,
             clientIdReady = clientProblem == null,
             clientProblem = clientProblem,
+            activeAccountUuid = settings.activeAccountUuid,
+            accountOwnsGame = accountOwnsGame,
         )
     }
 
@@ -72,13 +83,29 @@ data class FirstRunState(
     val accountsLoaded: Boolean,
     val clientIdReady: Boolean,
     val clientProblem: String?,
+    /** 设置里当前选中的账号 UUID；空串表示走离线模式。 */
+    val activeAccountUuid: String = "",
+    /** 当前选中的那个账号自己过没过所有权校验。 */
+    val accountOwnsGame: Boolean = false,
 ) {
     /** 这一版要不要正版账号。 */
     val requiresSignIn: Boolean get() = edition == Edition.FORMAL
 
-    /** 现在这一刻是否拦住用户：只有正式版会拦，且必须读完了账号、确实没有才拦。 */
+    /**
+     * 现在这一刻是否拦住用户。
+     *
+     * 只有正式版、且只在**首次引导还没走过**时拦，而且必须读完账号、确实不合格才拦。
+     * 不合格有两种：根本没选中微软账号（离线或外置登录），或者选中的那个没拥有游戏。
+     *
+     * **验证一次就够**：走过引导（firstRunAt 有了）之后一律放行，换号、退登改用离线
+     * 都不再追问 —— 这是 PCL-CE、HMCL 的做法，也是这台机器上「验过」的含义。
+     * 想再加强也不该在启动链上加卡口，该在登录那一步加强（见 [MicrosoftAuthClient] 的持有校验）。
+     */
     val blocked: Boolean
-        get() = needed && requiresSignIn && accountsLoaded && !signedIn
+        get() = requiresSignIn && needed && accountsLoaded && (!signedIn || !accountOwnsGame)
+
+    /** 这个弹窗此刻该不该出现：要么是首次引导，要么是正式版被拦住。 */
+    val show: Boolean get() = needed || blocked
 
     /** 能不能直接关掉继续用。正式版不行。 */
     val dismissible: Boolean get() = !requiresSignIn
@@ -86,6 +113,7 @@ data class FirstRunState(
     /** 弹窗标题。 */
     val title: String
         get() = when {
+            requiresSignIn && blocked && signedIn -> "这个账号不能进正式版"
             requiresSignIn && blocked -> "先登录一个正版账号"
             requiresSignIn -> "欢迎使用鸭嘴兽启动器"
             else -> "欢迎使用鸭嘴兽·孵化版"
@@ -94,19 +122,37 @@ data class FirstRunState(
     /** 正文：正式版讲清为什么不让跳过，孵化版讲清要玩正版得先做什么。 */
     val body: String
         get() = when {
+            requiresSignIn && blocked && signedIn ->
+                "这个微软账号没有 Minecraft 的持有记录。要么没买过（Xbox Game Pass 到期也算），" +
+                    "要么游戏买在了另一个微软账号上。换一个买过游戏的账号登录，或者退出登录改用别的身份。"
             requiresSignIn && blocked ->
-                "正式版要求用正版账号进游戏：登录一次之后一直记着，之后打开不会再问。" +
+                "正式版要求用正版账号进游戏。验证只做一次：登录时启动器会向微软确认这个账号" +
+                    "确实拥有 Minecraft，通过之后一直记着，之后打开不会再问。" +
                     "点下面的「去登录」，在「设置 → 账号」里填一个应用 ID，再用微软账号登录。"
-            requiresSignIn -> "这一版要求用正版账号进游戏。登录一次之后一直记着，之后打开不会再问。"
+            requiresSignIn -> "这一版要求用正版账号进游戏。验证只做一次，之后打开不会再问。"
             else ->
                 "孵化版不要求正版账号，离线也能进游戏。想用正版账号的话，得先自己申请一个" +
                     "微软应用 ID（微软不发放通用的，随安装包带出去的 ID 等于所有下载者共用一份别人的注册）。" +
                     "申请免费、大约三分钟，步骤在「设置 → 账号」第一张卡里，之后一直用。"
         }
 
+    /**
+     * 当前这个状态已经够进游戏了。
+     *
+     * 孵化版永远够；正式版要选着一个过得了所有权校验的微软账号才算。
+     * 已经合格就不该再把人往登录页赶 —— 老版本升上来的用户（设置里 firstRunAt 还没写、
+     * 但账号早登录过）正是这种情形。
+     */
+    val canProceed: Boolean get() = !requiresSignIn || (signedIn && accountOwnsGame)
+
     /** 次要按钮上的字；null 表示不显示次要按钮。 */
     val secondaryLabel: String? get() = if (dismissible) "先随便看看" else null
 
     /** 主按钮上的字。 */
-    val primaryLabel: String get() = if (requiresSignIn) "去登录" else "知道了"
+    val primaryLabel: String
+        get() = when {
+            requiresSignIn && canProceed -> "开始使用"
+            requiresSignIn -> "去登录"
+            else -> "知道了"
+        }
 }

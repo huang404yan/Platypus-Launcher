@@ -61,10 +61,14 @@ class MicrosoftAccountAuth(
         onCode(grant)
         val tokens = client.awaitTokens(grant, resolved, onTick)
         val login = client.authenticate(tokens.accessToken, tokens.refreshToken)
+        // entitledAt 写当下：能走到这一行，说明 [MicrosoftAuthClient.authenticate] 里那句
+        // entitlements 校验刚刚放行了（没买过游戏的话它在那里就抛了，根本到不了这里）。
+        // 正式版的首次验证就是看这一格，见 [io.github.huang404yan.platypus.core.edition.FirstRun]。
         val stored = StoredAccount(
             uuid = login.profile.id,
             name = login.profile.name,
             refreshToken = login.refreshToken.ifBlank { tokens.refreshToken },
+            entitledAt = System.currentTimeMillis(),
         )
         repository?.save(stored)
         return stored
@@ -84,6 +88,10 @@ class MicrosoftAccountAuth(
         val rotated = tokens.refreshToken
         if (rotated.isNotBlank() && rotated != account.refreshToken) {
             repository?.save(account.copy(refreshToken = rotated, lastLoginAt = System.currentTimeMillis()))
+        } else if (account.entitledAt <= 0L && account.lastLoginAt > 0L) {
+            // 老记录补一次：这一版之前登录的账号没记 entitledAt，但当时同样过了所有权校验。
+            // 不补的话 ownsGame 只能靠 lastLoginAt 兜着，界面会一直显示「没验证过」。
+            repository?.save(account.copy(entitledAt = account.lastLoginAt))
         }
         return client.authenticate(tokens.accessToken, rotated.ifBlank { account.refreshToken }).session
     }

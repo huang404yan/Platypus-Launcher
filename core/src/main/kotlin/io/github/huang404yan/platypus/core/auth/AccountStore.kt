@@ -23,6 +23,18 @@ data class StoredAccount(
     val createdAt: Long = 0L,
     val lastLoginAt: Long = 0L,
     /**
+     * 最近一次**确证这个账号真的拥有 Minecraft** 的时刻（毫秒）；0 表示没有记录。
+     *
+     * 只有一条路径会写它：微软登录走完 XSTS 之后那句
+     * `GET /entitlements/mcstore`（见 [MicrosoftAuthClient.authenticate]）。那一步返回空列表，
+     * 登录当场就会抛「这个账号没有 Minecraft 的持有记录」—— 也就是说，**能存进这个文件的
+     * 微软账号，都已经过了所有权校验**。
+     *
+     * 记下来的用途只有一个：正式版的首次验证只要一次。没这一格的话，判定只能退回
+     * 「这台机器走过首次引导没有」，换个账号再开程序就悄悄放行了 —— 那等于没验证。
+     */
+    val entitledAt: Long = 0L,
+    /**
      * 这条记录是哪种登录：[KIND_MICROSOFT] 或 [KIND_YGGDRASIL]。
      *
      * 默认值是 microsoft —— 这个字段是后加的，老文件里没有它，读出来必须还是微软账号，
@@ -54,6 +66,15 @@ data class StoredAccount(
         }
 
     val isYggdrasil: Boolean get() = kind == KIND_YGGDRASIL
+
+    /**
+     * 这个账号算不算「验过拥有游戏」。
+     *
+     * [entitledAt] 是这一版新加的，老文件里没有；而老版本的登录**同样**走了那句
+     * entitlements 校验，只是没把时间记下来。所以 `lastLoginAt > 0` 也要算数 ——
+     * 否则升级一次，所有老用户都会被当成「没验证过」再拦一道。
+     */
+    val ownsGame: Boolean get() = entitledAt > 0L || lastLoginAt > 0L
 
     companion object {
         const val KIND_MICROSOFT = "microsoft"

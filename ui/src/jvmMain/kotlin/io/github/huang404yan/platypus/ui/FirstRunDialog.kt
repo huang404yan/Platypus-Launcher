@@ -51,6 +51,7 @@ internal fun FirstRunGate(
         // 账号只在真的要判的时候才读：孵化版根本用不上，多一次磁盘读只是拖慢启动。
         val edition = io.github.huang404yan.platypus.core.edition.Edition.current()
         var signedIn = false
+        var ownsGame = false
         var loaded = true
         if (edition == io.github.huang404yan.platypus.core.edition.Edition.FORMAL) {
             val list = withContext(Dispatchers.IO) {
@@ -59,16 +60,26 @@ internal fun FirstRunGate(
             // null 表示读失败（仓库没装配或文件坏了）：当成「还不知道」而不是「没有账号」，
             // 免得把一句读盘错误变成一堵登录墙。
             loaded = list != null
-            signedIn = list.orEmpty().any {
+            val active = list.orEmpty().firstOrNull {
                 it.kind == StoredAccount.KIND_MICROSOFT && settings.activeAccountUuid.isNotBlank() &&
                     it.uuid.equals(settings.activeAccountUuid.trim(), ignoreCase = true)
             }
+            signedIn = active != null
+            // 所有权校验的结果记在账号自己身上（登录时 GET /entitlements/mcstore 过了才有那个时间戳），
+            // 这里只读它，不再发一次网络请求。
+            ownsGame = active?.ownsGame == true
         }
-        state = FirstRun.state(settings, edition, signedIn = signedIn, accountsLoaded = loaded)
+        state = FirstRun.state(
+            settings,
+            edition,
+            signedIn = signedIn,
+            accountsLoaded = loaded,
+            accountOwnsGame = ownsGame,
+        )
     }
 
     val current = state ?: return
-    if (!current.needed) return
+    if (!current.show) return
 
     fun finish() {
         if (busy) return
@@ -92,24 +103,17 @@ internal fun FirstRunGate(
         // 就成了「看一眼就能跳过」。孵化版可以随手关。
         onDismissRequest = { if (current.dismissible) finish() },
         title = { Text(current.title) },
-        text = {
-            Text(
-                current.body + if (current.blocked) {
-                    "\n\n还没有登录任何正版账号。"
-                } else {
-                    ""
-                },
-                style = MaterialTheme.typography.bodyMedium,
-            )
-        },
+        text = { Text(current.body, style = MaterialTheme.typography.bodyMedium) },
         confirmButton = {
             TextButton(onClick = {
-                if (current.requiresSignIn) {
-                    // 去登录这条路也要把「走完引导」记下来吗？不记：登录成功之后它自己会被
-                    // 下一个判断放行（那时 signedIn 为真），没登录成功则下次启动继续拦。
-                    onGoAccount()
-                } else {
+                // 已经合格的（孵化版，或正式版选着一个验过的号）直接收掉弹窗，
+                // 不再把人往登录页赶 —— 从老版本升上来的正是这种情形。
+                if (current.canProceed) {
                     finish()
+                } else {
+                    // 去登录这条路不写 firstRunAt：登录成功后弹窗自己会被放行，
+                    // 没登录成功则下次启动继续拦。
+                    onGoAccount()
                 }
             }) {
                 Text(current.primaryLabel)
