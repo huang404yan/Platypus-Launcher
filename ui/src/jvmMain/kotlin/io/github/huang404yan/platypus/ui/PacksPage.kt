@@ -124,7 +124,7 @@ fun PacksPage(
             !scanned.isGameDirectory -> "这里不是游戏目录（缺少 versions/、libraries/ 或 assets/）"
             else -> ""
         }
-        val merged = mergeInstances(registered, scanned?.instances.orEmpty())
+        val merged = mergeInstances(registered, scanned?.instances.orEmpty(), scanned?.libraryVersions.orEmpty())
         instances = merged
         if (merged.none { instanceKey(it) == selectedKey }) {
             val focused = focusInstanceKey.takeIf { it.isNotBlank() }?.let { key ->

@@ -39,8 +39,24 @@ object InstanceLayouts {
     /** 标准布局下 `versions` 这一层的名字。 */
     const val VERSIONS_DIR_NAME = "versions"
 
+    /**
+     * 设置页那一格「新建实例默认开隔离」在进程里的镜像。
+     *
+     * 为什么要一个全局量：真正读隔离开关的是 [of]（[InstanceLayout] 由它算 gameDir），
+     * 而它有三十多个调用点散在 core / 桌面 / 安卓 / 测试里。把「跟随默认」的判断放在
+     * 这一个函数里，调用点一行都不用动；设置值由界面在读设置时灌进来（桌面在 App.kt
+     * 的启动块里，安卓在 MainActivity 起 JVM 前），照 [io.github.huang404yan.platypus.core.download.DownloadPreference]
+     * 的老套路。默认 true 不改老行为。
+     */
+    @Volatile
+    var defaultIsolated: Boolean = true
+
+    /** 这个实例最终该不该隔离：标了「跟随默认」的读 [defaultIsolated]，其余读自己存的。 */
+    fun effectiveIsolated(instance: Instance): Boolean =
+        if (instance.isolatedFollowsDefault) defaultIsolated else instance.isolated
+
     fun of(instance: Instance): InstanceLayout =
-        of(File(instance.directory.trim().trim('"')), isolated = instance.isolated)
+        of(File(instance.directory.trim().trim('"')), isolated = effectiveIsolated(instance))
 
     fun of(versionDir: File, isolated: Boolean = true): InstanceLayout {
         val dir = versionDir.absoluteFile

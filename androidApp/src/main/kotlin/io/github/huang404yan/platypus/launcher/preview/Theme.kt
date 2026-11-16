@@ -9,6 +9,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import io.github.huang404yan.platypus.core.Brand
+import io.github.huang404yan.platypus.core.instance.InstanceLayouts
 import io.github.huang404yan.platypus.core.settings.JsonSettingsRepository
 import io.github.huang404yan.platypus.core.theme.LauncherTheme
 import io.github.huang404yan.platypus.core.theme.launcherThemeOf
@@ -91,6 +92,27 @@ internal fun PlatypusTheme(theme: LauncherTheme, content: @Composable () -> Unit
             content()
         }
     }
+}
+
+/**
+ * 启动时把「新建实例默认隔离」灌进进程级那一个（见 InstanceLayouts.effectiveIsolated）。
+ *
+ * 与桌面 App.kt 里同一件事：三十多个地方要用它，判断收在 core 的一个函数里，
+ * 这里只负责在开程序时灌一次。读不到就当默认开 —— 与 LauncherSettings.defaultIsolation
+ * 的默认值一致。
+ */
+internal suspend fun applyIsolationDefault() {
+    val root = runCatching { File(defaultGameRoot()) }.getOrNull() ?: return
+    val store = JsonSettingsRepository(JsonSettingsRepository.defaultFile(root))
+    val settings = runCatching { store.load() }.getOrNull() ?: return
+    val actual = settings.defaultGameRoot.trim()
+    val effective = if (actual.isNotEmpty() && actual != root.absolutePath) {
+        val moved = JsonSettingsRepository(JsonSettingsRepository.defaultFile(File(actual)))
+        runCatching { moved.load() }.getOrNull() ?: settings
+    } else {
+        settings
+    }
+    InstanceLayouts.defaultIsolated = effective.defaultIsolation
 }
 
 /**

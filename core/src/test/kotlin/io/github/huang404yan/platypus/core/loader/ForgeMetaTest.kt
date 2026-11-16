@@ -77,6 +77,64 @@ class ForgeMetaTest {
         assertNotNull(parseForgePromotions("{\"foo\":1}", "1.20.1").reasonOrNull())
     }
 
+    /** 实测响应形状（2026-11-16 抓的 maven-metadata.xml，213750 字节，截取相关条目）。 */
+    private val metadata = """
+        <metadata>
+          <groupId>net.minecraftforge</groupId>
+          <artifactId>forge</artifactId>
+          <versioning>
+            <latest>26.3-66.1.8</latest>
+            <release>26.3-66.1.8</release>
+            <versions>
+              <version>26.3-66.1.8</version>
+              <version>1.21-51.0.33</version>
+              <version>1.20.4-49.2.13</version>
+              <version>1.20.1-47.4.29</version>
+              <version>1.20.1-47.4.28</version>
+              <version>1.20.1-47.4.10</version>
+              <version>1.19.2-43.3.0</version>
+            </versions>
+          </versioning>
+        </metadata>
+    """.trimIndent()
+
+    /** maven 清单混着所有原版版本，只挑出问的那一个。 */
+    @Test
+    fun `全量清单只留指定原版`() {
+        val versions = assertNotNull(parseForgeVersions(metadata, "1.20.1").getOrNull())
+        assertEquals(listOf("47.4.29", "47.4.28", "47.4.10"), versions.map { it.version })
+        assertTrue(versions.none { it.recommended || it.latest }, "没传 promotions 时谁都不打标签")
+    }
+
+    /** 推荐与最新顶到前面，其余按 maven 原顺序（新的在前）跟上。 */
+    @Test
+    fun `推荐与最新排在最前`() {
+        val promotions = listOf(
+            ForgeVersion("47.4.28", recommended = true),
+            ForgeVersion("47.4.29", latest = true),
+        )
+        val versions = assertNotNull(parseForgeVersions(metadata, "1.20.1", promotions).getOrNull())
+        assertEquals(listOf("47.4.28", "47.4.29", "47.4.10"), versions.map { it.version })
+        assertEquals("推荐", versions[0].label)
+        assertEquals("最新", versions[1].label)
+        assertEquals("", versions[2].label)
+    }
+
+    /** promotions 里说是推荐、但 maven 清单里没有这个号时不能凭空造一条出来。 */
+    @Test
+    fun `推荐版不在清单里就跳过`() {
+        val promotions = listOf(ForgeVersion("47.9.9", recommended = true))
+        val versions = assertNotNull(parseForgeVersions(metadata, "1.20.1", promotions).getOrNull())
+        assertEquals(listOf("47.4.29", "47.4.28", "47.4.10"), versions.map { it.version })
+    }
+
+    @Test
+    fun `maven 清单没有这个原版时给出中文原因`() {
+        val reason = assertNotNull(parseForgeVersions(metadata, "1.0.0").reasonOrNull())
+        assertTrue(reason.contains("1.0.0"), "原因里应带上问的版本号，实际是：$reason")
+        assertNotNull(parseForgeVersions("", "1.20.1").reasonOrNull())
+    }
+
     /** installer 的 maven 坐标是 <原版号>-<forge 版本> 拼成的单段版本，不是两段。 */
     @Test
     fun `安装器坐标`() {

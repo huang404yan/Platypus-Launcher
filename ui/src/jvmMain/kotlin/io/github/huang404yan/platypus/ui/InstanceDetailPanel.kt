@@ -16,8 +16,10 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -35,8 +37,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import io.github.huang404yan.platypus.core.instance.DeletionPlan
 import io.github.huang404yan.platypus.core.instance.DirUsage
 import io.github.huang404yan.platypus.core.instance.Instance
+import io.github.huang404yan.platypus.core.instance.InstanceDeleter
 import io.github.huang404yan.platypus.core.instance.InstanceDetails
 import io.github.huang404yan.platypus.core.instance.InstanceDetailsLoader
 import io.github.huang404yan.platypus.core.instance.InstanceEditResult
@@ -110,6 +114,13 @@ internal fun InstanceDetailPanel(
      * 加载器与游戏版本，重复实现一遍必然两边不一致。
      */
     onOpenDownload: (String) -> Unit = {},
+    /**
+     * 这个实例的文件删干净之后叫一声，让调用方把详情页关掉、回列表重扫。
+     *
+     * 不给默认实现的话，删完详情页还停在一个已经不存在的目录上，
+     * 用户点「保存」会写回一条指向空路径的登记。
+     */
+    onDeleted: () -> Unit = {},
 ) {
     var details by remember(instance.directory) { mutableStateOf<InstanceDetails?>(null) }
     var loading by remember(instance.directory) { mutableStateOf(true) }
@@ -129,6 +140,11 @@ internal fun InstanceDetailPanel(
         InstanceLayouts.supportsIsolation(File(instance.directory.trim().trim('"')))
     }
     var isolated by remember(instance.directory, instance.isolated) { mutableStateOf(instance.isolated) }
+    // 「跟随设置里的默认」开着时，上面那个数不生效，真正用的是这里读到的全局默认值。
+    var isolatedFollowsDefault by remember(instance.directory, instance.isolatedFollowsDefault) {
+        mutableStateOf(instance.isolatedFollowsDefault)
+    }
+    var defaultIsolation by remember { mutableStateOf(InstanceLayouts.defaultIsolated) }
 
     var notice by remember(instance.directory) { mutableStateOf("") }
     var saving by remember(instance.directory) { mutableStateOf(false) }
@@ -139,6 +155,9 @@ internal fun InstanceDetailPanel(
         if (stored != null) {
             val fallback = MemoryDefaults.resolve(stored.defaultMemoryMb, stored.defaultMemoryAuto, SystemMemory.totalMb)
             defaultMemoryMb = fallback
+            defaultIsolation = stored.defaultIsolation
+            // 进程级那份也顺手对齐：这一页可能比别处先读到设置（比如从冷启动直接进版本设置）。
+            InstanceLayouts.defaultIsolated = stored.defaultIsolation
             // 跟随默认的实例：滑条初值要显示生效的那个数，而不是 instances.json 里存的老数。
             if (instance.memoryFollowsDefault) memoryMb = fallback
         }
@@ -163,6 +182,12 @@ internal fun InstanceDetailPanel(
     var shaderScan by remember(instance.directory) { mutableStateOf<PackScanResult?>(null) }
     // 删除前问一句。值是「哪种东西」+「哪个文件名」，两者一起才够删。
     var pendingDelete by remember(instance.directory) { mutableStateOf<Pair<String, String>?>(null) }
+
+    // 删整个实例：先算出「删哪个目录、多少文件、存档留不留」（InstanceDeleter.inspect），
+    // 用户确认后才动手。与实例列表页的删除是同一套 core 逻辑，不另写一份。
+    var instancePlan by remember(instance.directory) { mutableStateOf<DeletionPlan?>(null) }
+    var instanceSavesToo by remember(instance.directory) { mutableStateOf(false) }
+    var deletingInstance by remember(instance.directory) { mutableStateOf(false) }
 
     val scope = rememberCoroutineScope()
 
@@ -199,8 +224,9 @@ internal fun InstanceDetailPanel(
 
     // 开关拨到「关」的时候算一次：实例目录里有什么是游戏马上就会看不见的。
     // 放在 LaunchedEffect 而不是渲染里算，因为要 listFiles() 走一遍盘。
-    LaunchedEffect(instance.directory, isolated) {
-        pendingDirs = if (isolated) {
+    LaunchedEffect(instance.directory, isolated, isolatedFollowsDefault, defaultIsolation) {
+        val effectiveIsolation = if (isolatedFollowsDefault) defaultIsolation else isolated
+        pendingDirs = if (effectiveIsolation) {
             emptyList()
         } else {
             withContext(Dispatchers.IO) {
@@ -290,6 +316,70 @@ internal fun InstanceDetailPanel(
         }
     }
 
+    /**
+     * 删整个实例：先只算计划（要遍历目录数文件，放 IO），算完弹确认框。
+     *
+     * 和实例列表页的删除按钮走同一套 [InstanceDeleter]：越界、目录不存在、
+     * 被别的登记共用同一个目录，这三种拒绝理由都由 core 给，界面不重写一遍。
+     */
+    fun prepareDeleteInstance() {
+        val gameRoot = details?.gameRoot ?: return
+        notice = ""
+        deletingInstance = true
+        scope.launch {
+            val todos = runCatching { backend?.instances?.list() }.getOrNull().orEmpty()
+            val plan = withContext(Dispatchers.IO) {
+                InstanceDeleter.inspect(
+                    gameRoot = gameRoot,
+                    instanceId = instance.id,
+                    knownInstances = todos,
+                )
+            }
+            deletingInstance = false
+            instanceSavesToo = false
+            instancePlan = plan
+        }
+    }
+
+    /** 确认框里点「删除」：删文件 → 摘登记 → 告诉调用方回列表重扫。 */
+    fun confirmDeleteInstance() {
+        val plan = instancePlan ?: return
+        if (backend == null) {
+            notice = "后端未装配：删不了实例。"
+            instancePlan = null
+            return
+        }
+        if (!plan.deletable) {
+            notice = plan.refusalReason
+            instancePlan = null
+            return
+        }
+        deletingInstance = true
+        scope.launch {
+            val outcome = withContext(Dispatchers.IO) {
+                InstanceDeleter.delete(plan, includeSaves = instanceSavesToo)
+            }
+            if (!outcome.ok) {
+                deletingInstance = false
+                instancePlan = null
+                notice = outcome.summary
+                return@launch
+            }
+            // 文件没了，登记也必须跟着没，否则下次扫描会留下一条指向空路径的实例。
+            val error = withContext(Dispatchers.IO) {
+                runCatching { backend.instances.remove(instance.id) }.exceptionOrNull()
+            }
+            deletingInstance = false
+            instancePlan = null
+            if (error != null) {
+                notice = outcome.summary + " 但移除登记失败：" + (error.message ?: error.toString())
+                return@launch
+            }
+            onNotice(outcome.summary)
+            onDeleted()
+        }
+    }
+
     fun save() {
         if (backend == null) {
             notice = "后端未装配：改不了实例设置。"
@@ -304,6 +394,7 @@ internal fun InstanceDetailPanel(
                 jvmArgsText,
                 javaPath,
                 isolated = if (canToggleIsolation) isolated else null,
+                isolatedFollowsDefault = if (canToggleIsolation) isolatedFollowsDefault else null,
             )
         ) {
             is InstanceEditResult.Invalid -> {
@@ -385,6 +476,64 @@ internal fun InstanceDetailPanel(
             },
             dismissButton = {
                 TextButton(onClick = { pendingDelete = null }) { Text("算了") }
+            },
+        )
+    }
+
+    // 删整个实例的确认框。三条要给用户看清：删哪个绝对路径、多少文件多大、
+    // 存档默认留着（搬到 platypus/saves-backup/，那才是重新下载不回来的东西）。
+    instancePlan?.let { plan ->
+        AlertDialog(
+            onDismissRequest = { if (!deletingInstance) instancePlan = null },
+            title = { Text("删除这个实例？") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text(instance.name.ifBlank { instance.id }, fontWeight = FontWeight.SemiBold)
+                    Text(
+                        plan.versionDir.absolutePath,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    if (!plan.deletable) {
+                        Text(plan.refusalReason, color = MaterialTheme.colorScheme.error)
+                    } else {
+                        Text(plan.fileCount.toString() + " 个文件，" + formatBytes(plan.totalBytes))
+                        if (plan.hasSaves) {
+                            Text(
+                                "存档 " + plan.savesFileCount + " 个文件，" + formatBytes(plan.savesBytes) +
+                                    if (instanceSavesToo) "，会一起删掉。" else "，会搬到 platypus/saves-backup/ 保留。",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Checkbox(
+                                    checked = instanceSavesToo,
+                                    onCheckedChange = { instanceSavesToo = it },
+                                    enabled = !deletingInstance,
+                                )
+                                Text("连存档一起删（不可恢复）")
+                            }
+                        }
+                        if (plan.hasMods) {
+                            Text("目录里有 mods/。", style = MaterialTheme.typography.bodySmall)
+                        }
+                        Text(
+                            "文件会先改名为 " + plan.versionDir.name + ".deleting-<时间戳> 再逐个删除；" +
+                                "中途失败会自动改回原名。删完这条登记也一并从列表里移除。",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = { confirmDeleteInstance() },
+                    enabled = plan.deletable && !deletingInstance,
+                ) { Text(if (deletingInstance) "删除中…" else "删除") }
+            },
+            dismissButton = {
+                TextButton(onClick = { instancePlan = null }, enabled = !deletingInstance) { Text("算了") }
             },
         )
     }
@@ -505,9 +654,18 @@ internal fun InstanceDetailPanel(
                             IsolationBody(
                                 isolated = isolated,
                                 onIsolatedChange = { isolated = it },
+                                followsDefault = isolatedFollowsDefault,
+                                onFollowsDefaultChange = { follow ->
+                                    // 取消跟随时把此刻的生效值固化下来：否则一关，上面那个开关
+                                    // 会跳到实例里存的老值上，看着像自己弹了一下。
+                                    if (!follow) isolated = if (isolatedFollowsDefault) defaultIsolation else isolated
+                                    isolatedFollowsDefault = follow
+                                },
+                                defaultIsolation = defaultIsolation,
                                 canToggleIsolation = canToggleIsolation,
                                 saving = saving,
-                                changed = isolated != instance.isolated,
+                                changed = isolated != instance.isolated ||
+                                    isolatedFollowsDefault != instance.isolatedFollowsDefault,
                                 gameRootPath = d.gameRoot.absolutePath,
                                 pendingDirs = pendingDirs,
                                 merging = merging,
@@ -524,6 +682,32 @@ internal fun InstanceDetailPanel(
                             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                                 OutlinedButton(onClick = { openFolder(d.versionDir) }) { Text("打开实例目录") }
                                 OutlinedButton(onClick = { openFolder(d.gameDir) }) { Text("打开存档目录") }
+                            }
+                        }
+                        // 删实例放在「高级」最下面：它和「版本隔离」一样是对整个版本目录动手，
+                        // 但不可逆，所以摆到最后一块，和上面那些开关拉开距离。
+                        DetailCard("删除这个实例") {
+                            Text(
+                                "把 " + d.versionDir.absolutePath + " 整个删掉，并移除这条登记。" +
+                                    "存档默认保留（搬到 platypus/saves-backup/），也可以勾成一起删。" +
+                                    "删了不进回收站，下载不回来的只有存档与你自己放的模组。",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                            Button(
+                                onClick = { prepareDeleteInstance() },
+                                enabled = !saving && !deletingInstance,
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = MaterialTheme.colorScheme.errorContainer,
+                                    contentColor = MaterialTheme.colorScheme.onErrorContainer,
+                                ),
+                            ) { Text(if (deletingInstance) "正在统计目录…" else "删除这个实例") }
+                            if (notice.isNotBlank()) {
+                                Text(
+                                    notice,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.error,
+                                )
                             }
                         }
                     }
@@ -748,6 +932,9 @@ private fun JavaCard(
 private fun IsolationBody(
     isolated: Boolean,
     onIsolatedChange: (Boolean) -> Unit,
+    followsDefault: Boolean,
+    onFollowsDefaultChange: (Boolean) -> Unit,
+    defaultIsolation: Boolean,
     canToggleIsolation: Boolean,
     saving: Boolean,
     changed: Boolean,
@@ -756,6 +943,8 @@ private fun IsolationBody(
     merging: Boolean,
     onMerge: () -> Unit,
 ) {
+    // 这一页显示的是「生效值」：跟随默认时看全局那一个，否则看实例自己存的。
+    val effective = if (followsDefault) defaultIsolation else isolated
     Row(
         Modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically,
@@ -763,12 +952,12 @@ private fun IsolationBody(
     ) {
         Column(Modifier.fillMaxWidth(0.78f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
             Text(
-                if (isolated) "开：这个实例自己一份存档、模组、配置" else "关：与同目录下的其他版本共用一份",
+                if (effective) "开：这个实例自己一份存档、模组、配置" else "关：与同目录下的其他版本共用一份",
                 style = MaterialTheme.typography.bodyMedium,
             )
             Text(
                 if (canToggleIsolation) {
-                    if (isolated) {
+                    if (effective) {
                         "装模组、存档、改配置都只影响这一个实例。整合包把 mods/ 平铺在游戏根目录时，要关掉才看得见那些模组。"
                     } else {
                         "游戏读写 " + gameRootPath + " 下的 mods/、saves/、options.txt。别的版本改了配置、换了模组，这边也会跟着变。"
@@ -780,7 +969,33 @@ private fun IsolationBody(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
-        Switch(checked = isolated, onCheckedChange = onIsolatedChange, enabled = canToggleIsolation && !saving)
+        Switch(
+            checked = effective,
+            onCheckedChange = onIsolatedChange,
+            enabled = canToggleIsolation && !saving && !followsDefault,
+        )
+    }
+    // 全局默认开关（设置 → 启动 → 新建实例默认隔离）。这一页只给「跟随」，
+    // 真正的默认值在那儿改 —— 一个开关改所有新实例，摆在这一页会让人以为只改当前这个。
+    Row(
+        Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Column(Modifier.fillMaxWidth(0.78f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text("跟随设置里的默认", style = MaterialTheme.typography.bodyMedium)
+            Text(
+                "设置里现在是「" + (if (defaultIsolation) "默认开隔离" else "默认不隔离") + "」。" +
+                    "勾着这一项，这一版就跟着那个走，上面那个开关跟着变灰；要把这版单独定下来，先把它关掉。",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        Switch(
+            checked = followsDefault,
+            onCheckedChange = onFollowsDefaultChange,
+            enabled = canToggleIsolation && !saving,
+        )
     }
     if (changed) {
         Text(
@@ -789,7 +1004,7 @@ private fun IsolationBody(
             color = MaterialTheme.colorScheme.primary,
         )
     }
-    if (!isolated && pendingDirs.isNotEmpty()) {
+    if (!effective && pendingDirs.isNotEmpty()) {
         Text(
             "这个实例目录里还有 " + pendingDirs.joinToString("、") + "，关掉隔离后游戏就读不到它们了（它会去游戏根目录找）。",
             style = MaterialTheme.typography.bodySmall,

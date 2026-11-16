@@ -12,6 +12,13 @@ data class ScanResult(
     val isGameDirectory: Boolean,
     val instances: List<Instance>,
     val warnings: List<String> = emptyList(),
+    /**
+     * 只被别的版本当作 inheritsFrom 用的原版目录（装加载器时顺带建出来的那些）。
+     *
+     * 它们仍然在磁盘上、删不得也动不得，只是不当作独立实例列出来。
+     * 界面上要解释「为什么装一个 Forge 只多出一条」时可以拿它说话。
+     */
+    val libraryVersions: List<String> = emptyList(),
 )
 
 /**
@@ -41,7 +48,7 @@ object InstanceScanner {
 
         val warnings = mutableListOf<String>()
         val versionsDir = File(root, "versions")
-        val instances = mutableListOf<Instance>()
+        val parsed = mutableListOf<ParsedVersion>()
 
         if (!versionsDir.isDirectory) {
             warnings += "没有 versions/ 目录，也没有可用的版本"
@@ -54,21 +61,63 @@ object InstanceScanner {
                     warnings += "跳过 $id：缺少 $id.json"
                     continue
                 }
-                val parsed = runCatching { json.parseToJsonElement(jsonFile.readText()).jsonObject }.getOrNull()
-                if (parsed == null) {
+                val element = runCatching { json.parseToJsonElement(jsonFile.readText()).jsonObject }.getOrNull()
+                if (element == null) {
                     warnings += "跳过 $id：$id.json 解析失败"
                     continue
                 }
-                instances += buildInstance(root, dir, id, parsed)
+                parsed += ParsedVersion(dir, id, element)
             }
         }
 
-        return ScanResult(root, true, instances.sortedBy { it.name.lowercase() }, warnings)
+        // 装加载器必然会把原版目录建出来（Forge 的 installer 要拿它当父版本），
+        // 但那条原版不该在列表里和带加载器的那条并排出现 —— 用户会以为装重了。
+        // 判定只认「原版 + 没有任何 inheritsFrom + 恰好被别的版本继承」三件事同时成立，
+        // 少一样就照常当独立实例（自己就是加载器版本、或者根本没人继承它）。
+        val inheritedTargets = parsed.mapNotNull { it.inheritsFrom }.toSet()
+        val libraryVersions = mutableListOf<String>()
+        val instances = mutableListOf<Instance>()
+        for (version in parsed) {
+            val pureVanilla = version.inheritsFrom == null && version.loader == LoaderKind.VANILLA
+            if (pureVanilla && version.id in inheritedTargets) {
+                libraryVersions += version.id
+                continue
+            }
+            instances += buildInstance(root, version.dir, version.id, version.json, version.loader, version.loaderVersion)
+        }
+
+        return ScanResult(
+            root = root,
+            isGameDirectory = true,
+            instances = instances.sortedBy { it.name.lowercase() },
+            warnings = warnings,
+            libraryVersions = libraryVersions.sorted(),
+        )
     }
 
-    private fun buildInstance(root: File, versionDir: File, id: String, json: JsonObject): Instance {
+    /** scan 的中间产物：一个解析过 json 的版本目录。 */
+    private class ParsedVersion(val dir: File, val id: String, val json: JsonObject) {
+        val inheritsFrom: String? =
+            (json["inheritsFrom"] as? JsonPrimitive)?.content?.takeIf { it.isNotBlank() }
+        val loader: LoaderKind
+        val loaderVersion: String?
+
+        init {
+            val detected = detectLoader(id)
+            loader = detected.first
+            loaderVersion = detected.second
+        }
+    }
+
+    private fun buildInstance(
+        root: File,
+        versionDir: File,
+        id: String,
+        json: JsonObject,
+        loader: LoaderKind,
+        loaderVersion: String?,
+    ): Instance {
         val inheritsFrom = (json["inheritsFrom"] as? JsonPrimitive)?.content?.takeIf { it.isNotBlank() }
-        val (loader, loaderVersion) = detectLoader(id)
         // PCL 等启动器会写「合并后」的版本 json（没有 inheritsFrom），通常内嵌 <mc>-<loader> 的版本号。
         // 有 inheritsFrom 就直接用它；没有就从 id 前缀里取，取不到才退回整个 id。
         val gameVersion = inheritsFrom ?: gameVersionFromId(id) ?: id

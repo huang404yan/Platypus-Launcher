@@ -46,6 +46,7 @@ import io.github.huang404yan.platypus.core.Endpoints
 import io.github.huang404yan.platypus.core.download.DownloadPreference
 import io.github.huang404yan.platypus.core.download.DownloadSource
 import io.github.huang404yan.platypus.core.instance.Instance
+import io.github.huang404yan.platypus.core.instance.InstanceLayouts
 import io.github.huang404yan.platypus.core.instance.instanceKey
 import io.github.huang404yan.platypus.core.packs.PackKind
 import io.github.huang404yan.platypus.core.theme.LauncherTheme
@@ -83,6 +84,10 @@ fun App(
         // 空壳包的镜像根同理：所有地址都从 Endpoints.serverBase 拼，开程序时灌一次，
         // 设置页改完就地覆写。完整版这个字段恒为空串，setServerBase 也只会存空。
         Endpoints.setServerBase(settings.serverBase)
+        // 隔离的默认值也是进程级全局量（见 InstanceLayouts.effectiveIsolated 的说明）：
+        // 三十多个地方要用它，判断收在 core 的那一个函数里，这里只负责在开程序时灌一次。
+        // 设置页改完会就地覆写，不用等下次开程序。
+        InstanceLayouts.defaultIsolated = settings.defaultIsolation
     }
 
     LaunchedEffect(theme) { onThemeChanged(theme) }
@@ -308,6 +313,12 @@ fun App(
                                         overlayInstance?.let { focusKey = instanceKey(it) }
                                         subSelection[Page.DOWNLOAD.name] = sub
                                         page = Page.DOWNLOAD
+                                        closeOverlay()
+                                    },
+                                    // 删完实例：关掉覆盖层并让底下那页重扫（closeOverlay 里会 overlayTick++），
+                                    // 否则列表上还留着一条指向已经不存在的目录。
+                                    onDeleted = {
+                                        println("[setup] 实例已删除")
                                         closeOverlay()
                                     },
                                 )

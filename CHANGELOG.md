@@ -19,7 +19,7 @@ GitHub Release 的说明也从这里取对应小节。
 
 | 版本 | 日期 | 一句话 |
 |---|---|---|
-| 0.8.0-preview.21 | 未发布 | 按用户试用后提的 17 条问题回修的第一批（六条）：成年鸭嘴兽图标、下载源默认镜像、默认内存按物理内存自动算、正式版不再让人填微软 ID、下载进度挪到显眼处、选择框放大；版本号从 `1.0.0` 退回孵化线 |
+| 0.8.0-preview.21 | 未发布 | 按用户试用后提的 17 条问题回修（两批十二条）：成年鸭嘴兽图标、下载源默认镜像、默认内存按物理内存自动算、正式版不再让人填微软 ID、下载进度挪到显眼处、选择框放大；Forge 全量版本可选、加载器安装有进度、装加载器不再多出一个原版实例、版本设置里能删实例、隔离有了全局默认、语言能写进 `options.txt`；版本号从 `1.0.0` 退回孵化线 |
 | ~~[`1.0.0`](#10020261116)~~ | 已作废 | 原本要当第一个正式版（preview.20 的全部内容进正式线、安卓包名去掉 `.preview`、空壳回归可选开关），用户试用后判定问题不少、不算正式版；代码已退回 `0.8.0-preview.21`，正式线从修好之后重新开始 |
 | 0.8.0-preview.20 | 未发布 | 侧栏顺序重排、模组清单带图标、内存只留设置页一条连续滑条、下载页只下载、默认游戏目录搬出 C 盘、Java 自动补与可删、孵化版启动门禁、正式版按账号验一次、开源版可打空壳包、陶瓦跟官方最新版走、联机补公网 IPv4 直连 |
 | 0.8.0-preview.19 | 未发布 | 侧栏身份标志、顶栏五项均分与两端可折叠、启动参数下移 |
@@ -41,9 +41,9 @@ GitHub Release 的说明也从这里取对应小节。
 
 ## 0.8.0-preview.21（未发布）
 
-> 这一版是「先退回孵化线、再逐条修」的第一批。用户在 `1.0.0` 上试用后提了 17 条问题，
+> 这一版是「先退回孵化线、再逐条修」的一批。用户在 `1.0.0` 上试用后提了 17 条问题，
 > 判定那一版不算正式版，所以版本号退回 `0.8.0-preview.21`、安卓包名加回 `.preview`，
-> 先修最扎眼的六条，剩下的按批次继续。**没有一条是推倒重做**：都是把已经写歪的地方掰回来。
+> 分两批修了十二条，剩下的按批次继续。**没有一条是推倒重做**：都是把已经写歪的地方掰回来。
 
 ### 多了什么
 
@@ -52,8 +52,15 @@ GitHub Release 的说明也从这里取对应小节。
 - **正式版不再让人去填微软应用 ID**（`ui/AccountTab.kt`）。正式版是发给所有人用的，包里内置了发行方申请好的 ID，让每个下载者跑到 Azure 去申请一个自己的，等于把发行方的事推给用户；而且换一次 ID 会让已经存下的 refresh_token 全部作废。现在 `ClientIds.builtin()` 非空时整块「填一个自己的应用 ID」卡片不显示，「第二步：登录」也顺势改名成「登录」（没有第一步了）。孵化版照旧 —— 它本来就不带 ID。
 - **下载进度挪到看得见的地方**（`ui/DownloadsPage.kt`）。原来那块进度条在页面最底下，下载页又长，点完「一键安装」往上滚的人根本不知道已经在下了。现在顶部状态卡改成主题色的 `primaryContainer` 底、标题旁边直接写百分比、下面跟一条进度条；页面中部那份重复的进度显示删掉了 —— 同屏两个百分比只会让人怀疑哪个才是真的。
 
+- **装加载器时能选的不再只有「推荐」与「最新」两档**（`ForgeMeta.parseForgeVersions` + `ForgeInstaller.listVersions`）。原来 Forge 的版本清单只从 `promotions_slim.json` 读，那个文件只有 recommended 与 latest 两个频道，所以界面上永远只有两条，想退回一个旧一点的 Forge 就没得选。现在再拉一份 `maven-metadata.xml`（约 200 KB，条目形如 `1.20.1-47.4.29`），按原版号过滤出全量清单，推荐与最新仍带标签并排在最前，其余按 maven 原顺序跟随。两个文件都拉不到才报错 —— 单靠 promotions 时行为与以前一模一样。
+- **加载器自己的安装阶段也有进度了**（`ForgeInstaller` / `NeoForgeInstaller` 的 RUN 段）。这一段是跑官方 installer 的 java 子进程，它只吐日志不报百分比，原来界面上就是一个不动的圈。现在按收到的日志行数报进度、附上已用秒数与最后一行原文；`StepProgress` 新增的 `totalReliable` 把「这是行数不是字节数」这件事告诉界面，界面据此画一条来回扫的不确定进度条，而不是一条永远停在 0% 的实进度条（画成实进度条会让人以为卡住了）。
+- **进游戏的语言能定了**（新增 `core/launch/GameLanguage.kt`）。Minecraft 自己的语言写在游戏目录的 `options.txt` 里一行 `lang:zh_cn`，以前启动器一个字都不碰它，中文用户装完第一次进去还是英文。现在设置里多一张「游戏语言」卡，默认「跟随系统」（按系统的 locale 映射，简中→`zh_cn`、繁中→`zh_tw`，其余按语言+国家三级匹配，都不中给 `en_us`），也可以固定成十种之一。落点在 `DesktopGameRuntime.launch` 里起进程之前 —— 游戏一启动就读 `options.txt`，等它起来再改这一局不算数。写入只改那一行、其余行原顺序保留：整份重写会把游戏自己新加的键全丢掉。安卓端同样在 `startGame` 起 JVM 之前写一次。
+- **新建实例的隔离有了全局默认**（`LauncherSettings.defaultIsolation` + `Instance.isolatedFollowsDefault` + `InstanceLayouts.effectiveIsolated`）。以前每个实例的 `isolated` 各存一份，新装的恒为「开」，想统一关掉只能一个个点。现在设置里有一张「新建实例默认隔离」卡，新装的版本标上「跟随设置里的默认」，改全局就一起变；单个版本想去掉跟随，到「版本设置 → 高级 → 版本隔离」把那个开关关掉再改，那一刻的生效值会被固化下来，不会因为取消跟随而跳回实例里存的老值。生效判断只加在 `InstanceLayouts.of(instance)` 这一个函数里，三十多个调用点一行没动。
+- **版本设置里能删实例了**（`InstanceDetailPanel` 的「高级」分区）。以前要删一个版本得退回实例列表去点卡片上的删除，而人往往是在版本设置里点了一圈才发现这一版不要了。现在「高级」分区最下面有「删除这个实例」：先 `InstanceDeleter.inspect` 统计要删多少文件，对话框里列出绝对路径与体积，存档默认保留（勾了才一起删），确认后改名 `.deleting-<时间戳>` 再递归删 —— 不进回收站，所以文案里写清楚了。删完顺手 `instances.remove` 并关掉详情页，否则面板会停在已经不存在的目录上，点保存又写回一条指向空路径的登记。
+
 ### 修了什么
 
+- **装完带加载器的版本，列表里会多出一个纯原版**。这不是装了两遍：安装器只登记带加载器的那一条，原版目录是装加载器的前置（加载器靠 `inheritsFrom` 从它拿 client jar 与库），而实例列表是「登记的 + 扫 `versions/` 扫出来的」合并起来的，扫描器把那个原版目录也当成一个实例列了出来。现在把「纯原版、没有 `inheritsFrom`、又被别的版本继承」的目录判成库目录，不进列表；登记那边同样折叠 —— 只挡扫描层不够用，因为用户很可能先单独下过原版、后来才在同一个目录上补装加载器，那条原版是被**登记**过的，`mergeInstances` 里它一直活着。条件三个必须同时成立：自己就是加载器版本、或没人继承它的原版，照常显示。
 - **图标用错了：孵化版那只幼体被当成了通用图标**。根因不在版本号判断上，在资源本身 —— `app-desktop/src/main/resources/icon/platypus.png` 与 `platypus.ico` 这两份「通用兜底」里存的其实是幼体，而窗口标题栏、任务栏读的正是 jar 内这个 `icon/platypus.png`（`Main.kt` 的 `loadWindowIcon()`），所以不管什么通道，窗口图标永远是幼体。现在资源目录里有四份（`platypus-baby.png/.ico`、`platypus-adult.png/.ico`），`Brand.isPreview` 挑一份，jpackage 的 fallback 也按通道挑（linux 只吃 png，之前那处把 `.ico` 传给 linux 也一并修了）。安卓那边把 11 个 mipmap 图标全部按成年图重新生成（自适应图标的前景层抠成透明底、主体按 0.62 缩放居中；传统图标深色底 + 主体 0.82 + 22% 圆角）。
 - **下载默认改走国内镜像**（`DownloadSource.DEFAULT` 从 `AUTO` 改成 `MIRROR`）。用户反馈「下载比较慢」，查下来不是并发不够（`HttpDownloader` 本来就是 16 个文件并行），是默认源优先：国内连 Mojang 官方源基本是先等 30 秒连接超时再落回镜像，第一个文件就白等半分钟。镜像坏掉有 sha1 兜底、判失败会退回官方源，所以把默认调过来风险很低。设置页里仍可切回「官方源优先」。
 - **loader 版本的下拉按钮太小点不着**（`DownloadsPage.kt` 的 `LoaderPickerRow`）。原来那个「选 loader 版本」是一行小字，点击区跟文字一样大。现在按钮最少 180dp 宽、44dp 高（不到 44dp 的点击区在触屏上很难命中），文案改成会显示当前选中的版本号，下拉列表从 120dp 放到 240dp、每行竖向留白从 6dp 加到 10dp；Minecraft 版本列表也从 132dp（只够露三四行）放到 200dp。
@@ -62,18 +69,18 @@ GitHub Release 的说明也从这里取对应小节。
 
 ### 已知限制
 
-- **用户提的 17 条里这一版只修了六条**。还没做的：安卓装不了模组加载器（Forge / NeoForge 要起 java 子进程）、安卓加载器版本只能选「推荐」、安卓端还是起不了游戏（缺图形转译层）、加载器安装没有进度条、装加载器会多出一个纯原版实例、语言设置不能改游戏内的 `options.txt`、实例隔离仍放在版本设置里而不是全局设置、版本设置里没有删除入口、安卓授权成功后要手动刷新一次才显示已授权。这些按批次继续。
+- **用户提的 17 条里这一版修了十二条**。还没做的：安卓装不了模组加载器（Forge / NeoForge 要起 java 子进程，手机上既没有现成的 java 也没有起子进程的余地）、安卓加载器版本只能选「推荐」、安卓端还是起不了游戏（缺图形转译层，Android 10 起系统禁止从可写目录加载原生库）、单个文件不分段下载、安卓授权成功后要手动刷新一次才显示已授权。这些按批次继续。
 - 单个文件不分段下载，提速只到「多文件并行 + 优先镜像」这一层。大文件（客户端 jar、libraries 里的单个大件）仍是单连接拉。
 - 安卓包仍是 debug 签名（`C=US, O=Android, CN=Android Debug`），要在真机上长期装得换 release 签名。
 - `NOTICE` 仍然没有被打进产物：jpackage 段里没有 `licenseFile` 配置，安装目录只有 `exe` / `app/` / `runtime/` 三项。
 
 ### 校验
 
-- `gradlew :core:test :ui:jvmTest :app-desktop:compileKotlin :app-desktop:createDistributable :androidApp:clean :androidApp:assembleDebug -PskipWix` → `BUILD SUCCESSFUL in 36s`，0 条 `e: `（75 个 actionable task：40 执行、14 命中缓存、21 最新）。安卓那条带了 `:androidApp:clean`：增量构建会在 apk 里留下 zip 空洞（条目挪到文件尾），体积假性变大。
-- 全量单测 **87 个类 1086 个用例，0 失败 0 错误 0 跳过**（core 82 类 1040 例 + ui 5 类 46 例）。
-- 产物（`releases/preview/`，只在本机暂存，没发 Release）：`Platypus-Launcher-0.8.0-preview.21-win-x64.msi` **70,348,956 字节** sha256 `d3495d61f4ef505f08ee072c5f09eae9dddf49f1b96c3a503c59674c3fe65a39`；`Platypus-Launcher-0.8.0-preview.21-win-x64.zip` **68,690,915 字节**（202 条目，顶层 `Platypus Preview/Platypus Preview.exe`）sha256 `7a7ab503b5e70d2484b29bae97b1c2c32256fd338aa8d90ba2e78b2e45ab5eec`；`Platypus-Launcher-0.8.0-preview.21-android.apk` **13,902,445 字节** sha256 `a80e13f35976533d8b67665e94e523892e78d8d2876974e414eae0e5de316a32`。免装目录 202 个文件 / 136,088,624 字节，`Platypus Preview.exe` 597,504 字节。
-- 包内实证：`app/` 下的 jar 名已是 `core-0.8.0-preview.21-*.jar` / `app-desktop-0.8.0-preview.21-*.jar`；`app-desktop-*.jar` 里的 `icon/` 有四份，`platypus-adult.png` md5 `0019b1a7c38c4b220505cca5484ea88f`（与 `branding/android/platypus-adult-512.png` 同源）、`platypus-baby.png` md5 `9a0431b2c815ee83974602a9821cfff3`。apk 用 `aapt2 dump badging` 读出 `package: name='io.github.huang404yan.platypus.launcher.preview' versionCode='80021' versionName='0.8.0-preview.21'`、`application-label:'鸭嘴兽 · 孵化版'`；apk 内 11 张 `ic_launcher*` 的 md5 全部换过（旧的幼体那套不再是任何一个）。
-- 免装版冒烟：`Start-Process` 起 `Platypus Preview.exe`，14 秒后进程仍在（pid 23468），随后强停；它按预期在安装目录下建出 `game/platypus/`，冒烟完已把 `game/` 整个送回收站。
+- `gradlew :core:test :ui:jvmTest :app-desktop:compileKotlin :app-desktop:createDistributable -PskipWix` → `BUILD SUCCESSFUL in 14s`，0 条 `e: `（`build-all3.log`）；安卓 `:androidApp:compileDebugKotlin` → EXIT=0、0 条 `e: `；出 apk 前单独跑了 `:androidApp:clean :androidApp:assembleDebug`（`BUILD SUCCESSFUL`，51 个 task）。安卓那条必须带 `:androidApp:clean`：增量构建会在 apk 里留下 zip 空洞（条目挪到文件尾、体积假性变大），本轮实测干净构建后 149 个条目的 `header_offset` 单调递增。
+- 全量单测 **88 个类 1114 个用例，0 失败 0 错误 0 跳过**（core 83 类 1068 例 + ui 5 类 46 例）。
+- 产物（`releases/preview/`，只在本机暂存，没发 Release）：`Platypus-Launcher-0.8.0-preview.21-win-x64.msi` **70,406,300 字节** sha256 `56530caf197a640604fd11135e7e8b7f854dd1357426e3835a424832e18004a4`；`Platypus-Launcher-0.8.0-preview.21-win-x64.zip` **68,741,799 字节**（202 条目，顶层 `Platypus Preview/Platypus Preview.exe`）sha256 `210bc2d9aa464c3611322b5e67b59c92bc1e01c5d7e48cfec15b25aef2c5798f`；`Platypus-Launcher-0.8.0-preview.21-android.apk` **13,918,829 字节**（149 条目，`header_offset` 单调递增）sha256 `f80fcd9d622969d49116f0fbcbf8a74685dea75a2fdd075a4a3073f4aa23d15a`。免装目录 202 个文件 / 136,141,285 字节，`Platypus Preview.exe` 597,504 字节（23:02）。
+- 包内实证：`app/` 下的 jar 名已是 `core-0.8.0-preview.21-78ea54dfc030aafd815cd699155793ad.jar`（681 条目）/ `app-desktop-0.8.0-preview.21-911ba1ff222184ae729c50159ae21f9.jar`，前者含 `core/launch/GameLanguage.class`、`GameLanguage$Choice.class`、`instance/MemoryDefaults.class`（本轮新写的类确实进了包）；`app-desktop-*.jar` 里的 `icon/` 有四份，`platypus-adult.png` md5 `0019b1a7c38c4b220505cca5484ea88f`（与 `branding/android/platypus-adult-512.png` 同源）、`platypus-baby.png` md5 `9a0431b2c815ee83974602a9821cfff3`。apk 用 `aapt2 dump badging` 读出 `package: name='io.github.huang404yan.platypus.launcher.preview' versionCode='80021' versionName='0.8.0-preview.21'`、`application-label:'鸭嘴兽 · 孵化版'`；apk 内 11 张 `ic_launcher*` 的 md5 全部换过（旧的幼体那套不再是任何一个）；dex 里能搜到 `GameLanguage` / `GameOptions` / `MemoryDefaults` 三个类名（`classes10.dex` / `classes14.dex` / `classes2.dex`），本轮新代码确实进了包。
+- 免装版冒烟：`Start-Process` 起 `Platypus Preview.exe`，12 秒后进程仍在（pid 25460），随后强停；它按预期在安装目录下建出 `game/`，冒烟完已把 `game/` 整个送回收站（`Test-Path` 复核为 False）。
 
 ## 1.0.0（2026-11-16，已作废）
 

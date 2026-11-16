@@ -37,7 +37,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import io.github.huang404yan.platypus.core.Brand
 import io.github.huang404yan.platypus.core.instance.Instance
+import io.github.huang404yan.platypus.core.instance.InstanceLayouts
 import io.github.huang404yan.platypus.core.instance.MemoryDefaults
+import io.github.huang404yan.platypus.core.launch.GameLanguage
 import io.github.huang404yan.platypus.core.theme.LauncherTheme
 import io.github.huang404yan.platypus.core.theme.paletteOf
 import io.github.huang404yan.platypus.core.settings.JsonSettingsRepository
@@ -56,8 +58,9 @@ import java.io.File
  * 与桌面 SettingsPage 读写同一个 [JsonSettingsRepository]：游戏目录下的
  * `platypus/settings.json`，所以同一个目录在手机与桌面之间来回拷也能读。
  *
- * 只放三件真正影响「关掉再开还能用」的事：离线用户名、默认游戏目录、默认内存。
- * 实例自己的内存仍然存在 instances.json 里，这里只决定「第一次建实例给多少」。
+ * 只放几件真正影响「关掉再开还能用」的事：离线用户名、默认游戏目录、默认内存、
+ * 新建实例默认隔离、游戏语言。
+ * 实例自己的内存与隔离仍然存在 instances.json 里，这里只决定「第一次建实例按什么来」。
  */
 @Composable
 internal fun SettingsPage(theme: LauncherTheme = LauncherTheme.AUTO, onThemeChange: (LauncherTheme) -> Unit = {}) {
@@ -73,6 +76,10 @@ internal fun SettingsPage(theme: LauncherTheme = LauncherTheme.AUTO, onThemeChan
     var gameRoot by remember { mutableStateOf(defaultGameRoot()) }
     var memoryMb by remember { mutableStateOf(Instance.DEFAULT_MEMORY_MB.toString()) }
     var memoryAuto by remember { mutableStateOf(true) }
+    // 新建实例默认隔离：与桌面端同一个字段，实例里标了 isolatedFollowsDefault 的跟着它走。
+    var defaultIsolation by remember { mutableStateOf(true) }
+    // 游戏语言：空串 = 跟随系统（进游戏时按手机语言映射一个），其余是这个值的原样。
+    var gameLanguage by remember { mutableStateOf("") }
     var status by remember { mutableStateOf("") }
     // 「自动」在安卓上按设备的物理内存算，与桌面端同一个 MemoryDefaults。
     // 拿不到（ActivityManager 异常、或旧机型不给 totalMem）就是 0，autoMb 会退回 2048。
@@ -90,6 +97,10 @@ internal fun SettingsPage(theme: LauncherTheme = LauncherTheme.AUTO, onThemeChan
         memoryAuto = settings.defaultMemoryAuto
         memoryMb = MemoryDefaults.resolve(settings.defaultMemoryMb, settings.defaultMemoryAuto, deviceTotalMemoryMb(context))
             .toString()
+        defaultIsolation = settings.defaultIsolation
+        gameLanguage = settings.gameLanguage
+        // 进程级镜像：起 JVM 前手机这边也是先读设置再灌进去，这里顺手对齐一次。
+        InstanceLayouts.defaultIsolated = settings.defaultIsolation
         loaded = true
     }
 
@@ -110,11 +121,16 @@ internal fun SettingsPage(theme: LauncherTheme = LauncherTheme.AUTO, onThemeChan
                         defaultGameRoot = gameRoot.trim(),
                         defaultMemoryMb = memory,
                         defaultMemoryAuto = memoryAuto,
+                        defaultIsolation = defaultIsolation,
+                        gameLanguage = gameLanguage,
                         theme = theme.id,
                     ),
                 )
             }
             username = saved.offlineUsername
+            defaultIsolation = saved.defaultIsolation
+            gameLanguage = saved.gameLanguage
+            InstanceLayouts.defaultIsolated = saved.defaultIsolation
             memoryAuto = saved.defaultMemoryAuto
             memoryMb = MemoryDefaults.resolve(saved.defaultMemoryMb, saved.defaultMemoryAuto, deviceTotalMemoryMb(context))
                 .toString()
@@ -250,6 +266,74 @@ internal fun SettingsPage(theme: LauncherTheme = LauncherTheme.AUTO, onThemeChan
             )
         }
 
+        SettingCard(
+            "新建实例默认隔离",
+            "刚装好的版本按这个来：开着是各自一个目录（存档、模组都各管各的），关掉是共用游戏根目录。"
+                + "已经单独设过的版本不受影响 —— 去它的「版本设置 → 高级 → 版本隔离」把「跟随设置里的默认」关掉再改。",
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text("默认开隔离", style = MaterialTheme.typography.bodyMedium)
+                    Text(
+                        if (defaultIsolation) "新装的版本各用各的目录。" else "新装的版本共用游戏根目录。",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Switch(checked = defaultIsolation, onCheckedChange = { defaultIsolation = it }, enabled = loaded)
+            }
+        }
+
+        SettingCard(
+            "游戏语言",
+            "进游戏时写进 options.txt 的 lang: 那一行。只改这一行，别的键不动。",
+        ) {
+            Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text(
+                    if (gameLanguage.isBlank()) {
+                        "现在跟随系统：这台手机映射成「" + GameLanguage.labelOf(GameLanguage.systemDefault()) +
+                            "」（" + GameLanguage.systemDefault() + "）。"
+                    } else {
+                        "现在固定用「" + GameLanguage.labelOf(gameLanguage) + "」（" + gameLanguage + "）。"
+                    },
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                // 「跟随系统」排第一项，后面是固定语言。手机上竖排一行一个，比挤在 FlowRow 里好点。
+                (listOf(GameLanguage.Choice("", "跟随系统")) + GameLanguage.CHOICES).forEach { option ->
+                    val selected = option.id == gameLanguage
+                    Card(
+                        modifier = Modifier.fillMaxWidth().clickable { gameLanguage = option.id },
+                        colors = CardDefaults.cardColors(
+                            containerColor = if (selected) {
+                                MaterialTheme.colorScheme.primaryContainer
+                            } else {
+                                MaterialTheme.colorScheme.surface
+                            },
+                        ),
+                    ) {
+                        Row(
+                            Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                option.label,
+                                modifier = Modifier.weight(1f),
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+                            )
+                            if (selected) {
+                                Text("✓", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary)
+                            }
+                        }
+                    }
+                }
+            }
+        }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Button(onClick = { scope.launch { save() } }, enabled = loaded) { Text("保存") }
             OutlinedButton(
@@ -258,6 +342,8 @@ internal fun SettingsPage(theme: LauncherTheme = LauncherTheme.AUTO, onThemeChan
                     gameRoot = defaultGameRoot()
                     memoryAuto = true
                     memoryMb = autoMemoryMb.toString()
+                    defaultIsolation = true
+                    gameLanguage = ""
                 },
                 enabled = loaded,
             ) { Text("填回默认值") }

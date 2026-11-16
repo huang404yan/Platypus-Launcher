@@ -180,6 +180,8 @@ fun LaunchPage(
     // 设置里的 microsoftClientId 原值。只有孵化版（开源版）拿它做启动门禁：
     // 仓库里不带 Client ID，没填就登不了正版，给了也会在登录时才失败 —— 不如提前拦住。
     var clientIdValue by remember { mutableStateOf("") }
+    // 进游戏用哪个语言（设置 → 启动 → 游戏语言）。空串 = 不插手 options.txt。
+    var gameLanguage by remember { mutableStateOf("") }
     // 侧栏那个「测试启动」勾选：孵化版没填 ID 时唯一的绕行口，只跳门禁，不修登录。
     var testLaunch by remember { mutableStateOf(false) }
 
@@ -245,7 +247,7 @@ fun LaunchPage(
         }
         scanned = result
         registered = saved
-        val merged = mergeInstances(saved, result?.instances.orEmpty())
+        val merged = mergeInstances(saved, result?.instances.orEmpty(), result?.libraryVersions.orEmpty())
         val focused = focusKey?.takeIf { it.isNotBlank() }?.let { key ->
             merged.firstOrNull { instanceKey(it) == key }
         }
@@ -535,6 +537,7 @@ fun LaunchPage(
                     session = session,
                     jvmArgs = extraJvmArgs,
                     quickPlayServer = quickTarget,
+                    gameLanguage = gameLanguage,
                 )
                 val started = backend.gameRuntime.launch(request) { event ->
                     when (event) {
@@ -620,6 +623,7 @@ fun LaunchPage(
                 }
                 defaultMemoryMb = MemoryDefaults.resolve(stored.defaultMemoryMb, stored.defaultMemoryAuto, SystemMemory.totalMb)
                 clientIdValue = stored.microsoftClientId
+                gameLanguage = stored.gameLanguage
                 // 要在下面的 rescan() 之前就位：它是「扫完后选谁」的一级兜底。
                 lastInstanceKey = stored.lastInstanceKey
                 val wanted = stored.activeAccountUuid
@@ -658,6 +662,7 @@ fun LaunchPage(
                 val stored = withContext(Dispatchers.IO) { runCatching { settingsRepository.load() }.getOrNull() }
                 if (stored != null) {
                     clientIdValue = stored.microsoftClientId
+                    gameLanguage = stored.gameLanguage
                     defaultMemoryMb = MemoryDefaults.resolve(stored.defaultMemoryMb, stored.defaultMemoryAuto, SystemMemory.totalMb)
                 }
             }
@@ -681,7 +686,7 @@ fun LaunchPage(
     val clientIssue = ClientIds.missingProblem(clientIdValue)
     val clientGatePassed = Edition.current() != Edition.PREVIEW || clientIssue == null
     val requiredMajor = selected?.let { GameJavaRules.requiredMajor(it.gameVersion) }
-    val merged = mergeInstances(registered, scanned?.instances.orEmpty())
+    val merged = mergeInstances(registered, scanned?.instances.orEmpty(), scanned?.libraryVersions.orEmpty())
     val exactJava = requiredMajor?.let { major -> (javaPhase as? JavaPhase.Done)?.runtimes?.findExactMajor(major) }
 
     // PCL 的启动页是左栏选版本 + 大号启动按钮、右栏放设置与日志（PageLaunchLeft.xaml）。

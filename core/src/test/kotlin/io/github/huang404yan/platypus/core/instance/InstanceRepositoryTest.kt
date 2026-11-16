@@ -17,12 +17,14 @@ class InstanceRepositoryTest {
         name: String = "1.20.1",
         directory: String,
         memoryMb: Int = 2048,
+        loader: LoaderKind = LoaderKind.VANILLA,
     ) = Instance(
         id = id,
         name = name,
         gameVersion = "1.20.1",
         directory = directory,
         memoryMb = memoryMb,
+        loader = loader,
     )
 
     @Test
@@ -134,5 +136,43 @@ class InstanceRepositoryTest {
         assertTrue(!external.registered)
         // 登记的排在前面
         assertTrue(merged.first().registered)
+    }
+
+    @Test
+    fun foldsRegisteredVanillaThatLoadersInherit() {
+        // 先单独下过 1.20.1 并登记，后来又补装 fabric，于是两条都被登记过。
+        // 磁盘上 1.20.1 必须留着（fabric 那份 inheritsFrom 指着它），但列表里只该有 fabric。
+        val vanillaDir = File("C:/mc/versions/1.20.1").path
+        val fabricDir = File("C:/mc/versions/1.20.1-fabric-0.16.9").path
+        val registered = listOf(
+            instance(id = "1.20.1", name = "1.20.1", directory = vanillaDir),
+            instance(id = "1.20.1-fabric-0.16.9", name = "fabric", directory = fabricDir, loader = LoaderKind.FABRIC),
+        )
+
+        val merged = mergeInstances(registered, emptyList(), listOf("1.20.1"))
+        assertEquals(1, merged.size)
+        assertEquals("1.20.1-fabric-0.16.9", merged.first().id)
+        assertTrue(merged.first().registered)
+    }
+
+    @Test
+    fun keepsRegisteredVanillaWhenNothingInheritsIt() {
+        // 没传 libraryVersions 时行为与从前一致：登记的原版照常列出。
+        val dir = File("C:/mc/versions/1.20.1").path
+        val registered = listOf(instance(id = "1.20.1", name = "1.20.1", directory = dir))
+        val merged = mergeInstances(registered, emptyList(), emptyList())
+        assertEquals(1, merged.size)
+        assertEquals("1.20.1", merged.first().id)
+    }
+
+    @Test
+    fun doesNotFoldRegisteredLoaderVersion() {
+        // 被折叠的只能是纯原版那条：加载器版本即便 id 撞进 libraryVersions 也不能挡。
+        val dir = File("C:/mc/versions/1.20.1-forge-47.4.0").path
+        val registered = listOf(
+            instance(id = "1.20.1-forge-47.4.0", name = "forge", directory = dir, loader = LoaderKind.FORGE),
+        )
+        val merged = mergeInstances(registered, emptyList(), listOf("1.20.1-forge-47.4.0"))
+        assertEquals(1, merged.size)
     }
 }

@@ -9,6 +9,7 @@ import io.github.huang404yan.platypus.core.loader.ForgeMeta
 import io.github.huang404yan.platypus.core.loader.ForgeParse
 import io.github.huang404yan.platypus.core.loader.ForgeVersion
 import io.github.huang404yan.platypus.core.loader.parseForgePromotions
+import io.github.huang404yan.platypus.core.loader.parseForgeVersions
 import io.github.huang404yan.platypus.core.version.DownloadPlanner
 import io.github.huang404yan.platypus.core.version.VersionJson
 import io.github.huang404yan.platypus.core.version.parseVersionJson
@@ -42,13 +43,36 @@ object ForgeInstaller {
     /** 跑 installer 的总超时。实测 1.20.1 约 3 分钟，给到 15 分钟容忍慢网。 */
     private const val INSTALL_TIMEOUT_MINUTES = 15L
 
-    /** 只拉推荐版本列表，给 UI 选版本用。 */
+    /**
+     * 拉某个原版版本下**全部** Forge 版本，给 UI 选版本用。
+     *
+     * 两路都拉：promotions_slim.json（4 KB，给推荐/最新打标记）与 maven-metadata.xml
+     * （200 KB，给全量版本号）。maven 拉不到时退回只有推荐与最新两条——
+     * 那时候至少还能装，不至于连装都装不了。
+     */
     suspend fun listVersions(gameVersion: String): List<ForgeVersion> = withContext(Dispatchers.IO) {
-        val text = VanillaInstaller.fetchText(listOf(ForgeMeta.PROMOTIONS_URL))
-        when (val parsed = parseForgePromotions(text, gameVersion)) {
-            is ForgeParse.Ok -> parsed.value
-            is ForgeParse.Failure -> throw IOException(parsed.reason)
+        val promotions = runCatching {
+            when (val parsed = parseForgePromotions(
+                VanillaInstaller.fetchText(listOf(ForgeMeta.PROMOTIONS_URL)),
+                gameVersion,
+            )) {
+                is ForgeParse.Ok -> parsed.value
+                is ForgeParse.Failure -> emptyList()
+            }
+        }.getOrDefault(emptyList())
+
+        val metadata = runCatching { VanillaInstaller.fetchText(listOf(ForgeMeta.MAVEN_METADATA_URL)) }.getOrNull()
+        if (metadata != null) {
+            when (val parsed = parseForgeVersions(metadata, gameVersion, promotions)) {
+                is ForgeParse.Ok -> return@withContext parsed.value
+                // maven 清单里没有这个原版版本：退回 promotions 的结论（可能是真的没有）
+                is ForgeParse.Failure -> Unit
+            }
         }
+        if (promotions.isEmpty()) {
+            throw IOException("Forge 没有为 " + gameVersion + " 发布版本，也没有拉到 maven 版本清单")
+        }
+        promotions
     }
 
     /**
@@ -74,7 +98,9 @@ object ForgeInstaller {
             } else {
                 onProgress(ForgeProgress(ForgeStep.VERSIONS, "查询 " + vanillaVersion + " 的 Forge 版本…"))
                 val versions = listVersions(vanillaVersion)
-                (versions.firstOrNull { it.recommended } ?: versions.first()).version
+                (versions.firstOrNull { it.recommended }
+                    ?: versions.firstOrNull { it.latest }
+                    ?: versions.first()).version
             }
 
             val versionId = ForgeMeta.versionId(vanillaVersion, chosen)
@@ -156,15 +182,27 @@ object ForgeInstaller {
             step = ForgeStep.RUN
             val logFile = File(installersDir, versionId + "-install.log")
             onProgress(ForgeProgress(step, "运行 Forge 安装器（约 3 分钟，日志：" + logFile.name + "）"))
+            // installer 不报总进度，只能数它打了多少行日志：总行数事先不知道，
+            // 所以 total = 0（界面画不确定进度条），done = 已跑行数（用来显示「动了多少」）。
+            // 用户抱怨过「安装加载器没进度条不知道情况」，有行数与秒数在动就够判断死没死。
+            val runStartedAt = System.currentTimeMillis()
+            var runLines = 0
             val exitCode = runInstaller(
                 java = javaPath,
                 installer = installer,
                 gameRoot = gameRoot,
                 logFile = logFile,
             ) { line ->
-                // installer 每行日志都往前端推一次，用户能看到它真的在动；
-                // 进度不重要，卡住时最后一行是什么才重要。
-                onProgress(ForgeProgress(step, "安装器：" + line))
+                runLines += 1
+                val seconds = ((System.currentTimeMillis() - runStartedAt) / 1000L).toInt()
+                onProgress(
+                    ForgeProgress(
+                        step = ForgeStep.RUN,
+                        detail = "已跑 " + runLines + " 行 · 已用 " + seconds + " 秒 · " + line.take(160),
+                        done = runLines.toLong(),
+                        total = 0L,
+                    ),
+                )
             }
 
             step = ForgeStep.VERIFY

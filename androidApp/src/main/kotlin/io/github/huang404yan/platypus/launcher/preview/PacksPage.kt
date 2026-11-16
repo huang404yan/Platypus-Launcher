@@ -115,7 +115,7 @@ internal fun PacksPage() {
                 JsonInstanceRepository(JsonInstanceRepository.defaultIndexFile(dir)).list()
             }.getOrNull().orEmpty()
             runCatching { InstanceScanner.scan(dir) }.getOrNull()?.let { scan ->
-                scan.copy(instances = mergeInstances(registered, scan.instances))
+                scan.copy(instances = mergeInstances(registered, scan.instances, scan.libraryVersions))
             }
         }
         val found = scanned?.instances.orEmpty()

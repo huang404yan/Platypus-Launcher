@@ -20,6 +20,7 @@ enum class LoaderKind { VANILLA, FORGE, NEOFORGE, FABRIC, QUILT, OPTIFINE, OTHER
  *   --gameDir 指回 <gameRoot>，所有版本共用 <gameRoot>/mods、saves、options.txt ——
  *   只有一种情况该这么用：一个整合包把 mods/ 平铺在游戏根目录下，版本目录里干干净净。
  *   参照 PCL 的「版本隔离」开关（ModMinecraft.vb 的 PathIndie）。
+ *   想要「新实例按设置里的默认来」用 [isolatedFollowsDefault]，不是每次建实例都抄一遍。
  */
 @Serializable
 data class Instance(
@@ -36,6 +37,14 @@ data class Instance(
     val registered: Boolean = false,
     val isolated: Boolean = true,
     val memoryFollowsDefault: Boolean = false,
+    /**
+     * 版本隔离跟着设置页的「默认」走（2026-11-16 加，参照 [memoryFollowsDefault] 的做法）。
+     *
+     * 为 true 时 [isolated] 存的那份不再作数，实际用 [InstanceLayouts.effectiveIsolated]。
+     * 默认 false 是为了不改老数据的意思：老实例里那个开关是当初建的实例自己带的，
+     * 不能因为加了全局默认就集体跳一次 —— 那会让一部分人的存档在没人察觉时换地方。
+     */
+    val isolatedFollowsDefault: Boolean = false,
 ) {
     companion object {
         const val DEFAULT_MEMORY_MB = 2048
@@ -80,10 +89,24 @@ interface InstanceRepository {
  *
  * 同一目录只留一条，登记的优先（保住用户改过的内存与 Java 路径）；扫描到的外部实例
  * 原样保留在列表里，避免「别的启动器装的版本」从界面上消失。
+ *
+ * [libraryVersions] 是扫描器判定的「只被加载器版本继承的原版目录」。这些目录在磁盘上
+ * 必须留着（加载器靠 inheritsFrom 拿它的 client jar 与库），但不该在列表里和带加载器的
+ * 那条并排出现 —— 用户会以为装重了。**登记的也要一起挡**：先前单独下过原版、后来又在
+ * 同一目录上补装加载器的用户，原版那条是登记过的，光靠扫描层折叠挡不住。
  */
-fun mergeInstances(registered: List<Instance>, scanned: List<Instance>): List<Instance> {
+fun mergeInstances(
+    registered: List<Instance>,
+    scanned: List<Instance>,
+    libraryVersions: List<String> = emptyList(),
+): List<Instance> {
     val merged = LinkedHashMap<String, Instance>()
-    registered.forEach { merged[instanceKey(it)] = it.copy(registered = true) }
+    registered.forEach {
+        // 只挡「就是那个纯原版目录」的登记项：别的加载器版本、或者用户自己加过 mod 的
+        // 同名目录不算（后者 loader 仍标 VANILLA，但它的 id 不会被别的版本 inheritsFrom 指到）。
+        if (it.loader == LoaderKind.VANILLA && it.id in libraryVersions) return@forEach
+        merged[instanceKey(it)] = it.copy(registered = true)
+    }
     scanned.forEach { merged.putIfAbsent(instanceKey(it), it.copy(registered = false)) }
     return merged.values.sortedWith(
         compareByDescending<Instance> { it.registered }.thenBy { it.name.lowercase() },

@@ -116,6 +116,27 @@ class InstanceEditsTest {
     }
 
     @Test
+    fun `不传跟随开关时不改它`() {
+        val original = instance().copy(isolatedFollowsDefault = true)
+        val updated = ok(InstanceEdits.fromInput(original, "2048", "", "")).instance
+        assertTrue(updated.isolatedFollowsDefault, "安卓详情页不传这一项，不能把跟随悄悄取消")
+    }
+
+    @Test
+    fun `传了跟随开关就按传的存`() {
+        val on = ok(InstanceEdits.fromInput(instance(), "2048", "", "", isolatedFollowsDefault = true)).instance
+        assertTrue(on.isolatedFollowsDefault)
+        val off = ok(
+            InstanceEdits.fromInput(
+                instance().copy(isolatedFollowsDefault = true),
+                "2048", "", "",
+                isolatedFollowsDefault = false,
+            ),
+        ).instance
+        assertTrue(!off.isolatedFollowsDefault)
+    }
+
+    @Test
     fun `保存提示会把参数个数说清楚`() {
         assertEquals("已保存：2048 MB", InstanceEdits.savedMessage(ok(InstanceEdits.fromInput(instance(), "2048", "", ""))))
         assertEquals(

@@ -55,6 +55,9 @@ object LocalInstance {
             javaPath = javaPath?.takeIf { it.isNotBlank() },
             memoryMb = Instance.clampMemoryMb(memoryMb),
             registered = true,
+            // 刚认养的实例没有隔离历史，按设置里的「新建实例默认隔离」走。
+            // 用户以后在版本设置里动一下开关就自动脱离跟随（见 InstanceEdits.fromInput）。
+            isolatedFollowsDefault = true,
         )
     }
 }

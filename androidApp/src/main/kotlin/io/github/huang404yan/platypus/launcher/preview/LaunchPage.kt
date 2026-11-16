@@ -47,6 +47,8 @@ import io.github.huang404yan.platypus.core.launch.AndroidLaunchConfig
 import io.github.huang404yan.platypus.core.launch.AndroidLaunchPreparation
 import io.github.huang404yan.platypus.core.launch.AndroidLaunchPlanner
 import io.github.huang404yan.platypus.core.launch.AndroidRenderer
+import io.github.huang404yan.platypus.core.launch.GameLanguage
+import io.github.huang404yan.platypus.core.launch.GameOptions
 import io.github.huang404yan.platypus.core.launch.LaunchRequest
 import io.github.huang404yan.platypus.core.launch.NativesExtractor
 import io.github.huang404yan.platypus.core.runtime.AndroidJavaCatalog
@@ -126,6 +128,9 @@ internal fun LaunchPage() {
     // 空串表示离线。换完必须重新自检 —— 令牌与 jvmArgs 都是自检那一刻的产物。
     var activeUuid by remember { mutableStateOf("") }
     var accounts by remember { mutableStateOf<List<StoredAccount>>(emptyList()) }
+    // 设置里选的语言，空串 = 跟随系统。真正落盘在 startGame 起 JVM 之前，
+    // 因为那是唯一一次会读 options.txt 的时机（与桌面端同一个 GameOptions）。
+    var gameLanguage by remember { mutableStateOf("") }
 
     /** 这个实例的 natives 目录：一个实例一份，免得两个版本互相盖掉。 */
     fun nativeDirOf(instance: Instance?): File {
@@ -173,7 +178,8 @@ internal fun LaunchPage() {
                 val registered = runCatching {
                     JsonInstanceRepository(JsonInstanceRepository.defaultIndexFile(dir)).list()
                 }.getOrNull().orEmpty()
-                mergeInstances(registered, InstanceScanner.scan(dir).instances)
+                val scan = InstanceScanner.scan(dir)
+                mergeInstances(registered, scan.instances, scan.libraryVersions)
             }
             instances = list
             busy = false
@@ -312,14 +318,28 @@ internal fun LaunchPage() {
         starting = true
         startNotice = ""
         scope.launch {
+            // 语言要在 JVM 起之前写进 options.txt —— 游戏一启动就读它，慢一步这一局不算数。
+            // 写失败不拦启动：语言没切成顶多是界面还是旧的，比不让人进游戏强。
+            val langNote = withContext(Dispatchers.IO) {
+                if (gameLanguage.isBlank()) {
+                    ""
+                } else {
+                    val wanted = GameLanguage.resolve(gameLanguage)
+                    if (GameOptions.writeLang(current.env.gameDir, wanted)) {
+                        "游戏语言写成 " + wanted + "。"
+                    } else {
+                        "没能把游戏语言写成 " + wanted + "（options.txt 可能没有写权限）。"
+                    }
+                }
+            }
             val outcome = withContext(Dispatchers.IO) {
                 runCatching { JvmBridge.start(current) }
                     .getOrElse { JvmStartResult.Failed("启动时抛了异常：" + describe(it)) }
             }
             starting = false
             startNotice = when (outcome) {
-                is JvmStartResult.Ok -> "游戏进程结束了。"
-                is JvmStartResult.Failed -> outcome.message
+                is JvmStartResult.Ok -> if (langNote.isBlank()) "游戏进程结束了。" else langNote + "游戏进程结束了。"
+                is JvmStartResult.Failed -> if (langNote.isBlank()) outcome.message else langNote + outcome.message
             }
         }
     }
@@ -351,8 +371,9 @@ internal fun LaunchPage() {
 
     LaunchedEffect(Unit) {
         val store = JsonSettingsRepository(JsonSettingsRepository.defaultFile(File(root.trim())))
-        username = runCatching { store.load() }.getOrNull()?.offlineUsername
-            ?: LauncherSettings.DEFAULT_OFFLINE_USERNAME
+        val stored = runCatching { store.load() }.getOrNull()
+        username = stored?.offlineUsername ?: LauncherSettings.DEFAULT_OFFLINE_USERNAME
+        gameLanguage = stored?.gameLanguage.orEmpty()
         loadIdentities()
         scan()
         reloadJava(null)

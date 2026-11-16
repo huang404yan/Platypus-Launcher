@@ -99,7 +99,11 @@ class MainActivity : ComponentActivity() {
             // 配色从设置里读一次就定了：整棵界面都走 MaterialTheme.colorScheme，
             // 换主题只要换这一层，页面代码一行都不用知道主题存在。
             var theme by remember { mutableStateOf(LauncherTheme.AUTO) }
-            LaunchedEffect(Unit) { theme = readThemePreference() }
+            LaunchedEffect(Unit) {
+                theme = readThemePreference()
+                // 隔离默认值同样是进程级全局量，开程序时灌一次；设置页改完会就地覆写。
+                applyIsolationDefault()
+            }
             // PlatypusTheme 自己已经铺了一层 background 色的 Surface：这里再包一层
             // 默认取 surface 的 Surface 会把那层盖住（浅色那套 surface 是纯白，
             // background 才是色卡里那个 #F4F7F6），底色就变成白的了。
@@ -382,7 +386,7 @@ private fun InstancePage() {
                     JsonInstanceRepository(JsonInstanceRepository.defaultIndexFile(dir)).list()
                 }.getOrNull().orEmpty()
                 val scanned = InstanceScanner.scan(dir)
-                scanned.copy(instances = mergeInstances(registered, scanned.instances))
+                scanned.copy(instances = mergeInstances(registered, scanned.instances, scanned.libraryVersions))
             }
             result = r
             scanning = false

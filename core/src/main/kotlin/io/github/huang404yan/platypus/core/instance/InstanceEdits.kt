@@ -45,6 +45,9 @@ object InstanceEdits {
      *
      * @param isolated 版本隔离开关的新值；传 null 表示这次不改它（调用方没提供开关时
      *   必须传 null —— 传 false 会把每一个没渲染开关的端上的隔离悄悄关掉）
+     * @param isolatedFollowsDefault 这个实例的隔离是不是「跟随设置里的默认」；传 null
+     *   表示这次不改它。为 true 时 [isolated] 存的那份不作数（但照样写进去，
+     *   用户把「跟随」关掉的那一刻要有一个能回退的数）
      */
     fun fromInput(
         instance: Instance,
@@ -52,6 +55,7 @@ object InstanceEdits {
         jvmArgsText: String,
         javaPath: String,
         isolated: Boolean? = null,
+        isolatedFollowsDefault: Boolean? = null,
     ): InstanceEditResult {
         val parsed = memoryText.trim().toIntOrNull()
             ?: return InstanceEditResult.Invalid(BAD_MEMORY_MESSAGE)
@@ -62,6 +66,7 @@ object InstanceEdits {
                 memoryMb = clamped,
                 extraJvmArgs = jvmArgsOf(jvmArgsText),
                 isolated = isolated ?: instance.isolated,
+                isolatedFollowsDefault = isolatedFollowsDefault ?: instance.isolatedFollowsDefault,
                 registered = true,
             ),
             // 只比数值，不比文字：填 " 4096 " 与 "4096" 是一回事，不该提示「被改过」

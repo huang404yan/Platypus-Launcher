@@ -121,6 +121,66 @@ class InstanceScannerTest {
             assertEquals(LoaderKind.FORGE, forge.loader)
             assertEquals("47.2.0", forge.loaderVersion)
             assertEquals("1.20.1", forge.gameVersion)
+            assertTrue(result.libraryVersions.isEmpty())
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun foldsVanillaThatOnlyLoadersInherit() {
+        // 装 Forge 时安装器会把原版 1.20.1 目录建出来并让它当父版本。
+        // 那条原版不该当成第二个实例列出来，否则用户以为装重了。
+        val root = tempDir()
+        try {
+            writeVersion(root, "1.20.1", """{"id":"1.20.1","type":"release"}""")
+            writeVersion(
+                root,
+                "1.20.1-forge-47.2.0",
+                """{"id":"1.20.1-forge-47.2.0","inheritsFrom":"1.20.1","type":"release"}""",
+            )
+
+            val result = InstanceScanner.scan(root)
+            assertEquals(listOf("1.20.1-forge-47.2.0"), result.instances.map { it.id })
+            assertEquals(listOf("1.20.1"), result.libraryVersions)
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun foldsInheritedVanillaButKeepsOtherVersions() {
+        // 同一个目录里既有被继承的原版、也有没人继承的其他版本：
+        // 被继承的那条折叠，其余照常列出来。
+        val root = tempDir()
+        try {
+            writeVersion(root, "1.20.1", """{"id":"1.20.1","type":"release"}""")
+            writeVersion(
+                root,
+                "1.20.1-forge-47.2.0",
+                """{"id":"1.20.1-forge-47.2.0","inheritsFrom":"1.20.1","type":"release"}""",
+            )
+            writeVersion(root, "1.21.4", """{"id":"1.21.4","type":"release"}""")
+
+            val result = InstanceScanner.scan(root)
+            assertEquals(listOf("1.20.1-forge-47.2.0", "1.21.4"), result.instances.map { it.id })
+            // 1.20.1 仍被继承、且自己是纯原版 → 折叠
+            assertEquals(listOf("1.20.1"), result.libraryVersions)
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun keepsVanillaWhenNothingInheritsIt() {
+        val root = tempDir()
+        try {
+            writeVersion(root, "1.20.1", """{"id":"1.20.1","type":"release"}""")
+            writeVersion(root, "1.21.4", """{"id":"1.21.4","type":"release"}""")
+
+            val result = InstanceScanner.scan(root)
+            assertEquals(listOf("1.20.1", "1.21.4"), result.instances.map { it.id })
+            assertTrue(result.libraryVersions.isEmpty())
         } finally {
             root.deleteRecursively()
         }

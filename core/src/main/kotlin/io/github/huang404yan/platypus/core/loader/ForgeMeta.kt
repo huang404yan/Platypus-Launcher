@@ -31,6 +31,16 @@ object ForgeMeta {
     val PROMOTIONS_URL: String
         get() = Endpoints.join(Endpoints.forgeFiles(), "/net/minecraftforge/forge/promotions_slim.json")
 
+    /**
+     * Forge 自家 maven 的版本清单（约 200 KB）。结构是标准的 maven-metadata.xml，
+     * `<version>` 里每一条都是 `<原版号>-<forge 版本>`，一个原版版本下的**全部** Forge 版本都在。
+     *
+     * 为什么要拉它：promotions_slim.json 只有 recommended 与 latest 两个频道，
+     * 用户想退到一个旧一点的 Forge 时无处可选（2026-11-16 用户反馈「最新不能选版本」）。
+     */
+    val MAVEN_METADATA_URL: String
+        get() = Endpoints.join(Endpoints.forgeMaven(), "/net/minecraftforge/forge/maven-metadata.xml")
+
     /** Forge 生成的服务端/客户端入口类，用来判断装出来的版本 json 是否像样。 */
     const val MAIN_CLASS: String = "cpw.mods.bootstraplauncher.BootstrapLauncher"
 
@@ -95,12 +105,23 @@ sealed interface ForgeParse<out T> {
     fun reasonOrNull(): String? = (this as? Failure)?.reason
 }
 
-/** 一个可选的 Forge 版本；promotions 只给两个频道：recommended（推荐）与 latest（最新）。 */
+/**
+ * 一个可选的 Forge 版本。
+ *
+ * 三个标记互相独立：官方 promotions 给的 recommended / latest，以及从 maven-metadata
+ * 拉出来的全量条目（两者都没有就只是个历史版本，label 为空）。
+ */
 data class ForgeVersion(
     val version: String,
-    val recommended: Boolean,
+    val recommended: Boolean = false,
+    val latest: Boolean = false,
 ) {
-    val label: String get() = if (recommended) "推荐" else "最新"
+    val label: String
+        get() = when {
+            recommended -> "推荐"
+            latest -> "最新"
+            else -> ""
+        }
 }
 
 /**
@@ -132,10 +153,49 @@ fun parseForgePromotions(text: String, gameVersion: String): ForgeParse<List<For
     }
     val versions = buildList {
         if (recommended != null) add(ForgeVersion(recommended, recommended = true))
-        if (latest != null && latest != recommended) add(ForgeVersion(latest, recommended = false))
+        if (latest != null && latest != recommended) add(ForgeVersion(latest, latest = true))
     }
     return ForgeParse.Ok(versions)
 }
+
+/**
+ * 解析 maven-metadata.xml，列出某个原版版本下的全部 Forge 版本。
+ *
+ * 顺序：推荐在前，其次最新，其余按 maven 给的原顺序（官方是新的在前）。
+ * `promotions` 传进来是为了给推荐/最新打标记；不传就只有版本号，谁都不标。
+ *
+ * 只保留 `<原版号>-` 开头的条目：metadata 里混着所有原版版本的 Forge。
+ */
+fun parseForgeVersions(
+    text: String,
+    gameVersion: String,
+    promotions: List<ForgeVersion> = emptyList(),
+): ForgeParse<List<ForgeVersion>> {
+    if (text.isBlank()) return ForgeParse.Failure("Forge 版本清单为空：服务器返回了空响应")
+    val prefix = gameVersion + "-"
+    val all = VersionRegex.findAll(text)
+        .map { it.groupValues[1].trim() }
+        .filter { it.startsWith(prefix) && it.length > prefix.length }
+        .map { it.substring(prefix.length) }
+        .filter { it.isNotEmpty() }
+        .distinct()
+        .toList()
+    if (all.isEmpty()) {
+        return ForgeParse.Failure("Forge 没有为 " + gameVersion + " 发布版本（maven 清单里没有 " + prefix + " 开头的条目）")
+    }
+    val recommended = promotions.firstOrNull { it.recommended }?.version
+    val latest = promotions.firstOrNull { it.latest }?.version
+    val ordered = buildList {
+        recommended?.takeIf { all.contains(it) }?.let { add(ForgeVersion(it, recommended = true)) }
+        latest?.takeIf { it != recommended && all.contains(it) }?.let { add(ForgeVersion(it, latest = true)) }
+        for (version in all) {
+            if (version != recommended && version != latest) add(ForgeVersion(version))
+        }
+    }
+    return ForgeParse.Ok(ordered)
+}
+
+private val VersionRegex = Regex("""<version>([^<]+)</version>""")
 
 private fun describeForge(error: Throwable): String =
     error.message?.takeIf { it.isNotBlank() } ?: error::class.simpleName ?: "未知错误"

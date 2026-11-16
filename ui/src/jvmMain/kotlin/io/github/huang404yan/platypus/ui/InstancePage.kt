@@ -413,7 +413,7 @@ fun InstancePage(
     }
 
     val busy = phase is NewPhase.Running
-    val merged = mergeInstances(registered, result?.instances.orEmpty())
+    val merged = mergeInstances(registered, result?.instances.orEmpty(), result?.libraryVersions.orEmpty())
     val scannedOnly = merged.count { !it.registered }
 
     // 整页滚动：默认窗口里卡片一多，下面几张就被切在窗口外，用户得先最大化才看得全。

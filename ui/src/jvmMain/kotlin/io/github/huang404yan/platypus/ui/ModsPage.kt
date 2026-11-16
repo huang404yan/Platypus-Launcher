@@ -135,7 +135,7 @@ fun ModsPage(
             !scanned.isGameDirectory -> "这里不是游戏目录（缺少 versions/、libraries/ 或 assets/）"
             else -> ""
         }
-        val merged = mergeInstances(registered, scanned?.instances.orEmpty())
+        val merged = mergeInstances(registered, scanned?.instances.orEmpty(), scanned?.libraryVersions.orEmpty())
         instances = merged
         // 从详情页点过来时把那个实例选上。只在当前选择落空时才用 focus ——
         // 否则用户自己挑过之后每刷一次列表就被拽回去。

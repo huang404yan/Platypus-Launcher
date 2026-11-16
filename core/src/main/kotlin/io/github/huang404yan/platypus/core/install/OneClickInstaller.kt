@@ -291,6 +291,8 @@ object OneClickInstaller {
                             p.step.label + if (p.detail.isBlank()) "" else "：" + p.detail,
                             done = p.done,
                             total = p.total,
+                            // 安装器跑起来那段只有行数没有总量：别让界面画一个永远 0% 的实进度条
+                            totalReliable = p.total > 0L,
                         ),
                     )
                 }
@@ -333,6 +335,7 @@ object OneClickInstaller {
                             p.step.label + if (p.detail.isBlank()) "" else "：" + p.detail,
                             done = p.done,
                             total = p.total,
+                            totalReliable = p.total > 0L,
                         ),
                     )
                 }
@@ -374,6 +377,7 @@ object OneClickInstaller {
                             p.step.label + if (p.detail.isBlank()) "" else "：" + p.detail,
                             done = p.done,
                             total = p.total,
+                            totalReliable = p.total > 0L,
                         ),
                     )
                 }
@@ -422,6 +426,8 @@ object OneClickInstaller {
             javaPath = java.path,
             memoryMb = Instance.clampMemoryMb(memoryMb),
             registered = true,
+            // 新装的实例跟着设置里的「新建实例默认隔离」走，见 Instance.isolatedFollowsDefault。
+            isolatedFollowsDefault = true,
         )
         try {
             instances.save(instance)

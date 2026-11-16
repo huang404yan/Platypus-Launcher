@@ -85,7 +85,7 @@ fun main(args: Array<String>) {
         // ③ 目录扫描能看见同一个版本，合并后只有一条且是「已登记」
         val scan = InstanceScanner.scan(dir)
         check("scan sees version", scan.instances.any { it.id == "1.20.1" }, scan.instances.joinToString { it.id })
-        val merged = mergeInstances(listed, scan.instances)
+        val merged = mergeInstances(listed, scan.instances, scan.libraryVersions)
         // 扫描会看见 1.20.1 与 1.19.4 两个版本；1.20.1 是同一条被合并掉，所以是 2 条不是 3 条。
         check("merge dedup by directory", merged.size == 2, merged.joinToString { it.name + "/" + it.registered })
         val mergedTarget = merged.firstOrNull { it.id == "1.20.1" }

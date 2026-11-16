@@ -3,6 +3,7 @@ package io.github.huang404yan.platypus.core.instance
 import java.io.File
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 class InstanceLayoutTest {
@@ -102,6 +103,33 @@ class InstanceLayoutTest {
         assertEquals(File("/mc").absolutePath, InstanceLayouts.of(shared).gameDir.path)
         val own = instance("/mc/versions/1.20.1")
         assertEquals(File("/mc/versions/1.20.1").absolutePath, InstanceLayouts.of(own).gameDir.path)
+    }
+
+    @Test
+    fun `跟随默认的实例读进程级那一个`() {
+        val follower = instance("/mc/versions/1.20.1").copy(isolated = true, isolatedFollowsDefault = true)
+        try {
+            InstanceLayouts.defaultIsolated = false
+            assertEquals(File("/mc").absolutePath, InstanceLayouts.of(follower).gameDir.path)
+            assertFalse(InstanceLayouts.effectiveIsolated(follower))
+            InstanceLayouts.defaultIsolated = true
+            assertEquals(File("/mc/versions/1.20.1").absolutePath, InstanceLayouts.of(follower).gameDir.path)
+        } finally {
+            // 进程级单例，别的用例还要用它，改完必须摆回去
+            InstanceLayouts.defaultIsolated = true
+        }
+    }
+
+    @Test
+    fun `不跟随的实例不看默认值`() {
+        val own = instance("/mc/versions/1.20.1").copy(isolated = false, isolatedFollowsDefault = false)
+        try {
+            InstanceLayouts.defaultIsolated = true
+            assertFalse(InstanceLayouts.effectiveIsolated(own), "自己存的是关，就不能被默认值掰回去")
+            assertEquals(File("/mc").absolutePath, InstanceLayouts.of(own).gameDir.path)
+        } finally {
+            InstanceLayouts.defaultIsolated = true
+        }
     }
 
     @Test

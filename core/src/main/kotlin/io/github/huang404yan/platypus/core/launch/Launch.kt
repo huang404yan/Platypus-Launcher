@@ -19,6 +19,13 @@ data class LaunchRequest(
      * 哪个走哪条由 [LaunchArguments.directConnectMode] 决定。
      */
     val quickPlayServer: String = "",
+    /**
+     * 这次进游戏用哪个语言，写进 options.txt 的 `lang:` 那一行。
+     *
+     * 空串 = 不动游戏里已有的设置（保持玩家上次在游戏内选的那个）。
+     * 非空时取 [GameLanguage.resolve] 的结果，例如 `zh_cn`。
+     */
+    val gameLanguage: String = "",
 )
 
 sealed interface LaunchEvent {

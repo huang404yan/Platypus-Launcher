@@ -194,13 +194,24 @@ object NeoForgeInstaller {
             step = NeoForgeStep.RUN
             val logFile = File(installersDir, versionId + "-install.log")
             onProgress(NeoForgeProgress(step, "运行 NeoForge 安装器（约 2-5 分钟，日志：" + logFile.name + "）"))
+            // 与 Forge 同理：installer 不报总进度，数行数 + 秒数给个「还在动」的证据。
+            val runStartedAt = System.currentTimeMillis()
+            var runLines = 0
             val exitCode = runInstaller(
                 java = javaPath,
                 installer = installer,
                 gameRoot = gameRoot,
                 logFile = logFile,
             ) { line ->
-                onProgress(NeoForgeProgress(step, "安装器：" + line))
+                runLines += 1
+                val seconds = ((System.currentTimeMillis() - runStartedAt) / 1000L).toInt()
+                onProgress(
+                    NeoForgeProgress(
+                        step = NeoForgeStep.RUN,
+                        detail = "已跑 " + runLines + " 行 · 已用 " + seconds + " 秒 · " + line.take(160),
+                        done = runLines.toLong(),
+                    ),
+                )
             }
 
             step = NeoForgeStep.VERIFY

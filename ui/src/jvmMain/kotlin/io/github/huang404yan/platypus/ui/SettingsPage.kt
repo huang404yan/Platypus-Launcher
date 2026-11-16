@@ -5,6 +5,8 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
@@ -41,7 +43,10 @@ import io.github.huang404yan.platypus.core.Endpoints
 import io.github.huang404yan.platypus.core.download.DownloadPreference
 import io.github.huang404yan.platypus.core.download.DownloadSource
 import io.github.huang404yan.platypus.core.instance.Instance
+import io.github.huang404yan.platypus.core.instance.InstanceLayouts
 import io.github.huang404yan.platypus.core.instance.MemoryDefaults
+import io.github.huang404yan.platypus.core.launch.GameLanguage
+import io.github.huang404yan.platypus.core.launch.GameOptions
 import io.github.huang404yan.platypus.core.saves.AutoBackupPolicy
 import io.github.huang404yan.platypus.core.settings.LauncherSettings
 import io.github.huang404yan.platypus.core.theme.LauncherTheme
@@ -156,6 +161,10 @@ fun SettingsPage(
      */
     var memoryAuto by remember { mutableStateOf(true) }
     val autoMemoryMb = MemoryDefaults.autoMb(SystemMemory.totalMb)
+    /** 新建实例默认开不开隔离；真正读它的是 [InstanceLayouts.effectiveIsolated]，这里只是编辑那一格。 */
+    var defaultIsolation by remember { mutableStateOf(true) }
+    /** 进游戏用哪个语言；空串 = 跟随系统。 */
+    var gameLanguage by remember { mutableStateOf("") }
     var loaded by remember { mutableStateOf(false) }
     var loadedFrom by remember { mutableStateOf("") }
     var notice by remember { mutableStateOf("") }
@@ -188,6 +197,8 @@ fun SettingsPage(
         username = settings.offlineUsername
         gameRoot = settings.defaultGameRoot
         memoryAuto = settings.defaultMemoryAuto
+        defaultIsolation = settings.defaultIsolation
+        gameLanguage = settings.gameLanguage
         memoryText = MemoryDefaults.resolve(
             settings.defaultMemoryMb,
             settings.defaultMemoryAuto,
@@ -243,6 +254,8 @@ fun SettingsPage(
                         // 留着一个和实际生效值不一样的老数会让人以为设置没生效。
                         defaultMemoryMb = if (memoryAuto) autoMemoryMb else clamped,
                         defaultMemoryAuto = memoryAuto,
+                        defaultIsolation = defaultIsolation,
+                        gameLanguage = gameLanguage,
                         activeAccountUuid = activeAccountUuid,
                         microsoftClientId = microsoftClientId,
                         theme = theme.id,
@@ -265,6 +278,10 @@ fun SettingsPage(
                 ).toString()
                 autoBackupHours = stored.autoBackupHours.toString()
                 autoBackupKeep = stored.autoBackupKeep.toString()
+                defaultIsolation = stored.defaultIsolation
+                gameLanguage = stored.gameLanguage
+                // 进程级那份也要跟着变：否则回到列表页点启动，用的还是开程序时的老默认。
+                InstanceLayouts.defaultIsolated = stored.defaultIsolation
                 savedAt = stored.updatedAt
                 noticeIsError = false
                 notice = buildString {
@@ -331,6 +348,8 @@ fun SettingsPage(
                         autoBackupKeep = backupPolicyNow().keep,
                         curseForgeApiKey = curseForgeKey,
                         serverBase = serverBase,
+                        defaultIsolation = defaultIsolation,
+                        gameLanguage = gameLanguage,
                     ),
                 )
             }
@@ -376,6 +395,8 @@ fun SettingsPage(
                         autoBackupKeep = backupPolicyNow().keep,
                         curseForgeApiKey = curseForgeKey,
                         serverBase = serverBase,
+                        defaultIsolation = defaultIsolation,
+                        gameLanguage = gameLanguage,
                     ),
                 )
             }
@@ -414,6 +435,8 @@ fun SettingsPage(
                         autoBackupKeep = backupPolicyNow().keep,
                         curseForgeApiKey = curseForgeKey,
                         serverBase = serverBase,
+                        defaultIsolation = defaultIsolation,
+                        gameLanguage = gameLanguage,
                     ),
                 )
             }.onSuccess { stored ->
@@ -432,6 +455,8 @@ fun SettingsPage(
         gameRoot = ""
         memoryAuto = true
         memoryText = autoMemoryMb.toString()
+        defaultIsolation = true
+        gameLanguage = ""
         activeAccountUuid = ""
         // Client ID 刻意不跟着填回默认值：默认值是空串，而用户是从 Azure 门户抄来的，
         // 手边没有备份就找不回来了（那个 ID 在门户里还能看到，但他得再走一遍）。
@@ -473,6 +498,8 @@ fun SettingsPage(
                         autoBackupKeep = backupPolicyNow().keep,
                         curseForgeApiKey = cleaned,
                         serverBase = serverBase,
+                        defaultIsolation = defaultIsolation,
+                        gameLanguage = gameLanguage,
                     ),
                 )
             }.onSuccess {
@@ -522,6 +549,8 @@ fun SettingsPage(
                         autoBackupHours = backupPolicyNow().intervalHours,
                         autoBackupKeep = backupPolicyNow().keep,
                         curseForgeApiKey = curseForgeKey,
+                        defaultIsolation = defaultIsolation,
+                        gameLanguage = gameLanguage,
                     ),
                 )
             }.onSuccess {
@@ -559,6 +588,8 @@ fun SettingsPage(
                         autoBackupKeep = backupPolicyNow().keep,
                         curseForgeApiKey = curseForgeKey,
                         serverBase = serverBase,
+                        defaultIsolation = defaultIsolation,
+                        gameLanguage = gameLanguage,
                     ),
                 )
             }.onSuccess {
@@ -636,6 +667,10 @@ fun SettingsPage(
                     memoryAuto = memoryAuto,
                     autoMemoryMb = autoMemoryMb,
                     onMemoryAutoChange = { memoryAuto = it },
+                    defaultIsolation = defaultIsolation,
+                    onDefaultIsolationChange = { defaultIsolation = it },
+                    gameLanguage = gameLanguage,
+                    onGameLanguageChange = { gameLanguage = it },
                     loaded = loaded,
                 )
                 // Java 运行时就跟着启动项放：“这个版本要用哪个 Java”与
@@ -684,6 +719,7 @@ fun SettingsPage(
  * JVM 参数里加哪怕一条 —— 一个勾了没反应的勾比没有更糟。真要做优化参数，得先让启动链
  * 认它，再回来加界面。
  */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun LaunchTab(
     gameRoot: String,
@@ -693,6 +729,10 @@ private fun LaunchTab(
     memoryAuto: Boolean,
     autoMemoryMb: Int,
     onMemoryAutoChange: (Boolean) -> Unit,
+    defaultIsolation: Boolean,
+    onDefaultIsolationChange: (Boolean) -> Unit,
+    gameLanguage: String,
+    onGameLanguageChange: (String) -> Unit,
     loaded: Boolean,
 ) {
     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -767,6 +807,76 @@ private fun LaunchTab(
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+        }
+
+        SettingCard(
+            "新建实例默认隔离",
+            "刚装好的版本按这个来：开着，每一版自己一份 mods/、saves/、options.txt；" +
+                "关掉，所有版本共用游戏根目录那一份。单个版本要例外，去它的「版本设置 → 高级 → 版本隔离」" +
+                "把「跟随设置里的默认」关掉再改。",
+        ) {
+            Row(
+                Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text("默认开隔离", style = MaterialTheme.typography.bodyMedium)
+                    Text(
+                        if (defaultIsolation) {
+                            "新装的实例默认各管各的。已经装好的不受影响 —— 它们记着自己的值。"
+                        } else {
+                            "新装的实例默认共用游戏根目录。整体包（mods/ 平铺在根目录）用这种更省事。"
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Switch(
+                    checked = defaultIsolation,
+                    onCheckedChange = onDefaultIsolationChange,
+                    enabled = loaded,
+                )
+            }
+        }
+
+        SettingCard(
+            "游戏语言",
+            "进游戏时写进 " + GameOptions.LANG_KEY + ": 那一行（options.txt 在实例自己的目录里）。" +
+                "游戏本来就支持这些语言，只是没人愿意每次重装完再点一遍。",
+        ) {
+            Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    if (gameLanguage.isBlank()) {
+                        "现在跟随系统：本机会写成 " + GameLanguage.systemDefault() +
+                            "（" + GameLanguage.labelOf(GameLanguage.systemDefault()) + "）。"
+                    } else {
+                        "现在固定用 " + gameLanguage + "（" + GameLanguage.labelOf(gameLanguage) + "）。"
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                FlowRow(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    val options = listOf(GameLanguage.Choice("", "跟随系统")) + GameLanguage.CHOICES
+                    options.forEach { choice ->
+                        val picked = choice.id == gameLanguage
+                        if (picked) {
+                            Button(onClick = { onGameLanguageChange(choice.id) }, enabled = loaded) {
+                                Text(choice.label)
+                            }
+                        } else {
+                            OutlinedButton(
+                                onClick = { onGameLanguageChange(choice.id) },
+                                enabled = loaded,
+                            ) { Text(choice.label) }
+                        }
+                    }
+                }
+            }
         }
     }
 }

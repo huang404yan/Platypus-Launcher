@@ -2,6 +2,8 @@ package io.github.huang404yan.platypus.desktop.runtime
 
 import io.github.huang404yan.platypus.core.Brand
 import io.github.huang404yan.platypus.core.launch.GameHandle
+import io.github.huang404yan.platypus.core.launch.GameLanguage
+import io.github.huang404yan.platypus.core.launch.GameOptions
 import io.github.huang404yan.platypus.core.launch.GameRuntime
 import io.github.huang404yan.platypus.core.launch.LaunchDiagnosis
 import io.github.huang404yan.platypus.core.launch.LaunchEvent
@@ -58,6 +60,15 @@ class DesktopGameRuntime(
         if (plan.nativeArchives.isNotEmpty()) {
             NativesExtractor.extract(plan.nativeArchives, context.nativesDir).warnings
                 .forEach { message -> onEvent(LaunchEvent.LogLine(message)) }
+        }
+
+        // 语言写在进游戏之前：options.txt 是游戏自己读的，等它起来再改这一局不算数。
+        // 空串表示「不插手」，让玩家在游戏内选的保持原样。
+        if (request.gameLanguage.isNotBlank()) {
+            val wanted = GameLanguage.resolve(request.gameLanguage)
+            if (GameOptions.writeLang(plan.layout.gameDir, wanted)) {
+                onEvent(LaunchEvent.LogLine("游戏语言写成 " + wanted))
+            }
         }
 
         val command = plan.command

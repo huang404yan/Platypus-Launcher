@@ -38,6 +38,28 @@ data class LauncherSettings(
      */
     val defaultMemoryAuto: Boolean = true,
     /**
+     * 新建实例默认开不开版本隔离（2026-11-16 从「版本设置」里提出来的全局默认）。
+     *
+     * 隔离的意思见 [Instance.isolated]：开 = 这个版本自己一份存档/模组/配置，
+     * 关 = 与同目录下别的版本共用游戏根目录那一份。
+     *
+     * 为什么要有全局默认：绝大多数人从来不需要改它，而每个实例各有一个开关意味着
+     * 每装一个版本都要重新确认一次。关掉它的人通常是「整合包把 mods/ 平铺在根目录」，
+     * 那种人一次只能玩一个包，全局一个开关刚好。
+     *
+     * 已经单独设过的实例不受影响：它们自己存着 [Instance.isolated]，只有标了
+     * [Instance.isolatedFollowsDefault] 的才跟着这一项走。
+     */
+    val defaultIsolation: Boolean = true,
+    /**
+     * 进游戏用哪个语言；空串表示跟随系统（2026-11-16 加）。
+     *
+     * 存的是 Minecraft 的 options.txt 里 lang: 那一行的值（zh_cn、en_us…），
+     * 不是给人看的名字 —— 启动前原样写进文件，省一层映射就不会两边对不上。
+     * 空串时按系统语言猜，见 [io.github.huang404yan.platypus.core.launch.GameLanguage]。
+     */
+    val gameLanguage: String = "",
+    /**
      * 启动时用哪个正版账号的 UUID；空串表示走离线模式。
      *
      * 只记 UUID 不记令牌：令牌在 platypus/accounts.json 里，由账号仓库单独管。
@@ -143,6 +165,7 @@ data class LauncherSettings(
             offlineUsername = normalizeOfflineUsername(raw.offlineUsername),
             defaultGameRoot = raw.defaultGameRoot.trim().trim('"'),
             defaultMemoryMb = Instance.clampMemoryMb(raw.defaultMemoryMb),
+            gameLanguage = raw.gameLanguage.trim().lowercase(),
             activeAccountUuid = raw.activeAccountUuid.trim(),
             microsoftClientId = raw.microsoftClientId.trim().trim('"').trim(),
             theme = raw.theme.trim().lowercase(),

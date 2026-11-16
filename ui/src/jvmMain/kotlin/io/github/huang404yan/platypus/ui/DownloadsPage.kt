@@ -1,9 +1,16 @@
 package io.github.huang404yan.platypus.ui
 
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -12,7 +19,9 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -212,7 +221,12 @@ private fun FabricRow(
     )
 }
 
-/** Forge 那一行：官方只给 recommended 与 latest 两个频道，所以选项最多两条。 */
+/**
+ * Forge 那一行。
+ *
+ * 选项来自 maven-metadata.xml 的全量清单（几十到上百条），推荐与最新各带一个标签，
+ * 其余是历史版本 —— 用户想退到一个旧一点的 Forge 时有得选。
+ * promotions_slim.json 仍然要拉，它决定谁是「推荐」。 */
 @Composable
 private fun ForgeRow(
     enabled: Boolean,
@@ -236,7 +250,7 @@ private fun ForgeRow(
             error != null -> "Forge 版本拉取失败"
             versions.isEmpty() -> "这个版本没有 Forge"
             selected.isBlank() -> "选一个 Forge 版本"
-            else -> selected + "（官方安装器，约 3 分钟）"
+            else -> selected + "（" + versions.size + " 个可选 · 官方安装器约 3 分钟）"
         },
         options = versions.map {
             LoaderOption(version = it.version, tag = it.label, selected = it.version == selected)
@@ -250,7 +264,7 @@ private fun ForgeRow(
 /**
  * NeoForge 那一行。
  *
- * 与 Forge 长得一样，但选项来源不同：Forge 只有 recommended / latest 两条「频道」，
+ * 与 Forge 长得一样，但选项来源不同：NeoForge 走自己的 maven-metadata.xml，
  * 而 NeoForge 是 maven 里一长串真实版本号（21.1.265 这种），每个版本都能选。
  * 数量可能上千，所以只列当前游戏版本能用的那几十个。
  */
@@ -513,7 +527,7 @@ fun DownloadsPage(
         }
     }
 
-    /** 拉某个原版版本的 Forge 推荐版本；失败只记原因，不弹错。 */
+    /** 拉某个原版版本的全部 Forge 版本（推荐/最新带标签）；失败只记原因，不弹错。 */
     suspend fun refreshForgeVersions(gameVersion: String) {
         if (gameVersion.isBlank()) {
             forgeVersions = emptyList()
@@ -526,7 +540,10 @@ fun DownloadsPage(
             withContext(Dispatchers.IO) {
                 val versions = ForgeInstaller.listVersions(gameVersion)
                 forgeVersions = versions
-                val preferred = versions.firstOrNull { it.recommended } ?: versions.firstOrNull()
+                // 默认落在推荐版；没有推荐的版本（新版本刚发时常见）才用最新。
+                val preferred = versions.firstOrNull { it.recommended }
+                    ?: versions.firstOrNull { it.latest }
+                    ?: versions.firstOrNull()
                 forgeVersion = preferred?.version.orEmpty()
             }
         } catch (e: CancellationException) {
@@ -580,10 +597,11 @@ fun DownloadsPage(
         if (versionText.isBlank()) return@LaunchedEffect
         delay(400)
         refreshLoaders(versionText.trim())
-        // Forge 的 promotions_slim.json 只有 4 KB，拉一次就有全部可选项；
-        // 失败也不影响只装原版，所以和 Fabric 一样只记原因不弹错。
+        // Forge 要拉两个文件：promotions_slim.json（4 KB，定推荐/最新）与
+        // maven-metadata.xml（约 200 KB，定全量可选版本）。失败也不影响只装原版，
+        // 所以和 Fabric 一样只记原因不弹错。
         refreshForgeVersions(versionText.trim())
-        // NeoForge 的 maven-metadata.xml 有 68 KB（1856 个版本），拉一次也只要几百毫秒。
+        // NeoForge 的 maven-metadata.xml 有几十 KB（上千个版本），拉一次只要几百毫秒。
         refreshNeoForgeVersions(versionText.trim())
         // Quilt 的 loader 清单与 Fabric 一样只几 KB，顺手一起拉。
         refreshQuiltLoaders(versionText.trim())
@@ -926,7 +944,7 @@ private fun InstallStatusBanner(
 ) {
     val (text, isError, fraction) = when (phase) {
         is InstallPhase.Running -> {
-            val detail = if (progress != null && progress.total > 0L) {
+            val detail = if (progress != null && progress.detail.isNotBlank()) {
                 " · " + formatProgressDetail(progress)
             } else {
                 ""
@@ -936,6 +954,8 @@ private fun InstallStatusBanner(
             } else {
                 ""
             }
+            // 总量未知（例如跑 Forge 安装器：只知道已经多少行、不知道还要几行）时
+            // fraction 为 null，下面会画一条来回跑的不确定进度条，总比一片静止强。
             Triple(
                 "正在" + currentStep.label + detail + speed + " · 已用 " + formatDuration(elapsedMs),
                 false,
@@ -991,6 +1011,8 @@ private fun InstallStatusBanner(
             }
             if (fraction != null) {
                 ProgressBar(fraction)
+            } else if (!isError) {
+                IndeterminateBar()
             }
             Text(
                 text,
@@ -1055,6 +1077,43 @@ private fun formatProgressDetail(step: StepProgress): String = when (step.step) 
     }
     InstallStep.JAVA_INSTALL -> "Java 运行时下载 " + (step.fraction * 100f).toInt() + "%"
     else -> step.detail
+}
+
+/**
+ * 总量未知时的「不确定进度条」：一段高光在底槽里匀速来回跑。
+ *
+ * 用途是跑 Forge / NeoForge 安装器那种阶段——它是外部 java 子进程，只吐日志不报
+ * 总进度，只能证明「还在动」。没有这条，界面几十分钟一动不动，用户以为卡死了。
+ */
+@Composable
+private fun IndeterminateBar() {
+    val transition = rememberInfiniteTransition(label = "indeterminate")
+    val position by transition.animateFloat(
+        initialValue = 0f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 1200, easing = LinearEasing),
+            repeatMode = RepeatMode.Reverse,
+        ),
+        label = "indeterminatePosition",
+    )
+    BoxWithConstraints(
+        Modifier
+            .fillMaxWidth()
+            .height(8.dp)
+            .background(MaterialTheme.colorScheme.surfaceVariant, MaterialTheme.shapes.small),
+    ) {
+        // 高光宽 35%，起点在 [0, 65%] 之间来回 —— 用实测宽度算，别写死 dp。
+        val highlight = maxWidth * 0.35f
+        val travel = maxWidth - highlight
+        Box(
+            Modifier
+                .width(highlight)
+                .fillMaxHeight()
+                .offset(x = travel * position)
+                .background(MaterialTheme.colorScheme.primary, MaterialTheme.shapes.small),
+        )
+    }
 }
 
 @Composable
