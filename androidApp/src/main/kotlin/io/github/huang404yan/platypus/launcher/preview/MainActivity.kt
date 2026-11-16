@@ -85,6 +85,19 @@ import kotlinx.coroutines.withContext
 import java.io.File
 
 class MainActivity : ComponentActivity() {
+    /**
+     * 从系统设置页开完「所有文件访问权限」回来，走到这里。
+     *
+     * 权限是在别的应用（系统设置）里改的，Compose 这层收不到任何回调，所以必须由
+     * Activity 的生命周期转发一下：通知完各页面会用 [rememberFileAccessState] 重查一次，
+     * 「去授权」才会自己变成「已授权」。不加这一步，用户开完权限回来看到的还是没授权，
+     * 得再点一次按钮才知道其实已经生效了。
+     */
+    override fun onResume() {
+        super.onResume()
+        FileAccessGate.notifyResumed()
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
@@ -367,7 +380,7 @@ private fun SideBar(
 private fun InstancePage() {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    var granted by remember { mutableStateOf(hasFileAccess(context)) }
+    var granted by rememberFileAccessState(context)
     var root by remember { mutableStateOf(defaultGameRoot()) }
     var result by remember { mutableStateOf<ScanResult?>(null) }
     var scanning by remember { mutableStateOf(false) }

@@ -75,7 +75,7 @@ internal fun PacksPage() {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
 
-    var granted by remember { mutableStateOf(hasFileAccess(context)) }
+    var granted by rememberFileAccessState(context)
     var root by remember { mutableStateOf(defaultGameRoot()) }
     var instances by remember { mutableStateOf<List<Instance>>(emptyList()) }
     var selectedKey by remember { mutableStateOf("") }

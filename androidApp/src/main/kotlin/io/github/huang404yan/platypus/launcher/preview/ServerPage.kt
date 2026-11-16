@@ -76,7 +76,7 @@ internal fun ServerPage() {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
 
-    var granted by remember { mutableStateOf(hasFileAccess(context)) }
+    var granted by rememberFileAccessState(context)
     var root by remember { mutableStateOf(defaultGameRoot()) }
     var dirText by remember { mutableStateOf(defaultServerDir(root)) }
     var versionText by remember { mutableStateOf("") }

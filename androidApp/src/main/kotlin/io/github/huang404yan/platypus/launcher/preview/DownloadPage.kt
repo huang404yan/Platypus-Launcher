@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
@@ -40,6 +41,9 @@ import androidx.compose.ui.unit.dp
 import io.github.huang404yan.platypus.core.download.DownloadItem
 import io.github.huang404yan.platypus.core.download.DownloadProgress
 import io.github.huang404yan.platypus.core.download.HttpDownloader
+import io.github.huang404yan.platypus.core.instance.LoaderKind
+import io.github.huang404yan.platypus.core.install.FabricInstaller
+import io.github.huang404yan.platypus.core.install.QuiltInstaller
 import io.github.huang404yan.platypus.core.version.DownloadPlanner
 import io.github.huang404yan.platypus.core.version.ManifestVersion
 import io.github.huang404yan.platypus.core.version.VersionManifest
@@ -84,20 +88,59 @@ internal sealed interface Phase {
     data object Idle : Phase
     data class Preparing(val stage: String) : Phase
     data class Downloading(val progress: DownloadProgress) : Phase
+
+    /**
+     * 原版文件已经就位，正在往上叠加载器。
+     *
+     * 单独一个阶段而不是塞进 [Preparing]：加载器要下它自己的几个库，那是真进度，
+     * 混进「准备中」会变成一段没有百分比的黑箱。fraction 为空表示这一步只能说出在干什么。
+     */
+    data class Loader(val label: String, val detail: String, val fraction: Float?) : Phase
     data object Cancelled : Phase
-    data class Done(val files: Int, val bytes: Long) : Phase
+
+    /**
+     * 下载完成。[loaderLabel] 是叠上去的加载器（"Fabric 0.16.14" 这样），
+     * 装的是原版就留空 —— 完成提示要如实说清这一版最后是什么形态。
+     */
+    data class Done(val files: Int, val bytes: Long, val loaderLabel: String = "") : Phase
+
     data class Failed(val message: String, val details: List<String>) : Phase
+}
+
+/**
+ * 这一版要叠哪个加载器。
+ *
+ * 手机上只有 [LoaderKind.VANILLA]、[LoaderKind.FABRIC]、[LoaderKind.QUILT] 三种可能：
+ * Forge 与 NeoForge 的安装器是个 jar，得先起一个 java 子进程去跑它，手机上既没有现成的
+ * java 可执行文件也没有起子进程的余地（同样的话在 InstallJobs.kt 的服务端注释里也写着）。
+ * 所以这两个不在选项里，界面上说明了原因，而不是给一个点了就失败的下拉框。
+ *
+ * [version] 留空表示「装最新稳定版」，与 core 里 FabricInstaller / QuiltInstaller 的约定一致。
+ */
+internal data class LoaderPick(
+    val kind: LoaderKind = LoaderKind.VANILLA,
+    val version: String = "",
+) {
+    val isVanilla: Boolean get() = kind == LoaderKind.VANILLA
 }
 
 @Composable
 internal fun DownloadPage() {
     val context = LocalContext.current
 
-    var granted by remember { mutableStateOf(hasFileAccess(context)) }
+    var granted by rememberFileAccessState(context)
     var root by remember { mutableStateOf(defaultGameRoot()) }
     var filter by remember { mutableStateOf("") }
     var catalog by remember { mutableStateOf<CatalogState>(CatalogState.Loading) }
     var selected by remember { mutableStateOf<String?>(null) }
+
+    // 加载器：默认原版。换成 Fabric / Quilt 之后要拉它们的 loader 版本清单，
+    // 拉不到（没网 / 元数据站挂了）就只留「最新稳定版」这一条，别把安装堵住。
+    var loaderKind by remember { mutableStateOf(LoaderKind.VANILLA) }
+    var loaderVersions by remember { mutableStateOf<List<String>>(emptyList()) }
+    var loaderVersion by remember { mutableStateOf("") }
+    var loaderHint by remember { mutableStateOf("") }
+    var loadingLoaders by remember { mutableStateOf(false) }
 
     // 进度由进程级 DownloadJobRunner 持有：切走再回来进度还在，退出应用才会中断。
     val phase by DownloadJobRunner.phase.collectAsState()
@@ -114,12 +157,44 @@ internal fun DownloadPage() {
     val chosen = releases.firstOrNull { it.id == selected }
     val busy = phase is Phase.Preparing || phase is Phase.Downloading
 
+    // 换加载器或换游戏版本都要重拉 loader 清单：Fabric 的每个原版版本各有自己的一批
+    // loader，拿 1.21 的 loader 去装 1.16.5 是装不上的。
+    LaunchedEffect(loaderKind, chosen?.id) {
+        loaderVersion = ""
+        loaderVersions = emptyList()
+        loaderHint = ""
+        val version = chosen?.id ?: return@LaunchedEffect
+        if (loaderKind == LoaderKind.VANILLA) return@LaunchedEffect
+        loadingLoaders = true
+        val result = withContext(Dispatchers.IO) {
+            runCatching {
+                when (loaderKind) {
+                    LoaderKind.FABRIC -> FabricInstaller.listLoaders(version).map { it.version to it.stable }
+                    else -> QuiltInstaller.listLoaders(version).map { it.version to true }
+                }
+            }
+        }
+        loadingLoaders = false
+        result.onSuccess { list ->
+            loaderVersions = list.map { it.first }
+            // 默认落在第一个稳定版；一个 stable 都没有（新版本刚发时常见）就用第一条。
+            loaderVersion = (list.firstOrNull { it.second } ?: list.firstOrNull())?.first.orEmpty()
+            if (loaderVersions.isEmpty()) loaderHint = "这个版本没有可用的 " + loaderLabelOf(loaderKind) + "。"
+        }.onFailure {
+            loaderHint = "拉 " + loaderLabelOf(loaderKind) + " 版本清单失败：" + describe(it) + "。装的时候会退回最新稳定版。"
+        }
+    }
+
     fun startDownload() {
         val target = chosen ?: return
         if (root.isBlank()) return
         granted = hasFileAccess(context)
         if (!granted) return
-        DownloadJobRunner.start(target, File(root.trim()))
+        DownloadJobRunner.start(
+            target = target,
+            gameDir = File(root.trim()),
+            pick = LoaderPick(loaderKind, loaderVersion.trim()),
+        )
     }
 
     Row(
@@ -239,8 +314,25 @@ internal fun DownloadPage() {
                         )
                     }
                 }
+                LoaderPicker(
+                    kind = loaderKind,
+                    versions = loaderVersions,
+                    version = loaderVersion,
+                    loading = loadingLoaders,
+                    hint = loaderHint,
+                    enabled = !busy,
+                    onKind = { loaderKind = it },
+                    onVersion = { loaderVersion = it },
+                )
+
                 Button(onClick = { startDownload() }, enabled = !busy && granted) {
-                    Text(if (busy) "进行中…" else "下载到上面这个目录")
+                    Text(
+                        when {
+                            busy -> "进行中…"
+                            loaderKind == LoaderKind.VANILLA -> "下载原版到上面这个目录"
+                            else -> "下载 " + chosen.id + " + " + loaderLabelOf(loaderKind)
+                        },
+                    )
                 }
                 if (busy) {
                     OutlinedButton(onClick = { DownloadJobRunner.cancel() }) { Text("取消") }
@@ -253,6 +345,86 @@ internal fun DownloadPage() {
             PhaseView(phase)
         }
     }
+}
+
+/**
+ * 加载器选择：原版 / Fabric / Quilt 三选一，选了非原版再给一个具体版本的横向列表。
+ *
+ * Forge 与 NeoForge 为什么不在里面，写在 [LoaderPick] 的注释里 —— 一句话是手机上跑不了
+ * 它们那个 java 安装器。这里把原因写在界面上，比给一个点了必然失败的下拉框好。
+ */
+@Composable
+private fun LoaderPicker(
+    kind: LoaderKind,
+    versions: List<String>,
+    version: String,
+    loading: Boolean,
+    hint: String,
+    enabled: Boolean,
+    onKind: (LoaderKind) -> Unit,
+    onVersion: (String) -> Unit,
+) {
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text("加载器", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+            Text(
+                "原版 / Fabric / Quilt；Forge 与 NeoForge 要跑安装器进程，手机上装不了。",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            listOf(LoaderKind.VANILLA, LoaderKind.FABRIC, LoaderKind.QUILT).forEach { option ->
+                val picked = option == kind
+                if (picked) {
+                    Button(onClick = {}, enabled = false) { Text(loaderLabelOf(option)) }
+                } else {
+                    OutlinedButton(onClick = { if (enabled) onKind(option) }, enabled = enabled) {
+                        Text(loaderLabelOf(option))
+                    }
+                }
+            }
+        }
+        when {
+            kind == LoaderKind.VANILLA -> Text(
+                "只装原版文件，不加任何加载器。",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            loading -> Text("读取 " + loaderLabelOf(kind) + " 版本清单…", style = MaterialTheme.typography.bodySmall)
+            versions.isEmpty() -> Text(
+                hint.ifBlank { "没有可选的版本，装的时候会取最新稳定版。" },
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            else -> {
+                Text(
+                    "共 " + versions.size + " 个版本，当前 " + version.ifBlank { "最新稳定版" },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    items(versions) { item ->
+                        val picked = item == version
+                        if (picked) {
+                            Button(onClick = {}, enabled = false) { Text(item, style = MaterialTheme.typography.labelSmall) }
+                        } else {
+                            OutlinedButton(onClick = { if (enabled) onVersion(item) }, enabled = enabled) {
+                                Text(item, style = MaterialTheme.typography.labelSmall)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** 界面上给加载器用的名字。null 与 OTHER 都按原版处理，不在这里制造第四种可能。 */
+private fun loaderLabelOf(kind: LoaderKind): String = when (kind) {
+    LoaderKind.FABRIC -> "Fabric"
+    LoaderKind.QUILT -> "Quilt"
+    else -> "原版"
 }
 
 @Composable
@@ -326,10 +498,31 @@ private fun PhaseView(phase: Phase) {
         }
         is Phase.Done -> {
             Text(
-                "完成：${phase.files} 个文件，${formatBytes(phase.bytes)}",
+                "完成：" + phase.files + " 个文件，" + formatBytes(phase.bytes),
                 style = MaterialTheme.typography.titleSmall,
                 fontWeight = FontWeight.SemiBold,
                 color = MaterialTheme.colorScheme.primary,
+            )
+            Text(
+                if (phase.loaderLabel.isBlank()) {
+                    "装的是原版。要加加载器就在上面选 Fabric 或 Quilt 再下一次（已下过的文件会跳过）。"
+                } else {
+                    "已经叠上 " + phase.loaderLabel + "，它的版本目录是原版加一层加载器，" +
+                        "「实例」页会自动扫成一条。"
+                },
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        is Phase.Loader -> {
+            if (phase.fraction != null) {
+                LinearProgressIndicator(progress = { phase.fraction }, modifier = Modifier.fillMaxWidth())
+            } else {
+                LinearProgressIndicator(Modifier.fillMaxWidth())
+            }
+            Text(
+                "装 " + phase.label + "：" + phase.detail,
+                style = MaterialTheme.typography.bodySmall,
             )
         }
         is Phase.Failed -> {
@@ -408,11 +601,14 @@ internal object DownloadJobRunner {
     private var job: Job? = null
 
     /** 同一时间只跑一个下载任务；正在跑时再点按钮直接忽略。 */
-    fun start(target: ManifestVersion, gameDir: File) {
+    fun start(target: ManifestVersion, gameDir: File, pick: LoaderPick = LoaderPick()) {
         val current = _phase.value
-        if (current is Phase.Preparing || current is Phase.Downloading) return
-        job = scope.launch { run(target, gameDir) }
+        if (busy(current)) return
+        job = scope.launch { run(target, gameDir, pick) }
     }
+
+    private fun busy(current: Phase): Boolean =
+        current is Phase.Preparing || current is Phase.Downloading || current is Phase.Loader
 
     /**
      * 取消当前任务。已写好的文件留在盘上（次次下载会按 sha1 跳过），
@@ -420,7 +616,7 @@ internal object DownloadJobRunner {
      */
     fun cancel() {
         val current = _phase.value
-        if (current !is Phase.Preparing && current !is Phase.Downloading) return
+        if (!busy(current)) return
         job?.cancel()
         job = null
         _phase.value = Phase.Cancelled
@@ -428,11 +624,65 @@ internal object DownloadJobRunner {
 
     fun reset() {
         val current = _phase.value
-        if (current is Phase.Preparing || current is Phase.Downloading) return
+        if (busy(current)) return
         _phase.value = Phase.Idle
     }
 
-    private suspend fun run(target: ManifestVersion, gameDir: File) {
+    /**
+     * 往已经铺好原版文件的目录里叠加载器，返回界面上显示的名字（"Fabric 0.16.14"）。
+     *
+     * 返回 null 表示已经失败：失败状态由这里直接写进 [_phase]，调用方只能收摊。
+     * 成功时不额外登记实例 —— 安卓端实例列表一贯通 [InstanceScanner] 扫盘得出，
+     * 加载器的 version json 落在 versions/<id>/ 下，扫出来自然带 loader 标识。
+     */
+    private suspend fun installLoader(gameDir: File, vanillaVersion: String, pick: LoaderPick): String? {
+        val label = loaderLabelOf(pick.kind)
+        val wanted = pick.version.ifBlank { "最新稳定版" }
+        _phase.value = Phase.Loader(label, "准备安装 " + wanted, null)
+        return try {
+            when (pick.kind) {
+                LoaderKind.FABRIC -> {
+                    val result = FabricInstaller.install(
+                        gameRoot = gameDir,
+                        vanillaVersion = vanillaVersion,
+                        loaderVersion = pick.version.ifBlank { null },
+                    ) { progress ->
+                        _phase.value = Phase.Loader(
+                            label = label,
+                            detail = progress.step.label + " · " + progress.detail,
+                            fraction = if (progress.total > 0L) progress.fraction else null,
+                        )
+                    }
+                    label + " " + result.loaderVersion
+                }
+                LoaderKind.QUILT -> {
+                    val result = QuiltInstaller.install(
+                        gameRoot = gameDir,
+                        vanillaVersion = vanillaVersion,
+                        loaderVersion = pick.version.ifBlank { null },
+                    ) { progress ->
+                        _phase.value = Phase.Loader(
+                            label = label,
+                            detail = progress.step.label + " · " + progress.detail,
+                            fraction = if (progress.total > 0L) progress.fraction else null,
+                        )
+                    }
+                    label + " " + result.loaderVersion
+                }
+                else -> ""
+            }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            _phase.value = Phase.Failed(
+                "原版下好了，但 " + label + " 没装上：" + describe(e),
+                listOf("文件都已经在盘上，再点一次会跳过已下完的部分，只补加载器。"),
+            )
+            null
+        }
+    }
+
+    private suspend fun run(target: ManifestVersion, gameDir: File, pick: LoaderPick) {
         _phase.value = Phase.Preparing("获取版本信息…")
         try {
             val versionText = withContext(Dispatchers.IO) { fetchText(target.url) }
@@ -485,14 +735,22 @@ internal object DownloadJobRunner {
             val report = downloader.download(items) { progress ->
                 _phase.value = Phase.Downloading(progress)
             }
-            _phase.value = if (report.ok) {
-                Phase.Done(items.size, totalBytes)
-            } else {
-                Phase.Failed(
-                    "有 ${report.failures.size} 个文件下载失败",
-                    report.failures.take(6).map { "${File(it.item.target).name}：${it.reason}" },
+            if (!report.ok) {
+                _phase.value = Phase.Failed(
+                    "有 " + report.failures.size + " 个文件下载失败",
+                    report.failures.take(6).map { File(it.item.target).name + "：" + it.reason },
                 )
+                return
             }
+
+            // 原版文件齐了。要叠加载器就接着装 —— 它的 profile json 是 inheritsFrom 这一版的，
+            // 所以顺序不能反：先有原版，装出来的实例才起得来。
+            val loaderLabel = if (pick.isVanilla || version.id.isBlank()) {
+                ""
+            } else {
+                installLoader(gameDir, version.id, pick) ?: return
+            }
+            _phase.value = Phase.Done(items.size, totalBytes, loaderLabel)
         } catch (e: CancellationException) {
             // 用户主动取消：不当作失败，取消按钮已经把状态置成 Cancelled。
             throw e
