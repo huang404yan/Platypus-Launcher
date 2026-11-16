@@ -10,6 +10,7 @@ import io.github.huang404yan.platypus.core.runtime.javaExecutableInRuntime
 import io.github.huang404yan.platypus.core.runtime.runtimePlatform
 import io.github.huang404yan.platypus.core.runtime.JavaRuntimeUnavailableException
 import io.github.huang404yan.platypus.core.runtime.JavaSearchEnv
+import io.github.huang404yan.platypus.core.runtime.ManagedJava
 import io.github.huang404yan.platypus.core.runtime.findExactMajor
 import java.io.ByteArrayOutputStream
 import java.io.File
@@ -33,7 +34,8 @@ import kotlinx.coroutines.withContext
  * 都只是让这个候选从结果里消失，不抛异常、不影响其它候选。
  *
  * [ensure] 在本机找不到精确主版本时会从 Mojang 官方 runtime 清单下载一份到
- * `<gameRoot>/runtime/<component>`（见 [MojangJavaRuntimeInstaller]），装好即用。
+ * `<launcherDir>/java/<component>`（见 [MojangJavaRuntimeInstaller]），装好即用。
+ * 没有启动器目录（无头冒烟、单测）时退回旧的 `<gameRoot>/runtime`。
  */
 class DesktopJavaRuntimeService(
     /** 额外的候选（界面上用户手动指定的 java.exe 或 JDK 根目录）。 */
@@ -48,12 +50,39 @@ class DesktopJavaRuntimeService(
      * 「自动下载」这条代码路径，测出来的就是假的通过。
      */
     private val scanGlobalLaunchers: Boolean = true,
+    /**
+     * 启动器自己的目录（安装版 = 安装目录，便携版 = 解压出来的文件夹）。
+     *
+     * 托管运行时落在这里而不是游戏目录：Java 是启动器的东西，换个游戏目录不该弄丢，
+     * 卸载启动器也不该把一份 150 MB 的 JRE 留在用户盘上。为 null 时退回 [gameRoot]，
+     * 保持无头冒烟与单测的旧行为。
+     */
+    val launcherDir: File? = null,
 ) : JavaRuntimeService {
 
     private val windows: Boolean = System.getProperty("os.name").orEmpty().lowercase().contains("win")
 
     /** Mojang 运行时清单里的平台键（windows-x64 之类），[catalog] 与下载共用。 */
     private val platform: String = runtimePlatform()
+
+    /**
+     * 托管运行时的下载与「已装」判定落在哪个根目录。
+     *
+     * 优先用启动器目录（[launcherDir]），没有才退回游戏目录。这个根只影响**新下载**与
+     * 「这个组件装没装」，探测另走 [runtimeRoots]（那边两个根都扫，老用户的旧版本也认得出）。
+     */
+    private val installRoot: File? get() = launcherDir ?: gameRoot
+
+    /**
+     * 认作「托管」的所有根，删运行时与判断能不能删都用它。
+     *
+     * 两代位置都要认：老版本下在 `<游戏目录>/runtime`（[ManagedJava.legacyRootOf]），
+     * 新版下在 `<启动器目录>/java`（[ManagedJava.rootOf]）。升级上来的用户两种都在盘上，
+     * 漏一个就会退化成「删不掉」。
+     */
+    private val runtimeRoots: List<File>
+        get() = listOfNotNull(launcherDir?.let(ManagedJava::rootOf), gameRoot?.let(ManagedJava::legacyRootOf))
+            .distinctBy { it.absoluteFile.normalize().path.lowercase() }
 
     override suspend fun detect(): List<JavaRuntime> = withContext(Dispatchers.IO) {
         val candidates = JavaCandidatePaths.candidates(
@@ -78,12 +107,20 @@ class DesktopJavaRuntimeService(
 
         // 同一个 JDK 常常三条路一起命中（JAVA_HOME、PATH 里的 javapath 垫片、Program Files），
         // 按 java.home 去重，拿不到 java.home 时退回可执行文件的上级上级目录。
+        //
+        // 顺带把「落在托管根里的」标成 managed：probe 只看得到路径，不知道这份是谁装的。
+        // 不标的话，重启一次之后界面上那份就不叫「启动器下载的」了，删除按钮也跟着消失 ——
+        // 用户刚下回来的 150 MB 从此删不掉，只能手动去文件管理器里翻。
+        val roots = runtimeRoots
         val seen = LinkedHashMap<String, JavaRuntime>()
         for (item in probed.filterNotNull()) {
             val key = JavaCandidatePaths.normalizeKey(
                 item.home ?: File(item.runtime.path).parentFile?.parentFile?.path ?: item.runtime.path,
             )
-            if (!seen.containsKey(key)) seen[key] = item.runtime
+            if (!seen.containsKey(key)) {
+                val ours = ManagedJava.homeIn(item.runtime.path, roots) != null
+                seen[key] = if (ours && !item.runtime.managed) item.runtime.copy(managed = true) else item.runtime
+            }
         }
         seen.values.sortedWith(
             compareByDescending<JavaRuntime> { it.majorVersion }
@@ -117,11 +154,11 @@ class DesktopJavaRuntimeService(
         }
         onProgress(0.15f)
 
-        val root = gameRoot ?: throw JavaRuntimeUnavailableException(
-            "本机没有 Java " + major + "，且没有配置游戏目录，无法下载托管运行时；" +
+        val root = installRoot ?: throw JavaRuntimeUnavailableException(
+            "本机没有 Java " + major + "，且不知道启动器装在哪儿，无法下载托管运行时；" +
                 "请手动指定 java.exe 或通过 -Dplatypus.gameDir 指定目录。",
         )
-        val installer = MojangJavaRuntimeInstaller(root)
+        val installer = MojangJavaRuntimeInstaller(root, runtimeRootOverride = ManagedJava.rootOf(root))
         val java = try {
             installer.ensure(major, component) { fraction -> onProgress(0.15f + 0.85f * fraction) }
         } catch (e: JavaRuntimeInstallException) {
@@ -143,7 +180,7 @@ class DesktopJavaRuntimeService(
     /**
      * 官方清单里这台机器能装的运行时，带「已装」标记。
      *
-     * 「已装」先看托管目录（<gameRoot>/runtime/<component>/bin/java.exe），再看本机探测到的
+     * 「已装」先看托管目录（<启动器目录>/java/<component>/bin/java.exe），再看本机探测到的
      * 同主版本 Java —— 用户机器上已经有一份能用的 Java 17 时，列表里那一行就该显示「已装」，
      * 而不是让他再下一份 150 MB 的。两者都没有才显示「下载」。
      *
@@ -152,24 +189,24 @@ class DesktopJavaRuntimeService(
      */
     override suspend fun catalog(): List<JavaRuntimeOffer> {
         lastCatalogError = null
-        val root = gameRoot
+        val root = installRoot
         if (root == null) {
-            lastCatalogError = "没有配置游戏目录，不知道把 Java 下到哪儿。先去设置页填一个。"
+            lastCatalogError = "不知道启动器装在哪儿，也不知道游戏目录，没法决定 Java 下到哪儿。"
             return emptyList()
         }
         val index = try {
-            MojangJavaRuntimeInstaller(root).loadIndex()
+            MojangJavaRuntimeInstaller(root, runtimeRootOverride = ManagedJava.rootOf(root)).loadIndex()
         } catch (e: JavaRuntimeInstallException) {
             lastCatalogError = e.message
             return emptyList()
         }
         val detected = detect()
         val offers = buildRuntimeOffers(index, platform) { component ->
-            val managed = javaExecutableInRuntime(File(File(root, "runtime"), component), platform)
-            when {
-                managed.isFile -> managed.path
-                else -> null
-            }
+            // 两代托管根都算「已装」：不能因为换过位置就把下过的 150 MB 再下一遍。
+            val managed = runtimeRoots.asSequence()
+                .map { javaExecutableInRuntime(File(it, component), platform) }
+                .firstOrNull { it.isFile }
+            managed?.path
         }
         // 本机别处已装同主版本时补上「已装」，但路径显示托管那份的优先。
         return offers.map { offer ->
@@ -191,10 +228,10 @@ class DesktopJavaRuntimeService(
         component: String?,
         onProgress: (Float) -> Unit,
     ): JavaRuntime {
-        val root = gameRoot ?: throw JavaRuntimeUnavailableException(
-            "没有配置游戏目录，无法下载托管运行时；请去设置页填一个游戏目录。",
+        val root = installRoot ?: throw JavaRuntimeUnavailableException(
+            "不知道启动器装在哪儿，无法下载托管运行时；请手动指定 java.exe。",
         )
-        val installer = MojangJavaRuntimeInstaller(root)
+        val installer = MojangJavaRuntimeInstaller(root, runtimeRootOverride = ManagedJava.rootOf(root))
         val java = try {
             installer.ensure(major, component, onProgress)
         } catch (e: JavaRuntimeInstallException) {
@@ -208,6 +245,49 @@ class DesktopJavaRuntimeService(
             managed = true,
         )
     }
+
+    /**
+     * 删掉一份启动器自己装的运行时。
+     *
+     * 三条都要过：这份是托管的、路径确实落在某个托管根的 `<组件名>/bin/` 里、目录还在。
+     * 过了就先改名成 `<组件名>.deleting-<时间戳>` 再整个删 —— 与 [InstanceDeleter] 一个路子：
+     * 项目不带回收站依赖，改名这一步保证「删到一半失败」时用户看到的不是一坨半残的运行时。
+     * 删不完（文件被占用）就把名字改回去，并把原因放进 [lastRemoveError]。
+     */
+    override suspend fun remove(runtime: JavaRuntime): Boolean = withContext(Dispatchers.IO) {
+        lastRemoveError = null
+        if (!runtime.managed) {
+            lastRemoveError = "这一份不是启动器下载的，不在删除范围里。"
+            return@withContext false
+        }
+        val home = ManagedJava.homeIn(runtime.path, runtimeRoots)
+        if (home == null || !home.isDirectory) {
+            lastRemoveError = "这一份不在启动器的 java/ 目录里，不动它。"
+            return@withContext false
+        }
+        val stamp = java.text.SimpleDateFormat("yyyyMMdd-HHmmss", java.util.Locale.ROOT).format(java.util.Date())
+        val trashed = File(home.parentFile, home.name + ".deleting-" + stamp)
+        if (!home.renameTo(trashed)) {
+            lastRemoveError = "文件正被占用（游戏可能还开着），关掉之后再删。"
+            return@withContext false
+        }
+        var failure: File? = null
+        trashed.walkBottomUp().forEach { entry ->
+            if (!entry.delete() && failure == null) failure = entry
+        }
+        if (failure != null) {
+            // 删了一半：把名字改回去，至少目录还在、还能用。
+            trashed.renameTo(home)
+            lastRemoveError = "删到一半失败：" + failure!!.absolutePath + "（文件被占用）"
+            return@withContext false
+        }
+        true
+    }
+
+    /** 上次 [remove] 失败的原因，成功时为 null。 */
+    @Volatile
+    var lastRemoveError: String? = null
+        private set
 
     /** 上次 [catalog] 失败的原因，成功时为 null。 */
     @Volatile
@@ -247,6 +327,12 @@ class DesktopJavaRuntimeService(
         }
         val names = listOf("runtime", "java", "jre", "jres", "java-runtimes", "javas")
         val dirs = LinkedHashSet<String>()
+        // 启动器自己的运行时根：<启动器目录>/java。位置是我们自己定的，不拼 name 变体，
+        // 也不加启动器目录本身 —— 那会把 app/、runtime/（jpackage 自带的那个 JRE）一起扫，纯浪费。
+        launcherDir?.let { launcher ->
+            val ownRuntime = ManagedJava.rootOf(launcher)
+            if (ownRuntime.isDirectory) dirs += ownRuntime.path
+        }
         for (root in roots) {
             if (!File(root).isDirectory) continue
             dirs += root

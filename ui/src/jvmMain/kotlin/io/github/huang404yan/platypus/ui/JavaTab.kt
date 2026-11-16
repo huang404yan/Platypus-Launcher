@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -16,6 +17,7 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -30,9 +32,11 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import io.github.huang404yan.platypus.core.runtime.JavaRuntime
 import io.github.huang404yan.platypus.core.runtime.JavaRuntimeOffer
+import io.github.huang404yan.platypus.core.runtime.ManagedJava
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.io.File
 
 /**
  * 「设置 → Java」：让用户自己挑一份 Java 下回来。
@@ -44,13 +48,18 @@ import kotlinx.coroutines.withContext
  *
  * 两处刻意的取舍：
  * - **下载不探测本机**。用户点「下载」就是要一份启动器自己管理的运行时
- *   （在 <游戏目录>/runtime/ 下、删得掉、不会被系统 Java 更新牵连）。
+ *   （在 <启动器目录>/java/ 下、删得掉、不会被系统 Java 更新牵连）。
  *   「本机有没有能用的」是「启动」页那个按钮该操心的事（见 [JavaRuntimeService.ensure]）。
  * - **不做高版本顶替**。表里每一项都是精确主版本，界面也不推荐「装个更高的凑合用」：
  *   1.16.5 的 Forge 在 Java 16+ 上会直接崩（[GameJavaRules] 里那条规则就是这么来的）。
  */
 @Composable
-internal fun JavaTab(backend: LauncherBackend?, gameRoot: String, refreshTick: Int = 0) {
+internal fun JavaTab(
+    backend: LauncherBackend?,
+    gameRoot: String,
+    refreshTick: Int = 0,
+    launcherDir: File? = backend?.launcherDir,
+) {
     val scope = rememberCoroutineScope()
 
     var offers by remember { mutableStateOf<List<JavaRuntimeOffer>>(emptyList()) }
@@ -64,10 +73,24 @@ internal fun JavaTab(backend: LauncherBackend?, gameRoot: String, refreshTick: I
     var installingMajor by remember { mutableStateOf(0) }
     var notice by remember { mutableStateOf("") }
     var noticeIsError by remember { mutableStateOf(false) }
+    var deleting by remember { mutableStateOf("") }
+    // 待确认删除的那一份；不问一句就从盘上抹掉 150 MB 太狠。
+    var pendingDelete by remember { mutableStateOf<JavaRuntime?>(null) }
+
+    // 认作「托管的」所有根：启动器目录的 java/（新版）与游戏目录的 runtime/（老版本）都算。
+    // 拿不到启动器目录时只剩后一个 —— 老用户的那份仍删得掉，只是界面上不会出现新版那份。
+    val runtimeRoots = remember(launcherDir, gameRoot) {
+        val roots = ArrayList<File>(2)
+        launcherDir?.let { roots += ManagedJava.rootOf(it) }
+        if (gameRoot.isNotBlank()) roots += ManagedJava.legacyRootOf(File(gameRoot))
+        roots.distinctBy { it.absoluteFile.normalize().path.lowercase() }
+    }
 
     fun rootProblem(): String? {
         if (backend == null) return "后端没装配，读不到 Java 清单。"
-        if (gameRoot.isBlank()) return "先去「启动」页把游戏目录填好 —— 托管运行时会下到那个目录的 runtime/ 下。"
+        if (launcherDir == null && gameRoot.isBlank()) {
+            return "不知道启动器装在哪儿，也没填游戏目录 —— 托管运行时没地方放。"
+        }
         return null
     }
 
@@ -130,7 +153,7 @@ internal fun JavaTab(backend: LauncherBackend?, gameRoot: String, refreshTick: I
     LaunchedEffect(backend, gameRoot, refreshTick) { reload() }
 
     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        SettingCard("Java 运行时", "启动器可以自己下官方运行时，装在这里：<游戏目录>/runtime/。") {
+        SettingCard("Java 运行时", "启动器可以自己下官方运行时，装在启动器自己的 java/ 里（便携版就是解压出来那个文件夹）。") {
             Text(
                 "挑一个版本下回来；已经装好的那几行会标出来。不用手动找 java.exe。" +
                     "装在别处的 Java（PATH、JAVA_HOME、其它启动器的 runtime）不会显示在这一栏里，但启动时会自动扫到。",
@@ -196,7 +219,11 @@ internal fun JavaTab(backend: LauncherBackend?, gameRoot: String, refreshTick: I
                 )
             } else {
                 for (runtime in detected) {
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
                         Text(
                             "Java " + runtime.majorVersion,
                             style = MaterialTheme.typography.bodySmall,
@@ -206,10 +233,70 @@ internal fun JavaTab(backend: LauncherBackend?, gameRoot: String, refreshTick: I
                             runtime.path + if (runtime.managed) "（启动器下载的）" else "",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.weight(1f),
                         )
+                        // 只给「启动器自己下的、且确实落在托管目录里」的那几份画删除。
+                        // 系统 JDK、PCL/HMCL 留下的 runtime 在探测结果里也有，但删它们不是我们该干的事。
+                        if (ManagedJava.removable(runtime, runtimeRoots)) {
+                            TextButton(
+                                onClick = { pendingDelete = runtime },
+                                enabled = deleting.isBlank(),
+                            ) { Text(if (deleting == runtime.path) "删除中…" else "删除") }
+                        }
                     }
                 }
             }
+        }
+
+        // 删除确认：说清楚删的是哪一份、删了会怎样。
+        val doomed = pendingDelete
+        if (doomed != null) {
+            AlertDialog(
+                onDismissRequest = { pendingDelete = null },
+                title = { Text("删掉这份 Java？") },
+                text = {
+                    Text(
+                        "Java " + doomed.majorVersion + "\n" + doomed.path +
+                            "\n\n会直接删掉整个运行时目录，不进回收站。" +
+                            "删完之后这个版本要用的 Java 会重新探测；本机一份都不剩的话，" +
+                            "下次启动时启动器会自己下一份 Java 17。",
+                    )
+                },
+                confirmButton = {
+                    TextButton(
+                        onClick = {
+                            pendingDelete = null
+                            if (backend == null) return@TextButton
+                            deleting = doomed.path
+                            scope.launch {
+                                val removed = runCatching {
+                                    withContext(Dispatchers.IO) { backend.javaRuntimes.remove(doomed) }
+                                }
+                                deleting = ""
+                                removed.onSuccess { ok ->
+                                    if (ok) {
+                                        notice = "已删掉 Java " + doomed.majorVersion + "：" + doomed.path
+                                        noticeIsError = false
+                                        reload()
+                                    } else {
+                                        // 具体原因在桌面实现里（lastRemoveError），界面拿不到类型，
+                                        // 用一条通用说法兜底。
+                                        notice = "没能删掉这份 Java。可能它不是启动器下的，或者文件正被占用 —— 关掉游戏再试。"
+                                        noticeIsError = true
+                                    }
+                                }.onFailure {
+                                    notice = "删除 Java " + doomed.majorVersion + " 失败：" +
+                                        (it.message ?: it.javaClass.simpleName)
+                                    noticeIsError = true
+                                }
+                            }
+                        },
+                    ) { Text("删除") }
+                },
+                dismissButton = {
+                    TextButton(onClick = { pendingDelete = null }) { Text("取消") }
+                },
+            )
         }
 
         if (notice.isNotBlank()) {

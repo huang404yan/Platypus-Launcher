@@ -22,7 +22,12 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
 /**
- * 从 Mojang 官方 runtime 清单装一个 JRE 到 <gameRoot>/runtime/<component>。
+ * 从 Mojang 官方 runtime 清单装一个 JRE 到 <runtimeRoot>/<component>。
+ *
+ * runtimeRoot 默认是 `<gameRoot>/runtime`（老位置，只给没有启动器目录的无头场景用），
+ * 桌面端会传启动器自己的 `java/`（[runtimeRootOverride]，见 [ManagedJava.rootOf]）：
+ * 这样卸载/换游戏目录都不会把那份 150 MB 的运行时带走或弄丢，也不会和 jpackage
+ * 自带的 `runtime/`（启动器自己的 JRE）撞在一起。
  *
  * 只用官方 raw 文件（manifest 里 `downloads.raw` 就是成品），不解压 lzma——实测 gamma 的
  * 486 个条目里有 file 条目没有 lzma 键，走 lzma 会直接 KeyError；raw 全量约 150 MB。
@@ -34,6 +39,14 @@ class MojangJavaRuntimeInstaller(
     private val indexUrl: String = MOJANG_RUNTIME_INDEX_URL,
     private val parallelism: Int = 16,
     private val platform: String = runtimePlatform(),
+    /**
+     * 运行时根目录，覆盖默认的 `<gameRoot>/runtime`。
+     *
+     * 桌面端把它指到启动器目录下的 `java/`（安装版 = 安装目录，便携版 = 解压出来的文件夹）：
+     * Java 是启动器的东西，不该散落在被启动的游戏目录里；也不能用 `runtime/`，那是
+     * jpackage app-image 里启动器自己 JRE 的位置。
+     */
+    private val runtimeRootOverride: File? = null,
 ) {
 
     /** 上次失败的原因，供 UI 直接展示（成功时为 null）。 */
@@ -41,7 +54,7 @@ class MojangJavaRuntimeInstaller(
     var lastFailure: String? = null
         private set
 
-    val runtimeRoot: File get() = File(gameRoot, "runtime")
+    val runtimeRoot: File get() = runtimeRootOverride ?: File(gameRoot, "runtime")
 
     /**
      * 确保 [major] 版本的运行时可用，返回 java 可执行文件。

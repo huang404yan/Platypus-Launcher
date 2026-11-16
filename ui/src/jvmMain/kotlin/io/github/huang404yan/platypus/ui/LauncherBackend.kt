@@ -8,6 +8,7 @@ import io.github.huang404yan.platypus.core.instance.InstanceRepository
 import io.github.huang404yan.platypus.core.launch.GameRuntime
 import io.github.huang404yan.platypus.core.runtime.JavaRuntimeService
 import io.github.huang404yan.platypus.core.settings.SettingsRepository
+import java.io.File
 
 /**
  * 界面需要的后端能力集合。
@@ -60,4 +61,13 @@ interface LauncherBackend {
      * 给默认 null —— 没有账号存储的假后端不该被迫实现它。
      */
     val yggdrasil: YggdrasilAccountAuth? get() = null
+
+    /**
+     * 启动器自己的目录：安装版是安装目录（exe 那层），便携版是解压出来的文件夹。
+     *
+     * 只有「托管 Java 下在哪儿、哪份删得掉」用得上它（见 core 的 `ManagedJava`）。
+     * 给默认 null：读不到就等于「不知道」，界面据此不画删除按钮 —— 宁可少一个按钮，
+     * 也不能删到用户的系统 JDK。
+     */
+    val launcherDir: File? get() = null
 }

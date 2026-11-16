@@ -28,6 +28,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -60,8 +61,10 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import io.github.huang404yan.platypus.core.auth.AccountBootstrap
+import io.github.huang404yan.platypus.core.auth.ClientIds
 import io.github.huang404yan.platypus.core.auth.OfflineProfile
 import io.github.huang404yan.platypus.core.auth.StoredAccount
+import io.github.huang404yan.platypus.core.edition.Edition
 import io.github.huang404yan.platypus.core.instance.Instance
 import io.github.huang404yan.platypus.core.instance.InstanceLayouts
 import io.github.huang404yan.platypus.core.instance.InstanceScanner
@@ -173,6 +176,12 @@ fun LaunchPage(
     // 不记这个的话，每次开程序都停在按名字排第一的那个版本上。
     var lastInstanceKey by remember { mutableStateOf("") }
 
+    // 设置里的 microsoftClientId 原值。只有孵化版（开源版）拿它做启动门禁：
+    // 仓库里不带 Client ID，没填就登不了正版，给了也会在登录时才失败 —— 不如提前拦住。
+    var clientIdValue by remember { mutableStateOf("") }
+    // 侧栏那个「测试启动」勾选：孵化版没填 ID 时唯一的绕行口，只跳门禁，不修登录。
+    var testLaunch by remember { mutableStateOf(false) }
+
     var username by remember { mutableStateOf("Dev") }
     // 上次从设置文件里读到的名字；启动时只有在用户改过名的情况下才回写，避免每次启动都写盘
     var savedUsername by remember { mutableStateOf("") }
@@ -250,19 +259,6 @@ fun LaunchPage(
         selected = focused ?: previous ?: last ?: merged.firstOrNull()
     }
 
-    fun detectJava() {
-        if (javaPhase is JavaPhase.Detecting) return
-        javaPhase = JavaPhase.Detecting
-        scope.launch {
-            javaPhase = try {
-                JavaPhase.Done(backend.javaRuntimes.detect())
-            } catch (t: Throwable) {
-                // 探测失败不能当成「没有 Java」，原文要原样带到界面上
-                JavaPhase.Failed(t.message ?: t.javaClass.simpleName, duringInstall = false)
-            }
-        }
-    }
-
     /** 版本 json 里声明的 javaVersion.component；读不到就返回 null，由后端按主版本推。 */
     fun javaComponentOf(instance: Instance): String? =
         runCatching {
@@ -270,6 +266,52 @@ fun LaunchPage(
             if (!json.isFile) return null
             parseVersionJson(json.readText()).javaVersion?.component?.takeIf { it.isNotBlank() }
         }.getOrNull()
+
+    /**
+     * 静默装一份托管 Java：进度照常打在 [javaPhase] 上，失败不弹窗、不留错误页。
+     *
+     * 「探测不到任何 Java」本来就是个空列表，界面上那句话还在（「没有找到任何 Java」），
+     * 用户看到的是它在自己下载 —— 这正是要的效果。装失败也只是回到空列表 + 原来那句提示，
+     * 他仍可以点「自动补 Java N」重试（那里会把失败原文显示出来）。
+     */
+    fun installJavaSilently(major: Int) {
+        if (javaPhase is JavaPhase.Installing) return
+        javaPhase = JavaPhase.Installing(0f, "本机还没有 Java，正在自动准备 Java " + major)
+        scope.launch {
+            try {
+                backend.javaRuntimes.ensureRuntime(major, null) { fraction ->
+                    javaPhase = JavaPhase.Installing(fraction, "正在下载 Java " + major)
+                }
+                val refreshed = runCatching { backend.javaRuntimes.detect() }.getOrDefault(emptyList())
+                javaPhase = JavaPhase.Done(refreshed)
+            } catch (t: Throwable) {
+                val fallback = runCatching { backend.javaRuntimes.detect() }.getOrDefault(emptyList())
+                javaPhase = JavaPhase.Done(fallback)
+            }
+        }
+    }
+
+    /**
+     * 探测本机 Java；一个都没有就顺手补一份 Java [DEFAULT_JAVA_MAJOR]。
+     *
+     * 自动补只在「一份 Java 都探测不到」时触发，不是「缺这个版本要的那个」：用户机器上已经有
+     * Java 21 而要玩 1.20.1（要 17）时，悄悄下 150 MB 太越界 —— 那种情况留在界面上让他点「自动补」。
+     */
+    fun detectJava() {
+        if (javaPhase is JavaPhase.Detecting) return
+        javaPhase = JavaPhase.Detecting
+        scope.launch {
+            val found = try {
+                backend.javaRuntimes.detect()
+            } catch (t: Throwable) {
+                // 探测失败不能当成「没有 Java」，原文要原样带到界面上
+                javaPhase = JavaPhase.Failed(t.message ?: t.javaClass.simpleName, duringInstall = false)
+                return@launch
+            }
+            javaPhase = JavaPhase.Done(found)
+            if (found.isEmpty()) installJavaSilently(DEFAULT_JAVA_MAJOR)
+        }
+    }
 
     fun installJava() {
         val instance = selected ?: return
@@ -360,7 +402,22 @@ fun LaunchPage(
         }.getOrElse { "自动备份没做成：" + (it.message ?: it.javaClass.simpleName) }
     }
 
-    fun launchGame() {
+    /**
+     * 启动。孵化版（开源版）仓库里不带 Client ID，没填就登不了正版 —— 默认在这里拦住；
+     * [bypassClientGate] 只有侧栏那个「测试启动」勾选会传 true。
+     */
+    fun launchGame(bypassClientGate: Boolean = false) {
+        // 门禁放在最前面（早于写盘与备份）：被拦下时不该顺手改用户的设置文件。
+        if (Edition.current() == Edition.PREVIEW && !bypassClientGate) {
+            val issue = ClientIds.missingProblem(clientIdValue)
+            if (issue != null) {
+                phase = LaunchPhase.Failed(
+                    "孵化版没有内置 Client ID，正版登录用不了，所以没有启动。" +
+                        "去「设置 → 账号」填一个，或者勾上左栏的「测试启动」只跑这一次。",
+                )
+                return
+            }
+        }
         launchCancelRequested = false
         val instance = resolveLaunchInstance() ?: return
         val java = selectedJava ?: run {
@@ -561,6 +618,7 @@ fun LaunchPage(
                     rootText = stored.defaultGameRoot
                 }
                 defaultMemoryMb = Instance.clampMemoryMb(stored.defaultMemoryMb)
+                clientIdValue = stored.microsoftClientId
                 // 要在下面的 rescan() 之前就位：它是「扫完后选谁」的一级兜底。
                 lastInstanceKey = stored.lastInstanceKey
                 val wanted = stored.activeAccountUuid
@@ -590,8 +648,20 @@ fun LaunchPage(
     }
 
     // 副页面关掉后重扫一次：登记 / 新建 / 删除都发生在那边，这一页的 registered 需要跟上。
+    // 同时把设置重读一遍：用户很可能刚在「设置 → 账号」里填了 Client ID，不重读的话
+    // 启动按钮会一直灰着，非得重启程序才认。
     LaunchedEffect(refreshTick) {
-        if (refreshTick > 0 && rootText.isNotBlank()) rescan()
+        if (refreshTick > 0) {
+            val settingsRepository = backend.settings
+            if (settingsRepository != null) {
+                val stored = withContext(Dispatchers.IO) { runCatching { settingsRepository.load() }.getOrNull() }
+                if (stored != null) {
+                    clientIdValue = stored.microsoftClientId
+                    defaultMemoryMb = Instance.clampMemoryMb(stored.defaultMemoryMb)
+                }
+            }
+            if (rootText.isNotBlank()) rescan()
+        }
     }
 
     // 选中实例后按游戏版本要求挑一个主版本正好匹配的 Java；没有就不选，由界面提示缺什么。
@@ -604,6 +674,11 @@ fun LaunchPage(
     }
 
     val busy = phase is LaunchPhase.Starting || phase is LaunchPhase.Running
+
+    // 孵化版没有内置 Client ID 时，正版登录这条路根本走不通；预先拦住，别让用户在登录那一刻才发现。
+    // missingProblem 读的是「内置 + 设置里的」两份来源，用户填过就从这里消失（见 ClientIds）。
+    val clientIssue = ClientIds.missingProblem(clientIdValue)
+    val clientGatePassed = Edition.current() != Edition.PREVIEW || clientIssue == null
     val requiredMajor = selected?.let { GameJavaRules.requiredMajor(it.gameVersion) }
     val merged = mergeInstances(registered, scanned?.instances.orEmpty())
     val exactJava = requiredMajor?.let { major -> (javaPhase as? JavaPhase.Done)?.runtimes?.findExactMajor(major) }
@@ -626,10 +701,14 @@ fun LaunchPage(
             identityTab = identityTab,
             onIdentityTab = { identityTab = it },
             onOpenAccountPage = onOpenAccountPage,
-            canLaunch = selected != null && selectedJava != null,
+            canLaunch = selected != null && selectedJava != null && (clientGatePassed || testLaunch),
             // 「按钮是灰的，为什么」——以前只在折叠块里才看得到缺 Java，用户以为是要先填 clientId。
             blockedHint = when {
                 selected == null -> "还没选版本。在右边点一张版本卡片。"
+                // 这条要排在「缺 Java」前面：门禁没过时补 Java 也没用，说了反而误导。
+                !clientGatePassed && !testLaunch ->
+                    "孵化版没有内置 Client ID，正版登录用不了，所以启动被拦下了。" +
+                        "去「设置 → 账号」填一个（说明就在那页），或者勾上上面的「测试启动」只跑这一次。"
                 selectedJava != null -> ""
                 // 刚进页面时 Java 还在探测、自动挑选还没发生：这时说「缺 Java」是误报，先等等
                 javaPhase is JavaPhase.Detecting || javaPhase is JavaPhase.Idle -> ""
@@ -639,7 +718,10 @@ fun LaunchPage(
                 else -> "需要一个 Java " + requiredMajor + " 才能启动。点下面「游戏目录与 Java（点开改）」，" +
                     "里面能一键补 Java " + requiredMajor + "。"
             },
-            onLaunch = { launchGame() },
+            onLaunch = { launchGame(bypassClientGate = testLaunch) },
+            showTestLaunch = Edition.current() == Edition.PREVIEW,
+            testLaunch = testLaunch,
+            onTestLaunchChange = { testLaunch = it },
             onStop = { stopGame() },
         )
         Column(
@@ -774,7 +856,7 @@ fun LaunchPage(
                         } else {
                             if (requiredMajor != null && current.runtimes.findExactMajor(requiredMajor) == null) {
                                 SectionHint(
-                                    "本机没有 Java " + requiredMajor + "。点「自动补 Java " + requiredMajor + "」会从 Mojang 下到游戏目录的 runtime/ 下。",
+                                    "本机没有 Java " + requiredMajor + "。点「自动补 Java " + requiredMajor + "」会从 Mojang 下一份到启动器自己的 java/ 里。",
                                     error = true,
                                 )
                             }
@@ -938,6 +1020,9 @@ fun LaunchPage(
 }
 
 private const val MAX_VISIBLE_LINES = 500
+
+/** 「一个 Java 都没有」时默认装哪个主版本。17 是 1.18–1.20.4 的要求，也是整合包最常用基线；25 只对 1.21.9+ 有用。 */
+private const val DEFAULT_JAVA_MAJOR = 17
 
 /**
  * 允许报告比启动时刻早一点：文件系统时间戳精度、以及崩溃写盘到进程真正退出之间的几十毫秒。
@@ -1254,6 +1339,10 @@ private fun LaunchSidePanel(
     canLaunch: Boolean,
     /** 不能启动时的一句话原因（空串 = 能启动）。只用来解释按钮为什么是灰的。 */
     blockedHint: String,
+    /** 孵化版才画「测试启动」那个勾选框；正式版自带 Client ID，没有这条路。 */
+    showTestLaunch: Boolean,
+    testLaunch: Boolean,
+    onTestLaunchChange: (Boolean) -> Unit,
     onLaunch: () -> Unit,
     onStop: () -> Unit,
 ) {
@@ -1338,6 +1427,21 @@ private fun LaunchSidePanel(
                 enabled = !busy && canLaunch,
             ) {
                 Text(if (busy) "启动中…" else "启动游戏", style = MaterialTheme.typography.titleMedium)
+            }
+            // 孵化版唯一的绕行口：没填 Client ID 也能把这一版跑起来（登录该失败还是失败）。
+            if (showTestLaunch) {
+                Row(
+                    Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    Checkbox(checked = testLaunch, onCheckedChange = onTestLaunchChange, enabled = !busy)
+                    Text(
+                        "测试启动（跳过 ID 检查）",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
             }
             if (running || busy) {
                 OutlinedButton(onClick = onStop, modifier = Modifier.fillMaxWidth(), enabled = running) {

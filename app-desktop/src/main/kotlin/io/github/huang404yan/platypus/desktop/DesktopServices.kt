@@ -44,6 +44,15 @@ class DesktopServices private constructor(
     /** 外置登录（Yggdrasil）。 */
     override val yggdrasil: YggdrasilAccountAuth,
 ) : LauncherBackend {
+
+    /**
+     * 启动器自己的目录（安装版 = 安装目录，便携版 = 解压出来的文件夹）。
+     *
+     * 界面拿它判断「这份托管运行时归不归我删」——运行时就在 `<launcherDir>/java/<组件>` 下。
+     * 拿不到时为空，界面就不会画删除按钮（宁可少一个按钮，不能删错目录）。
+     */
+    override val launcherDir: File? = (javaRuntimes as? DesktopJavaRuntimeService)?.launcherDir
+
     companion object {
         /**
          * @param gameRoot 当前游戏目录，可为 null。探测 Java 时会连带扫它的 runtime/ 子目录
@@ -55,23 +64,32 @@ class DesktopServices private constructor(
          * @param instanceIndex 实例索引文件；null 时按 gameRoot 推导，gameRoot 也为 null 时
          *   退到用户目录下的 .platypus/instances.json（先能存下来，之后用户指了目录再迁移）。
          */
-        fun create(gameRoot: File?, instanceIndex: File?): DesktopServices {
+        fun create(gameRoot: File?, instanceIndex: File?): DesktopServices =
+            create(gameRoot, instanceIndex, launcherDir = null)
+
+        /**
+         * @param launcherDir 启动器自己的目录（安装版 = 安装目录，便携版 = 解压出来的文件夹）。
+         *   托管运行时（自动补的 Java）落在这里的 java/ 下，而不是游戏目录 —— 见
+         *   [DesktopJavaRuntimeService]。null 时退回游戏目录，方便无头冒烟与单测。
+         */
+        fun create(gameRoot: File?, instanceIndex: File?, launcherDir: File?): DesktopServices {
             // 账号仓库要被登录流程和界面共用一份：两边各 new 一个会让「刚登录的账号
             // 没出现在列表里」这类问题变成偶发。
             val accountRepository = JsonAccountRepository(defaultAccountIndex(gameRoot))
-            return assemble(gameRoot, instanceIndex, accountRepository)
+            return assemble(gameRoot, instanceIndex, accountRepository, launcherDir?.takeIf { it.isDirectory })
         }
 
         private fun assemble(
             gameRoot: File?,
             instanceIndex: File?,
             accountRepository: AccountRepository,
+            launcherDir: File?,
         ): DesktopServices {
             // 设置仓库与登录共用同一份：Client ID 存在设置里，登录时现读，
             // 两个实例指向同一个文件也问题不大，但共用一份能少一次「为什么刚填的没生效」。
             val settingsRepository = JsonSettingsRepository(settingsFile(gameRoot))
             return DesktopServices(
-                javaRuntimes = DesktopJavaRuntimeService(gameRoot = gameRoot),
+                javaRuntimes = DesktopJavaRuntimeService(gameRoot = gameRoot, launcherDir = launcherDir),
                 gameRuntime = DesktopGameRuntime(),
                 instances = JsonInstanceRepository(instanceIndex ?: defaultInstanceIndex(gameRoot)),
                 settings = settingsRepository,

@@ -46,7 +46,12 @@ fun main(args: Array<String>) {
     val title = if (Brand.isPreview) "${Brand.PREVIEW_NAME_ZH} ${Brand.version}" else Brand.NAME_ZH
 
     // 组合根：整个程序只有这一处装配后端，Composable 里不 new 任何实现。
-    val services = DesktopServices.create(root.takeIf { it.isNotBlank() }?.let(::File))
+    // launcherDir 是启动器自己的目录：托管 Java 下在那里，不在游戏目录。
+    val services = DesktopServices.create(
+        gameRoot = root.takeIf { it.isNotBlank() }?.let(::File),
+        instanceIndex = null,
+        launcherDir = installDir(),
+    )
 
     application {
         val windowState = rememberWindowState(width = 1280.dp, height = 820.dp)
@@ -110,8 +115,13 @@ private fun installGameRoot(): String? {
     return candidate.absolutePath
 }
 
-/** 启动器安装目录；两个来源都拿不到就返回 null。 */
-private fun installDir(): File? {
+/**
+ * 启动器安装目录；两个来源都拿不到就返回 null。
+ *
+ * 两处在用：默认游戏目录（[installGameRoot]），以及托管 Java 的落盘位置
+ * （[DesktopServices.create] 的 launcherDir）。便携版下它就是解压出来的那个文件夹。
+ */
+internal fun installDir(): File? {
     System.getProperty("jpackage.app-path")?.takeIf { it.isNotBlank() }?.let { path ->
         return runCatching { File(path).absoluteFile.parentFile }.getOrNull()
     }

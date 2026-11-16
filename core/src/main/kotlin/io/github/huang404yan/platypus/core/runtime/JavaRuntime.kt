@@ -58,6 +58,15 @@ interface JavaRuntimeService {
         component: String?,
         onProgress: (Float) -> Unit = {},
     ): JavaRuntime = ensureRuntime(major, component, onProgress)
+
+    /**
+     * 删掉一份启动器自己装的运行时；返回是否真的删掉了。
+     *
+     * 只该在位「这份是启动器下的、且确实落在托管目录里」时返回 true（判定见 core 的
+     * [ManagedJava]）。系统装的 JDK、别的启动器留下的 runtime、用户手动指定的 java.exe
+     * 一律返回 false —— 拿不准的不删。默认实现返回 false，方便安卓端与测试替身。
+     */
+    suspend fun remove(runtime: JavaRuntime): Boolean = false
 }
 
 /**
