@@ -19,7 +19,8 @@ GitHub Release 的说明也从这里取对应小节。
 
 | 版本 | 日期 | 一句话 |
 |---|---|---|
-| [`1.0.0`](#10020261116) | 2026-11-16 | 第一个正式版：`0.8.0-preview.20` 的全部内容进正式线，安卓包名去掉 `.preview`、改名「鸭嘴兽启动器」，空壳回到它本来的位置（可选构建开关，不再是孵化版的同义词） |
+| 0.8.0-preview.21 | 未发布 | 按用户试用后提的 17 条问题回修的第一批（六条）：成年鸭嘴兽图标、下载源默认镜像、默认内存按物理内存自动算、正式版不再让人填微软 ID、下载进度挪到显眼处、选择框放大；版本号从 `1.0.0` 退回孵化线 |
+| ~~[`1.0.0`](#10020261116)~~ | 已作废 | 原本要当第一个正式版（preview.20 的全部内容进正式线、安卓包名去掉 `.preview`、空壳回归可选开关），用户试用后判定问题不少、不算正式版；代码已退回 `0.8.0-preview.21`，正式线从修好之后重新开始 |
 | 0.8.0-preview.20 | 未发布 | 侧栏顺序重排、模组清单带图标、内存只留设置页一条连续滑条、下载页只下载、默认游戏目录搬出 C 盘、Java 自动补与可删、孵化版启动门禁、正式版按账号验一次、开源版可打空壳包、陶瓦跟官方最新版走、联机补公网 IPv4 直连 |
 | 0.8.0-preview.19 | 未发布 | 侧栏身份标志、顶栏五项均分与两端可折叠、启动参数下移 |
 | 0.8.0-preview.18 | 未发布 | 副页面不再叠字、启动页身份三格与版本卡片网格、目录与 Java 收成可折叠 |
@@ -38,7 +39,48 @@ GitHub Release 的说明也从这里取对应小节。
 
 > 更早的 `0.8.0-preview.1`–`5` 是仓库公开前的内部迭代，说明留在对应 tag 的 Release 里，没有并进这份记录。
 
-## 1.0.0（2026-11-16）
+## 0.8.0-preview.21（未发布）
+
+> 这一版是「先退回孵化线、再逐条修」的第一批。用户在 `1.0.0` 上试用后提了 17 条问题，
+> 判定那一版不算正式版，所以版本号退回 `0.8.0-preview.21`、安卓包名加回 `.preview`，
+> 先修最扎眼的六条，剩下的按批次继续。**没有一条是推倒重做**：都是把已经写歪的地方掰回来。
+
+### 多了什么
+
+- **默认内存改成「自动（按物理内存算）」**（新增 `core/instance/MemoryDefaults.kt`）。以前默认值是写死的 2048 MB，发给别人用就出问题：8 GB 的笔记本上装个整合包直接爆内存，64 GB 的工作站上只给 2 GB 又白白浪费一半性能。现在自动值 = 物理内存的 40%，按 128 MB 取整，上限仍然不超过「物理内存减 1 GB」。取四成不是随手定的：剩下六成要留给系统、显存映射、浏览器和 IDE，还有 jpackage 自带的那套运行时；16 GB 的机器给到 6 GB，正好是模组整合包能稳住的区间下沿。设置页多一个开关，关掉就退回手工拖滑条，拖过的值原样保留。这个「自动」与 preview.20 删掉的那个假「自动分配」开关不是一回事：那个从来没接进 `-Xmx`，这一个算出来的数真的会写进 `defaultMemoryMb` 并落到实例上。
+- **安卓端也跟着算自动值**（新增 `androidApp/.../preview/MemoryProbe.kt`）。安卓拿不到 ui 模块的 `SystemMemory`（那是 JVM 侧的 object），改走 `ActivityManager.MemoryInfo.totalMem`。抽成一个共享函数而不是在设置页与实例详情页各写一份，是因为两处算出来的数一旦不一致，用户会看到「设置里写 6 GB，实例里说跟随 4 GB」这种自相矛盾的界面；拿不到物理内存时返回 0，`MemoryDefaults.autoMb` 见到 0 会退回 2048。
+- **正式版不再让人去填微软应用 ID**（`ui/AccountTab.kt`）。正式版是发给所有人用的，包里内置了发行方申请好的 ID，让每个下载者跑到 Azure 去申请一个自己的，等于把发行方的事推给用户；而且换一次 ID 会让已经存下的 refresh_token 全部作废。现在 `ClientIds.builtin()` 非空时整块「填一个自己的应用 ID」卡片不显示，「第二步：登录」也顺势改名成「登录」（没有第一步了）。孵化版照旧 —— 它本来就不带 ID。
+- **下载进度挪到看得见的地方**（`ui/DownloadsPage.kt`）。原来那块进度条在页面最底下，下载页又长，点完「一键安装」往上滚的人根本不知道已经在下了。现在顶部状态卡改成主题色的 `primaryContainer` 底、标题旁边直接写百分比、下面跟一条进度条；页面中部那份重复的进度显示删掉了 —— 同屏两个百分比只会让人怀疑哪个才是真的。
+
+### 修了什么
+
+- **图标用错了：孵化版那只幼体被当成了通用图标**。根因不在版本号判断上，在资源本身 —— `app-desktop/src/main/resources/icon/platypus.png` 与 `platypus.ico` 这两份「通用兜底」里存的其实是幼体，而窗口标题栏、任务栏读的正是 jar 内这个 `icon/platypus.png`（`Main.kt` 的 `loadWindowIcon()`），所以不管什么通道，窗口图标永远是幼体。现在资源目录里有四份（`platypus-baby.png/.ico`、`platypus-adult.png/.ico`），`Brand.isPreview` 挑一份，jpackage 的 fallback 也按通道挑（linux 只吃 png，之前那处把 `.ico` 传给 linux 也一并修了）。安卓那边把 11 个 mipmap 图标全部按成年图重新生成（自适应图标的前景层抠成透明底、主体按 0.62 缩放居中；传统图标深色底 + 主体 0.82 + 22% 圆角）。
+- **下载默认改走国内镜像**（`DownloadSource.DEFAULT` 从 `AUTO` 改成 `MIRROR`）。用户反馈「下载比较慢」，查下来不是并发不够（`HttpDownloader` 本来就是 16 个文件并行），是默认源优先：国内连 Mojang 官方源基本是先等 30 秒连接超时再落回镜像，第一个文件就白等半分钟。镜像坏掉有 sha1 兜底、判失败会退回官方源，所以把默认调过来风险很低。设置页里仍可切回「官方源优先」。
+- **loader 版本的下拉按钮太小点不着**（`DownloadsPage.kt` 的 `LoaderPickerRow`）。原来那个「选 loader 版本」是一行小字，点击区跟文字一样大。现在按钮最少 180dp 宽、44dp 高（不到 44dp 的点击区在触屏上很难命中），文案改成会显示当前选中的版本号，下拉列表从 120dp 放到 240dp、每行竖向留白从 6dp 加到 10dp；Minecraft 版本列表也从 132dp（只够露三四行）放到 200dp。
+- **点「一键安装」但条件不满足时的提示没人看得见**。那句「先选一个游戏目录」原来在版本列表下方，而按钮在上方，点完没反应又滚不到提示。现在提示直接渲染在按钮正下方。
+- **版本号退回 `0.8.0-preview.21`、安卓包名加回 `.preview`**。这是按用户判断来的：`1.0.0` 那一版问题不少，不够格占正式线的第一个号，所以正式线留空、从修好之后重新起算，期间的修复都按 `0.8.0-preview.N` 走。安卓的 `namespace` / `applicationId` / `versionCode`(80021) / `versionName` 与 JNI 那两个导出符号一起改回来 —— 构建脚本里那条 `check(applicationId == expectedId)` 保证两边不会各改一半。
+
+### 已知限制
+
+- **用户提的 17 条里这一版只修了六条**。还没做的：安卓装不了模组加载器（Forge / NeoForge 要起 java 子进程）、安卓加载器版本只能选「推荐」、安卓端还是起不了游戏（缺图形转译层）、加载器安装没有进度条、装加载器会多出一个纯原版实例、语言设置不能改游戏内的 `options.txt`、实例隔离仍放在版本设置里而不是全局设置、版本设置里没有删除入口、安卓授权成功后要手动刷新一次才显示已授权。这些按批次继续。
+- 单个文件不分段下载，提速只到「多文件并行 + 优先镜像」这一层。大文件（客户端 jar、libraries 里的单个大件）仍是单连接拉。
+- 安卓包仍是 debug 签名（`C=US, O=Android, CN=Android Debug`），要在真机上长期装得换 release 签名。
+- `NOTICE` 仍然没有被打进产物：jpackage 段里没有 `licenseFile` 配置，安装目录只有 `exe` / `app/` / `runtime/` 三项。
+
+### 校验
+
+- `gradlew :core:test :ui:jvmTest :app-desktop:compileKotlin :app-desktop:createDistributable :androidApp:clean :androidApp:assembleDebug -PskipWix` → `BUILD SUCCESSFUL in 36s`，0 条 `e: `（75 个 actionable task：40 执行、14 命中缓存、21 最新）。安卓那条带了 `:androidApp:clean`：增量构建会在 apk 里留下 zip 空洞（条目挪到文件尾），体积假性变大。
+- 全量单测 **87 个类 1086 个用例，0 失败 0 错误 0 跳过**（core 82 类 1040 例 + ui 5 类 46 例）。
+- 产物（`releases/preview/`，只在本机暂存，没发 Release）：`Platypus-Launcher-0.8.0-preview.21-win-x64.msi` **70,348,956 字节** sha256 `d3495d61f4ef505f08ee072c5f09eae9dddf49f1b96c3a503c59674c3fe65a39`；`Platypus-Launcher-0.8.0-preview.21-win-x64.zip` **68,690,915 字节**（202 条目，顶层 `Platypus Preview/Platypus Preview.exe`）sha256 `7a7ab503b5e70d2484b29bae97b1c2c32256fd338aa8d90ba2e78b2e45ab5eec`；`Platypus-Launcher-0.8.0-preview.21-android.apk` **13,902,445 字节** sha256 `a80e13f35976533d8b67665e94e523892e78d8d2876974e414eae0e5de316a32`。免装目录 202 个文件 / 136,088,624 字节，`Platypus Preview.exe` 597,504 字节。
+- 包内实证：`app/` 下的 jar 名已是 `core-0.8.0-preview.21-*.jar` / `app-desktop-0.8.0-preview.21-*.jar`；`app-desktop-*.jar` 里的 `icon/` 有四份，`platypus-adult.png` md5 `0019b1a7c38c4b220505cca5484ea88f`（与 `branding/android/platypus-adult-512.png` 同源）、`platypus-baby.png` md5 `9a0431b2c815ee83974602a9821cfff3`。apk 用 `aapt2 dump badging` 读出 `package: name='io.github.huang404yan.platypus.launcher.preview' versionCode='80021' versionName='0.8.0-preview.21'`、`application-label:'鸭嘴兽 · 孵化版'`；apk 内 11 张 `ic_launcher*` 的 md5 全部换过（旧的幼体那套不再是任何一个）。
+- 免装版冒烟：`Start-Process` 起 `Platypus Preview.exe`，14 秒后进程仍在（pid 23468），随后强停；它按预期在安装目录下建出 `game/platypus/`，冒烟完已把 `game/` 整个送回收站。
+
+## 1.0.0（2026-11-16，已作废）
+
+> **这一节作废，代码已退回 `0.8.0-preview.21`。** 用户拿这一版试用后判了 17 条问题
+> （图标用错、默认内存写死、下载提示看不见、安卓装不了加载器等等），结论是「有不少问题不算正式版」，
+> 正式线从修好之后重新起算，期间的修复都按 `0.8.0-preview.N` 走。下面这些内容没有消失，
+> 只是搬回了孵化线；正式线开张那天要做的还是同样三件事（切版本号、安卓包名去掉 `.preview`、空壳回归可选开关）。
 
 第一个正式版。内容就是 `0.8.0-preview.20` 那一批（内存只留一条滑条、模组照 PCL 改点行启停、
 Java 自动补与可删、托管 Java 挪到启动器目录、陶瓦跟官方最新版走、联机补公网 IPv4 直连、

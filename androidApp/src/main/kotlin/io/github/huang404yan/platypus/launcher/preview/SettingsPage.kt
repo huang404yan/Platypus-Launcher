@@ -1,4 +1,4 @@
-package io.github.huang404yan.platypus.launcher
+package io.github.huang404yan.platypus.launcher.preview
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -20,6 +20,7 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -36,6 +37,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import io.github.huang404yan.platypus.core.Brand
 import io.github.huang404yan.platypus.core.instance.Instance
+import io.github.huang404yan.platypus.core.instance.MemoryDefaults
 import io.github.huang404yan.platypus.core.theme.LauncherTheme
 import io.github.huang404yan.platypus.core.theme.paletteOf
 import io.github.huang404yan.platypus.core.settings.JsonSettingsRepository
@@ -70,7 +72,12 @@ internal fun SettingsPage(theme: LauncherTheme = LauncherTheme.AUTO, onThemeChan
     var username by remember { mutableStateOf(LauncherSettings.DEFAULT_OFFLINE_USERNAME) }
     var gameRoot by remember { mutableStateOf(defaultGameRoot()) }
     var memoryMb by remember { mutableStateOf(Instance.DEFAULT_MEMORY_MB.toString()) }
+    var memoryAuto by remember { mutableStateOf(true) }
     var status by remember { mutableStateOf("") }
+    // 「自动」在安卓上按设备的物理内存算，与桌面端同一个 MemoryDefaults。
+    // 拿不到（ActivityManager 异常、或旧机型不给 totalMem）就是 0，autoMb 会退回 2048。
+    val context = LocalContext.current
+    val autoMemoryMb = MemoryDefaults.autoMb(deviceTotalMemoryMb(context))
 
     suspend fun load() {
         val root = File(gameRoot.trim().ifBlank { defaultGameRoot() })
@@ -80,13 +87,16 @@ internal fun SettingsPage(theme: LauncherTheme = LauncherTheme.AUTO, onThemeChan
         base = settings
         username = settings.offlineUsername
         if (settings.defaultGameRoot.isNotBlank()) gameRoot = settings.defaultGameRoot
-        memoryMb = settings.defaultMemoryMb.toString()
+        memoryAuto = settings.defaultMemoryAuto
+        memoryMb = MemoryDefaults.resolve(settings.defaultMemoryMb, settings.defaultMemoryAuto, deviceTotalMemoryMb(context))
+            .toString()
         loaded = true
     }
 
     suspend fun save() {
         val store = repo ?: return
-        val memory = memoryMb.trim().toIntOrNull()
+        // 自动模式下输入框是灰的、值就是算出来的那个，不用再解析它。
+        val memory = if (memoryAuto) autoMemoryMb else memoryMb.trim().toIntOrNull()
         if (memory == null) {
             status = "内存要填数字（MB），比如 2048。"
             return
@@ -99,12 +109,15 @@ internal fun SettingsPage(theme: LauncherTheme = LauncherTheme.AUTO, onThemeChan
                         offlineUsername = normalizeOfflineUsername(username),
                         defaultGameRoot = gameRoot.trim(),
                         defaultMemoryMb = memory,
+                        defaultMemoryAuto = memoryAuto,
                         theme = theme.id,
                     ),
                 )
             }
             username = saved.offlineUsername
-            memoryMb = saved.defaultMemoryMb.toString()
+            memoryAuto = saved.defaultMemoryAuto
+            memoryMb = MemoryDefaults.resolve(saved.defaultMemoryMb, saved.defaultMemoryAuto, deviceTotalMemoryMb(context))
+                .toString()
             status = "已保存到 " + store.path +
                 if (problem != null) "（注意：$problem）" else ""
         } catch (e: CancellationException) {
@@ -198,15 +211,40 @@ internal fun SettingsPage(theme: LauncherTheme = LauncherTheme.AUTO, onThemeChan
             )
         }
 
-        SettingCard("内存（MB）", "新实例默认值，之后可以在实例页单独改。") {
+        SettingCard("新实例拿多少内存", "之后可以在实例页单独改。") {
+            // 「自动」按这台手机的物理内存算（四成、按 128 MB 取整、上限留 1 GB 给系统），
+            // 与桌面端共用 MemoryDefaults，所以同一份 settings.json 两边读出来的数一致。
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text("自动（按物理内存算）", style = MaterialTheme.typography.bodyMedium)
+                    Text(
+                        "本机物理内存约 " + formatGbShort(deviceTotalMemoryMb(context)) +
+                            "，自动值 " + autoMemoryMb + " MB（" + MemoryDefaults.AUTO_PERCENT + "%）。",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Switch(checked = memoryAuto, onCheckedChange = { memoryAuto = it }, enabled = loaded)
+            }
             OutlinedTextField(
                 value = memoryMb,
                 onValueChange = { memoryMb = it },
                 modifier = Modifier.fillMaxWidth(),
                 singleLine = true,
+                enabled = loaded && !memoryAuto,
+                label = { Text(if (memoryAuto) "自动算出来的值" else "MB") },
             )
             Text(
-                "允许范围 " + Instance.MIN_MEMORY_MB + "–" + Instance.MAX_MEMORY_MB + " MB。",
+                if (memoryAuto) {
+                    "关掉上面那个开关才能手填。允许范围 " + Instance.MIN_MEMORY_MB + "–" +
+                        Instance.MAX_MEMORY_MB + " MB。"
+                } else {
+                    "允许范围 " + Instance.MIN_MEMORY_MB + "–" + Instance.MAX_MEMORY_MB + " MB。"
+                },
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -218,7 +256,8 @@ internal fun SettingsPage(theme: LauncherTheme = LauncherTheme.AUTO, onThemeChan
                 onClick = {
                     username = LauncherSettings.DEFAULT_OFFLINE_USERNAME
                     gameRoot = defaultGameRoot()
-                    memoryMb = Instance.DEFAULT_MEMORY_MB.toString()
+                    memoryAuto = true
+                    memoryMb = autoMemoryMb.toString()
                 },
                 enabled = loaded,
             ) { Text("填回默认值") }
@@ -299,5 +338,17 @@ private fun SettingCard(title: String, hint: String, content: @Composable () -> 
             Text(hint, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             content()
         }
+    }
+}
+
+/** 把 MB 写成「16 GB」「7.5 GB」这样的短标签，只在这一页用。 */
+private fun formatGbShort(totalMb: Int): String {
+    if (totalMb <= 0) return "未知"
+    val gb = totalMb / 1024.0
+    val rounded = Math.round(gb * 10) / 10.0
+    return if (rounded == rounded.toLong().toDouble()) {
+        rounded.toLong().toString() + " GB"
+    } else {
+        String.format(java.util.Locale.US, "%.1f GB", rounded)
     }
 }

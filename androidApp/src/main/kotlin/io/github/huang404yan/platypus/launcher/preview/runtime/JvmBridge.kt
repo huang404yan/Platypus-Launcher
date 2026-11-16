@@ -1,4 +1,4 @@
-package io.github.huang404yan.platypus.launcher.runtime
+package io.github.huang404yan.platypus.launcher.preview.runtime
 
 import android.util.Log
 import io.github.huang404yan.platypus.core.launch.AndroidLaunchPreparation

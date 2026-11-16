@@ -41,6 +41,7 @@ import io.github.huang404yan.platypus.core.Endpoints
 import io.github.huang404yan.platypus.core.download.DownloadPreference
 import io.github.huang404yan.platypus.core.download.DownloadSource
 import io.github.huang404yan.platypus.core.instance.Instance
+import io.github.huang404yan.platypus.core.instance.MemoryDefaults
 import io.github.huang404yan.platypus.core.saves.AutoBackupPolicy
 import io.github.huang404yan.platypus.core.settings.LauncherSettings
 import io.github.huang404yan.platypus.core.theme.LauncherTheme
@@ -146,6 +147,15 @@ fun SettingsPage(
     var username by remember { mutableStateOf(LauncherSettings.DEFAULT_OFFLINE_USERNAME) }
     var gameRoot by remember { mutableStateOf("") }
     var memoryText by remember { mutableStateOf(Instance.DEFAULT_MEMORY_MB.toString()) }
+    /**
+     * 默认内存用「自动（按物理内存算）」还是用手上这个数。
+     *
+     * 自动时 [memoryText] 仍然跟着算出来的值走 —— 它代表「下次保存会写进设置的那个数」，
+     * 也是滑条画的位置。这样用户从自动切回手动时，滑条就停在刚刚看到的那个数上，
+     * 不会跳回某个陌生的老值。
+     */
+    var memoryAuto by remember { mutableStateOf(true) }
+    val autoMemoryMb = MemoryDefaults.autoMb(SystemMemory.totalMb)
     var loaded by remember { mutableStateOf(false) }
     var loadedFrom by remember { mutableStateOf("") }
     var notice by remember { mutableStateOf("") }
@@ -177,7 +187,12 @@ fun SettingsPage(
         }
         username = settings.offlineUsername
         gameRoot = settings.defaultGameRoot
-        memoryText = settings.defaultMemoryMb.toString()
+        memoryAuto = settings.defaultMemoryAuto
+        memoryText = MemoryDefaults.resolve(
+            settings.defaultMemoryMb,
+            settings.defaultMemoryAuto,
+            SystemMemory.totalMb,
+        ).toString()
         activeAccountUuid = settings.activeAccountUuid
         microsoftClientId = settings.microsoftClientId
         downloadSource = DownloadSource.of(settings.downloadSource).id
@@ -224,7 +239,10 @@ fun SettingsPage(
                     base.copy(
                         offlineUsername = cleanedName,
                         defaultGameRoot = gameRoot.trim(),
-                        defaultMemoryMb = clamped,
+                        // 自动时把算出来的值也写进字段：instances.json 是给人看的，
+                        // 留着一个和实际生效值不一样的老数会让人以为设置没生效。
+                        defaultMemoryMb = if (memoryAuto) autoMemoryMb else clamped,
+                        defaultMemoryAuto = memoryAuto,
                         activeAccountUuid = activeAccountUuid,
                         microsoftClientId = microsoftClientId,
                         theme = theme.id,
@@ -240,7 +258,11 @@ fun SettingsPage(
             result.onSuccess { stored ->
                 username = stored.offlineUsername
                 gameRoot = stored.defaultGameRoot
-                memoryText = stored.defaultMemoryMb.toString()
+                memoryText = MemoryDefaults.resolve(
+                    stored.defaultMemoryMb,
+                    stored.defaultMemoryAuto,
+                    SystemMemory.totalMb,
+                ).toString()
                 autoBackupHours = stored.autoBackupHours.toString()
                 autoBackupKeep = stored.autoBackupKeep.toString()
                 savedAt = stored.updatedAt
@@ -408,7 +430,8 @@ fun SettingsPage(
     fun resetDefaults() {
         username = LauncherSettings.DEFAULT_OFFLINE_USERNAME
         gameRoot = ""
-        memoryText = Instance.DEFAULT_MEMORY_MB.toString()
+        memoryAuto = true
+        memoryText = autoMemoryMb.toString()
         activeAccountUuid = ""
         // Client ID 刻意不跟着填回默认值：默认值是空串，而用户是从 Azure 门户抄来的，
         // 手边没有备份就找不回来了（那个 ID 在门户里还能看到，但他得再走一遍）。
@@ -610,6 +633,9 @@ fun SettingsPage(
                     onGameRootChange = { gameRoot = it },
                     memoryText = memoryText,
                     onMemoryChange = { memoryText = it },
+                    memoryAuto = memoryAuto,
+                    autoMemoryMb = autoMemoryMb,
+                    onMemoryAutoChange = { memoryAuto = it },
                     loaded = loaded,
                 )
                 // Java 运行时就跟着启动项放：“这个版本要用哪个 Java”与
@@ -646,13 +672,17 @@ fun SettingsPage(
  * 跟「这一局用谁的身份」是同一件事，所以挪到启动页左栏那三格底下填。
  * 留在设置页只会让人以为得先去注册一个名字才能玩。
  *
- * 内存这一块只有一条滑条加一排常用档位（2026-11-16 改）：内存就是「给多少」一个数，
- * 而「自动分配」从来没接进 JVM 参数（core 里没人读 memoryAuto，-Xmx 只认实例上的
- * memoryMb），留着开关只会让人以为它在起作用。
+ * 内存这一块是一条滑条、一排常用档位，外加一个「自动」开关（2026-11-16 两次改动叠出来的）。
  *
- * 「内存优化」那个勾选框也删了（同一天，后一手）：它在 core 里同样没有任何读取方，
- * 勾上不会往 JVM 参数里加哪怕一条 —— 一个勾了没反应的勾比没有更糟。真要做优化参数，
- * 得先让启动链认它，再回来加界面。
+ * 先是把假的「自动分配」删了：那个开关在 core 里没有任何读取方，勾上也不会改变 -Xmx，
+ * 留着只会让人以为它在起作用。后来发现「自动」这个需求本身是真的 —— 启动器发给别人用，
+ * 写死 2048 MB 在 8 GB 机器上会爆、在 64 GB 机器上浪费 —— 于是换成一个**真算**的自动：
+ * 取物理内存的四成，见 [io.github.huang404yan.platypus.core.instance.MemoryDefaults]。
+ * 差别在于这个自动值真的会写进 defaultMemoryMb 并在启动时落到实例上，而不是一个死开关。
+ *
+ * 「内存优化」那个勾选框删了（同一天）：它在 core 里同样没有任何读取方，勾上不会往
+ * JVM 参数里加哪怕一条 —— 一个勾了没反应的勾比没有更糟。真要做优化参数，得先让启动链
+ * 认它，再回来加界面。
  */
 @Composable
 private fun LaunchTab(
@@ -660,6 +690,9 @@ private fun LaunchTab(
     onGameRootChange: (String) -> Unit,
     memoryText: String,
     onMemoryChange: (String) -> Unit,
+    memoryAuto: Boolean,
+    autoMemoryMb: Int,
+    onMemoryAutoChange: (Boolean) -> Unit,
     loaded: Boolean,
 ) {
     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -691,16 +724,46 @@ private fun LaunchTab(
         SettingCard(
             "默认内存",
             "新建实例时用这个数。标着「跟随默认」的实例也跟着它走 —— 在这里改一次，" +
-                "那些实例一起变；在版本卡片或「版本设置」里把滑条拖到别的数，就改成单独设了。",
+                "那些实例一起变；在版本卡片或「版本设置」里把滑条拖到别的数，就改成单独设了。" +
+                "默认按本机物理内存算，不想要就关掉开关自己拖。",
         ) {
+            Row(
+                Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text("自动（按物理内存算）", style = MaterialTheme.typography.bodyMedium)
+                    Text(
+                        if (SystemMemory.totalMb > 0) {
+                            "本机物理内存约 " + (SystemMemory.totalMb / 1024) + " GB，自动值 " +
+                                autoMemoryMb + " MB（" + memoryPresetLabel(autoMemoryMb) + "，" +
+                                MemoryDefaults.AUTO_PERCENT + "%）。"
+                        } else {
+                            "读不到本机物理内存，自动值退回 " + autoMemoryMb + " MB。"
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Switch(checked = memoryAuto, onCheckedChange = onMemoryAutoChange, enabled = loaded)
+            }
             MemorySlider(
-                valueMb = memoryText.trim().toIntOrNull() ?: Instance.DEFAULT_MEMORY_MB,
+                valueMb = memoryText.trim().toIntOrNull() ?: autoMemoryMb,
                 onChange = { onMemoryChange(it.toString()) },
-                enabled = loaded,
+                // 自动模式下这条滑条只是把算出来的数画出来，不让拖 —— 拖了就该切成手动，
+                // 而「拖一下就悄悄改掉另一个开关」比灰着更难理解。
+                enabled = loaded && !memoryAuto,
+                showPresets = !memoryAuto,
             )
             Text(
-                "范围 " + Instance.MIN_MEMORY_MB + "–" + Instance.MAX_MEMORY_MB + " MB，按 128 MB 一档；" +
-                    "上限再看本机物理内存收窄（留 1 GB 给系统）。下面那排是常停的几档，点一下就跳过去。",
+                if (memoryAuto) {
+                    "自动按物理内存的四成算，按 128 MB 取整、最多到物理内存减 1 GB。" +
+                        "要固定一个数就把上面这个开关关掉，滑条跟着亮起来。"
+                } else {
+                    "范围 " + Instance.MIN_MEMORY_MB + "–" + Instance.MAX_MEMORY_MB + " MB，按 128 MB 一档；" +
+                        "上限再看本机物理内存收窄（留 1 GB 给系统）。下面那排是常停的几档，点一下就跳过去。"
+                },
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )

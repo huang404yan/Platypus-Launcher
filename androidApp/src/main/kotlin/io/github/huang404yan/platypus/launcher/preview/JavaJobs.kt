@@ -1,4 +1,4 @@
-package io.github.huang404yan.platypus.launcher
+package io.github.huang404yan.platypus.launcher.preview
 
 import io.github.huang404yan.platypus.core.runtime.AndroidJavaInstaller
 import io.github.huang404yan.platypus.core.runtime.AndroidJavaPackage

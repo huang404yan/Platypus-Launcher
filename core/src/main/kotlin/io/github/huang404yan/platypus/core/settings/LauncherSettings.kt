@@ -13,7 +13,8 @@ import kotlinx.serialization.Serializable
  *   换台机器或换个存档还得再改一次。
  * - [defaultGameRoot]：上次用的 .minecraft 目录。检测不到默认位置时，用户每次开程序都要重新填一遍。
  * - [defaultMemoryMb]：新登记实例的默认内存。实例自己的内存仍然存在 instances.json 里，
- *   这里只决定「第一次建实例给多少」。
+ *   这里只决定「第一次建实例给多少」。默认是按 [defaultMemoryAuto] 由物理内存算出来的，
+ *   见 [io.github.huang404yan.platypus.core.instance.MemoryDefaults]。
  *
  * 读写宽容是刻意的：文件损坏、字段缺失、以后加了新字段，都退到默认值继续跑，
  * 不让一个设置文件把启动器顶死。
@@ -23,6 +24,19 @@ data class LauncherSettings(
     val offlineUsername: String = DEFAULT_OFFLINE_USERNAME,
     val defaultGameRoot: String = "",
     val defaultMemoryMb: Int = Instance.DEFAULT_MEMORY_MB,
+    /**
+     * 默认内存按本机物理内存自动算（2026-11-16 加）。
+     *
+     * 为什么默认开：这一版是发给别人的，2048 MB 在 8 GB 的机器上开模组整合包必爆、
+     * 在 64 GB 的机器上又浪费。算法在 [io.github.huang404yan.platypus.core.instance.MemoryDefaults]，
+     * 读这个字段的界面**不要**直接用 [defaultMemoryMb]，要走
+     * `MemoryDefaults.resolve(defaultMemoryMb, defaultMemoryAuto, 物理内存)`。
+     *
+     * 默认 true 会改变旧数据的意思（老用户存的那个数不再生效），这是有意的：
+     * 老用户里绝大多数没调过这一项，留着 2048 反而是 bug。真拖过滑条的人，
+     * 界面上把开关关掉就回到手动模式，值还在 [defaultMemoryMb] 里没丢。
+     */
+    val defaultMemoryAuto: Boolean = true,
     /**
      * 启动时用哪个正版账号的 UUID；空串表示走离线模式。
      *
@@ -46,12 +60,12 @@ data class LauncherSettings(
      */
     val theme: String = "auto",
     /**
-     * 下载源偏好：auto 官方源优先（默认），mirror 优先国内镜像。
+     * 下载源偏好：auto 官方源优先，mirror 优先国内镜像（默认，2026-11-16 起）。
      *
      * 存 id 字符串而不是枚举下标，理由同 theme。这一项影响的是全部下载
      *（游戏本体、模组、整合包、Java、服务端），因为国内网络下官方源经常不是慢而是根本连不上。
      */
-    val downloadSource: String = "auto",
+    val downloadSource: String = "mirror",
     /**
      * 空壳发布包用的镜像根地址（见 [Endpoints]）；完整版这里是空串，根本不读。
      *

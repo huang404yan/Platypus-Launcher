@@ -500,6 +500,24 @@ val fullVersion = project.version.toString()
 val isPreviewChannel = fullVersion.contains("-preview")
 val brand = if (isPreviewChannel) previewBrand else stableBrand
 
+/**
+ * 通用图标跟着通道走：正式版取 adult，孵化版取 baby。
+ *
+ * 2026-11-16 之前这里写死成一个 `icon/platypus.ico` / `icon/platypus.png`，而那份
+ * 被误存成了幼体的图 —— 于是 1.0.0 正式版的安装包与窗口图标都是幼体。现在两份都留在
+ * resources/icon 下，按 [isPreviewChannel] 选，branding/ 缺失时也不会串通道。
+ */
+val fallbackIcon = if (isPreviewChannel)
+    "app-desktop/src/main/resources/icon/platypus-baby.ico"
+else
+    "app-desktop/src/main/resources/icon/platypus-adult.ico"
+
+/** Linux 的 jpackage 只吃 png，不能复用上面那个 .ico。 */
+val fallbackIconPng = if (isPreviewChannel)
+    "app-desktop/src/main/resources/icon/platypus-baby.png"
+else
+    "app-desktop/src/main/resources/icon/platypus-adult.png"
+
 /** 首选图标不存在时回退到通用图标；两者都没有就返回 null，让 jpackage 用默认图标。 */
 fun resolveIcon(preferred: String, fallback: String): java.io.File? {
     val candidate = rootProject.file(preferred)
@@ -542,7 +560,7 @@ compose.desktop {
             vendor = "Platypus Launcher"
 
             windows {
-                resolveIcon(brand.windowsIcon, "app-desktop/src/main/resources/icon/platypus.ico")
+                resolveIcon(brand.windowsIcon, fallbackIcon)
                     ?.let { iconFile.set(it) }
                 menuGroup = brand.nameEn
                 shortcut = true
@@ -553,7 +571,7 @@ compose.desktop {
             }
 
             linux {
-                resolveIcon(brand.linuxIcon, "app-desktop/src/main/resources/icon/platypus.png")
+                resolveIcon(brand.linuxIcon, fallbackIconPng)
                     ?.let { iconFile.set(it) }
                 menuGroup = brand.nameEn
                 appCategory = "Game"

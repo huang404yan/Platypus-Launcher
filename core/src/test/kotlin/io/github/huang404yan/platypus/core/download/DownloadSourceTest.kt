@@ -17,12 +17,12 @@ class DownloadSourceTest {
     }
 
     @Test
-    fun `认不出的值与空串都退回自动`() {
-        assertEquals(DownloadSource.AUTO, DownloadSource.of(""))
-        assertEquals(DownloadSource.AUTO, DownloadSource.of("   "))
-        assertEquals(DownloadSource.AUTO, DownloadSource.of("only-official"))
-        // 老版本没有这个字段，读出来是空串；升级后必须还能起来。
-        assertEquals(DownloadSource.AUTO, DownloadSource.DEFAULT)
+    fun `认不出的值与空串都退回默认`() {
+        assertEquals(DownloadSource.DEFAULT, DownloadSource.of(""))
+        assertEquals(DownloadSource.DEFAULT, DownloadSource.of("   "))
+        assertEquals(DownloadSource.DEFAULT, DownloadSource.of("only-official"))
+        // 老版本没有这个字段，读出来是空串；升级后必须还能起来，并且落到镜像优先。
+        assertEquals(DownloadSource.MIRROR, DownloadSource.DEFAULT)
     }
 
     @Test

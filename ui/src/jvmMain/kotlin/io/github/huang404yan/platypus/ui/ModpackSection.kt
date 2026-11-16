@@ -34,6 +34,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import io.github.huang404yan.platypus.core.instance.Instance
 import io.github.huang404yan.platypus.core.instance.LoaderKind
+import io.github.huang404yan.platypus.core.instance.MemoryDefaults
 import io.github.huang404yan.platypus.core.install.ModpackImportException
 import io.github.huang404yan.platypus.core.install.ModpackImportOutcome
 import io.github.huang404yan.platypus.core.install.ModpackImporter
@@ -90,7 +91,7 @@ internal fun ModpackPage(
                 if (initialGameRoot.isNullOrBlank() && stored.defaultGameRoot.isNotBlank()) {
                     gameDirText = stored.defaultGameRoot
                 }
-                defaultMemoryMb = stored.defaultMemoryMb
+                defaultMemoryMb = MemoryDefaults.resolve(stored.defaultMemoryMb, stored.defaultMemoryAuto, SystemMemory.totalMb)
             }
         }
     }

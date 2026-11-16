@@ -3,19 +3,23 @@ package io.github.huang404yan.platypus.core.download
 /**
  * 下载源偏好：同一个文件往往有官方源与国内镜像两条路，这里决定先走哪条。
  *
- * 只有两个选项，**没有「只用官方源」**：那等于把兜底关掉。官方源被墙的时候，
+ * 只有两个选项，**没有「只走一条」**：那等于把兜底关掉。官方源被墙的时候，
  * 用户选了它就只能看着进度条不动，而镜像本来是他唯一能下成的那条路。
  * 「优先镜像」也不是「只走镜像」——镜像挂了照样退回官方源。两个选项的差别只是顺序。
+ *
+ * 2026-11-16 把默认值从官方源优先改成镜像优先：国内用官方源基本是等超时，
+ * 一个原版装下来大部分时间花在等 30 秒的连接超时上，观感就是「下载很慢」。
+ * 镜像内容坏掉有 sha1 校验兜底，判失败会自己退回官方源，所以先走快的那条不亏。
  */
 enum class DownloadSource(val id: String, val label: String, val note: String) {
-    /** 官方源先试，失败再换镜像。默认值。 */
+    /** 官方源先试，失败再换镜像。 */
     AUTO(
         "auto",
-        "自动（官方源优先）",
+        "官方源优先",
         "先试官方源，失败才换镜像。国内网络下通常要等到超时才换过去，慢一些但一定拿到官方原件。",
     ),
 
-    /** 镜像先试，失败再退回官方源。 */
+    /** 镜像先试，失败再退回官方源。默认值。 */
     MIRROR(
         "mirror",
         "优先国内镜像",
@@ -24,8 +28,8 @@ enum class DownloadSource(val id: String, val label: String, val note: String) {
     ;
 
     companion object {
-        /** 默认值：与老版本行为一致（官方源在前）。 */
-        val DEFAULT: DownloadSource = AUTO
+        /** 默认值：镜像优先。理由见这个枚举的 KDoc 与 MIRROR 那条。 */
+        val DEFAULT: DownloadSource = MIRROR
 
         /** 从设置文件里的字符串认出偏好，认不出来退回默认值。 */
         fun of(raw: String): DownloadSource {

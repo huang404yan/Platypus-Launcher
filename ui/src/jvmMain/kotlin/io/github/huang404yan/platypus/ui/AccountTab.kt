@@ -307,24 +307,14 @@ internal fun AccountTab(
         }
     }
 
-    // 包里自带应用 ID 时（正式版），「四步申请」那张卡没有意义 —— 换成一句「已经配好了」。
+    // 包里自带应用 ID 时（正式版），「填 ID」这一整套界面**整块不显示**（2026-11-16 用户要求）：
+    // 这一版是发给所有人用的，让每个下载者去 Azure 申请一个应用 ID 属于把发行方的事推给用户，
+    // 而且填错、换 ID 都会让已经存下来的 refresh_token 作废（微软把令牌绑在应用上）。
+    // 所以只在孵化版（包里没 ID）时才放出这一步，标题也从「第一步 / 第二步」改成不带序号的说法。
     // 判据走 ClientIds.builtin() 而不是看 [clientId] 参数：参数是用户自己填在设置里的值，
     // 内置 ID 在的时候它通常是空的，拿它判会把孵化版的逻辑套到正式版头上。
     val packagedId = ClientIds.builtin()
-    if (packagedId.isNotEmpty()) {
-        SettingCard(
-            title = "应用 ID",
-            hint = "这个安装包已经自带一个应用 ID，正版登录不需要你填任何东西，直接看下面第二步。",
-        ) {
-            Text(
-                "用的是这个包自己的应用注册（前 8 位 " + packagedId.take(8) + "…）。" +
-                    "换成自己申请的那个只会让已经存下来的登录凭据对不上 —— 微软把 refresh_token " +
-                    "绑在应用上，换了 ID 一律要重登，所以不用管它。",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-    } else SettingCard(
+    if (packagedId.isEmpty()) SettingCard(
         title = "第一步：填一个自己的应用 ID",
         hint = "微软不发放通用的客户端 ID，任何「随安装包一起发」的 ID 都等于所有使用者共用一份" +
             "别人的应用注册，出了限流或被收紧，拿到安装包的人无从处理；仓库公开后谁都能抄走。" +
@@ -469,7 +459,7 @@ internal fun AccountTab(
     }
 
     SettingCard(
-        title = "第二步：登录",
+        title = if (packagedId.isNotEmpty()) "登录" else "第二步：登录",
         hint = "登录走微软官方的设备码流程：点下面的按钮，拿手机或浏览器打开 microsoft.com/link " +
             "输一串短码，输完这边自动继续。登录成功后本地只留一枚 refresh_token，存在游戏目录下的 " +
             "platypus/accounts.json 里 —— 那个文件等价于账号密码，别发给别人。",

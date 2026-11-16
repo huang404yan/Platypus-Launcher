@@ -1,4 +1,4 @@
-package io.github.huang404yan.platypus.launcher
+package io.github.huang404yan.platypus.launcher.preview
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -35,6 +35,7 @@ import io.github.huang404yan.platypus.core.instance.InstanceDetails
 import io.github.huang404yan.platypus.core.instance.InstanceDetailsLoader
 import io.github.huang404yan.platypus.core.instance.InstanceEditResult
 import io.github.huang404yan.platypus.core.instance.InstanceEdits
+import io.github.huang404yan.platypus.core.instance.MemoryDefaults
 import io.github.huang404yan.platypus.core.instance.JsonInstanceRepository
 import io.github.huang404yan.platypus.core.runtime.GameJavaRules
 import io.github.huang404yan.platypus.core.settings.JsonSettingsRepository
@@ -94,7 +95,13 @@ internal fun InstanceDetailScreen(
                 JsonSettingsRepository(JsonSettingsRepository.defaultFile(settingsRoot)).load()
             }.getOrNull()
         } ?: return@LaunchedEffect
-        val fallback = Instance.clampMemoryMb(stored.defaultMemoryMb)
+        // 设置页那边开着「自动」时，defaultMemoryMb 里存的是上次算出来的快照；
+        // 换了台机器、或者设置被手改过，就地按这台手机的物理内存重算一遍才准。
+        val fallback = MemoryDefaults.resolve(
+            stored.defaultMemoryMb,
+            stored.defaultMemoryAuto,
+            deviceTotalMemoryMb(context),
+        )
         defaultMemoryMb = fallback
         // 跟随默认的实例：这一格要显示生效的那个数，而不是 instances.json 里写死的老数。
         if (instance.memoryFollowsDefault) memoryText = fallback.toString()

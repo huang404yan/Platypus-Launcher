@@ -43,6 +43,7 @@ import io.github.huang404yan.platypus.core.instance.InstanceEditResult
 import io.github.huang404yan.platypus.core.instance.InstanceEdits
 import io.github.huang404yan.platypus.core.instance.InstanceLayouts
 import io.github.huang404yan.platypus.core.instance.InstanceMigration
+import io.github.huang404yan.platypus.core.instance.MemoryDefaults
 import io.github.huang404yan.platypus.core.instance.formatBytes
 import io.github.huang404yan.platypus.core.packs.PackEntry
 import io.github.huang404yan.platypus.core.packs.PackFileOps
@@ -136,7 +137,7 @@ internal fun InstanceDetailPanel(
         val repository = backend?.settings ?: return@LaunchedEffect
         val stored = withContext(Dispatchers.IO) { runCatching { repository.load() }.getOrNull() }
         if (stored != null) {
-            val fallback = Instance.clampMemoryMb(stored.defaultMemoryMb)
+            val fallback = MemoryDefaults.resolve(stored.defaultMemoryMb, stored.defaultMemoryAuto, SystemMemory.totalMb)
             defaultMemoryMb = fallback
             // 跟随默认的实例：滑条初值要显示生效的那个数，而不是 instances.json 里存的老数。
             if (instance.memoryFollowsDefault) memoryMb = fallback

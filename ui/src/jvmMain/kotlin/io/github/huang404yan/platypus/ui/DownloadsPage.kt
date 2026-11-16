@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
@@ -39,6 +40,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import io.github.huang404yan.platypus.core.instance.Instance
+import io.github.huang404yan.platypus.core.instance.MemoryDefaults
 import io.github.huang404yan.platypus.core.loader.FabricLoaderVersion
 import io.github.huang404yan.platypus.core.loader.ForgeVersion
 import io.github.huang404yan.platypus.core.loader.NeoForgeVersion
@@ -105,11 +107,25 @@ private fun LoaderPickerRow(
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+            // 这个按钮原来只是个小尺寸的文字按钮，点击区就一行字高 —— 用户抱怨
+            // 「选择的框太小点不中」（2026-11-16）。改成占满 1/3 宽、最小 44dp 高，
+            // 且把「当前选中的版本号」直接写在按钮上，不展开也知道选了哪个。
             OutlinedButton(
                 onClick = { expanded = !expanded },
+                modifier = Modifier
+                    .weight(1f, fill = false)
+                    .widthIn(min = 180.dp)
+                    .heightIn(min = 44.dp),
                 enabled = enabled && options.isNotEmpty(),
             ) {
-                Text(if (expanded) "收起" else "选 loader 版本")
+                Text(
+                    when {
+                        expanded -> "收起版本列表"
+                        options.isEmpty() -> "选 loader 版本"
+                        else -> options.firstOrNull { it.selected }?.let { "版本 " + it.version } ?: "选 loader 版本"
+                    },
+                    maxLines = 1,
+                )
             }
         }
 
@@ -118,7 +134,7 @@ private fun LoaderPickerRow(
                 Modifier.fillMaxWidth(),
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
             ) {
-                LazyColumn(Modifier.fillMaxWidth().heightIn(max = 120.dp).padding(4.dp)) {
+                LazyColumn(Modifier.fillMaxWidth().heightIn(max = 240.dp).padding(4.dp)) {
                     items(options, key = { it.version }) { entry ->
                         Row(
                             Modifier
@@ -135,7 +151,7 @@ private fun LoaderPickerRow(
                                     onCheckedChange(true)
                                     expanded = false
                                 }
-                                .padding(horizontal = 10.dp, vertical = 6.dp),
+                                .padding(horizontal = 10.dp, vertical = 10.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             Text(
@@ -582,7 +598,7 @@ fun DownloadsPage(
                 if (initialGameRoot.isNullOrBlank() && stored.defaultGameRoot.isNotBlank()) {
                     gameDirText = stored.defaultGameRoot
                 }
-                defaultMemoryMb = stored.defaultMemoryMb
+                defaultMemoryMb = MemoryDefaults.resolve(stored.defaultMemoryMb, stored.defaultMemoryAuto, SystemMemory.totalMb)
             }
         }
         if (manifest == null) refreshManifest()
@@ -674,6 +690,12 @@ fun DownloadsPage(
             if (busy) {
                 OutlinedButton(onClick = { cancelInstall() }) { Text("取消") }
             }
+        }
+
+        // 点「一键安装」但条件没满足时（目录没填、没选版本、没选 loader）的提示。
+        // 原来它在版本列表下面，隔着几十行 —— 用户点了按钮以为坏了，所以要挪到按钮正下方。
+        if (message.isNotBlank() && phase !is InstallPhase.Failed) {
+            DownloadHint(message)
         }
 
         FabricRow(
@@ -790,7 +812,8 @@ fun DownloadsPage(
                 Modifier.fillMaxWidth(),
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
             ) {
-                LazyColumn(Modifier.fillMaxWidth().heightIn(max = 132.dp).padding(4.dp)) {
+                // 132dp 只够露出三四行，一滚就找不到刚才那个版本了；放到 200dp 能同时看到八九行。
+                LazyColumn(Modifier.fillMaxWidth().heightIn(max = 200.dp).padding(4.dp)) {
                     items(visible, key = { it.id }) { entry ->
                         val selected = entry.id == versionText.trim()
                         Row(
@@ -802,7 +825,7 @@ fun DownloadsPage(
                                     MaterialTheme.shapes.small,
                                 )
                                 .clickable(enabled = !busy) { versionText = entry.id }
-                                .padding(horizontal = 10.dp, vertical = 6.dp),
+                                .padding(horizontal = 10.dp, vertical = 9.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             Text(
@@ -822,10 +845,9 @@ fun DownloadsPage(
             }
         }
 
-        // 整合包导入搬去左栏「下载 / 整合包」了：它和一键装原版是并列的两件事，
-        // 都塞在原版页底部时，用户要滚过版本列表和进度条才看得见 —— 那正是「藏得深」。
-        if (message.isNotBlank()) {
-            DownloadHint(message, error = phase is InstallPhase.Failed)
+        // 失败原因留在这里（顶部摘要卡已经说了「卡在哪个步骤」，这里给完整原文与重试入口）。
+        if (message.isNotBlank() && phase is InstallPhase.Failed) {
+            DownloadHint(message, error = true)
         }
 
         // 失败后给一个明确的下一动作：直接重来，已下好并通过 sha1 的文件会跳过。
@@ -846,30 +868,10 @@ fun DownloadsPage(
         }
 
         // 分步进度：每一步一行，卡在哪一步一眼能看出来。
+        // 进度条与百分比不在这里重复了 —— 顶部的摘要卡已经画了一份，两处在同一屏里
+        // 显示同一个百分比只会让人怀疑哪个才是真的。
         if (currentStep != InstallStep.IDLE) {
             StepList(currentStep = currentStep, states = stepStates)
-        }
-
-        val snapshot = progress
-        if (snapshot != null && snapshot.total > 0L) {
-            Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                // 分母不全时画进度条等于撒谎（永远停在 9x%），只报文件数
-                if (snapshot.totalReliable) {
-                    ProgressBar(snapshot.fraction)
-                }
-                Text(
-                    formatProgressDetail(snapshot),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                if (snapshot.step == InstallStep.DOWNLOADING) {
-                    Text(
-                        "速度 " + formatSpeed(speedBytesPerSecond) + " · 已用 " + formatDuration(elapsedMs),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-            }
         }
 
         val finished = phase as? InstallPhase.Finished
@@ -907,12 +909,12 @@ fun DownloadsPage(
 }
 
 /**
- * 安装状态的一行摘要，钉在页面顶部。
+ * 安装状态的醒目摘要，紧跟在「一键安装」那几行下面（2026-11-16 重做）。
  *
- * 详细的分步列表、进度条、失败原因仍在页面下方（那里有完整信息），
- * 但那些内容在 1280x800 的窗口里一滚就出屏 —— 用户点完「一键安装」、
- * 页面没动，很容易以为按钮没反应，然后再点几次。这个条的作用就是
- * 「点了有反应」当场可见：现在在干什么、下了多少、大概还剩多久。
+ * 为什么要做得这么重：原来这里只有一行灰色小字，用户点完安装视线还停在按钮上，
+ * 一行小字根本不构成「有反应了」的证据；而带进度条、带百分比的卡片一变出来，
+ * 不用读字就知道在下载。详细的分步列表仍在页面下方，这里只回答三个问题：
+ * 在干什么、做到几成、还要多久。
  */
 @Composable
 private fun InstallStatusBanner(
@@ -922,7 +924,7 @@ private fun InstallStatusBanner(
     speedBytesPerSecond: Long,
     elapsedMs: Long,
 ) {
-    val (text, isError) = when (phase) {
+    val (text, isError, fraction) = when (phase) {
         is InstallPhase.Running -> {
             val detail = if (progress != null && progress.total > 0L) {
                 " · " + formatProgressDetail(progress)
@@ -934,10 +936,14 @@ private fun InstallStatusBanner(
             } else {
                 ""
             }
-            ("正在" + currentStep.label + detail + speed + " · 已用 " + formatDuration(elapsedMs)) to false
+            Triple(
+                "正在" + currentStep.label + detail + speed + " · 已用 " + formatDuration(elapsedMs),
+                false,
+                if (progress != null && progress.total > 0L && progress.totalReliable) progress.fraction else null,
+            )
         }
-        is InstallPhase.Failed -> ("卡在「" + phase.step.label + "」：" + phase.message) to true
-        is InstallPhase.Finished -> ("安装完成：" + phase.outcome.instance.name + " 已就绪") to false
+        is InstallPhase.Failed -> Triple("卡在「" + phase.step.label + "」：" + phase.message, true, null)
+        is InstallPhase.Finished -> Triple("安装完成：" + phase.outcome.instance.name + " 已就绪", false, null)
         InstallPhase.Idle -> return
     }
     Card(
@@ -946,16 +952,57 @@ private fun InstallStatusBanner(
             containerColor = if (isError) {
                 MaterialTheme.colorScheme.errorContainer
             } else {
-                MaterialTheme.colorScheme.surfaceVariant
+                MaterialTheme.colorScheme.primaryContainer
             },
         ),
     ) {
-        Text(
-            text,
-            Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
-            style = MaterialTheme.typography.bodySmall,
-            color = if (isError) MaterialTheme.colorScheme.onErrorContainer else MaterialTheme.colorScheme.onSurfaceVariant,
-        )
+        Column(
+            Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            Row(
+                Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Text(
+                    when {
+                        isError -> "安装卡住了"
+                        phase is InstallPhase.Finished -> "装好了"
+                        else -> "正在下载安装"
+                    },
+                    Modifier.weight(1f),
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold,
+                    color = if (isError) {
+                        MaterialTheme.colorScheme.onErrorContainer
+                    } else {
+                        MaterialTheme.colorScheme.onPrimaryContainer
+                    },
+                )
+                if (fraction != null) {
+                    Text(
+                        (fraction * 100f).toInt().toString() + "%",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer,
+                    )
+                }
+            }
+            if (fraction != null) {
+                ProgressBar(fraction)
+            }
+            Text(
+                text,
+                Modifier.fillMaxWidth(),
+                style = MaterialTheme.typography.bodySmall,
+                color = if (isError) {
+                    MaterialTheme.colorScheme.onErrorContainer
+                } else {
+                    MaterialTheme.colorScheme.onPrimaryContainer
+                },
+            )
+        }
     }
 }
 /**

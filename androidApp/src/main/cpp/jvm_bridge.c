@@ -178,7 +178,7 @@ static char *to_jni_class_name(const char *raw) {
 }
 
 JNIEXPORT jint JNICALL
-Java_io_github_huang404yan_platypus_launcher_runtime_JvmBridge_nativeStart(
+Java_io_github_huang404yan_platypus_launcher_preview_runtime_JvmBridge_nativeStart(
         JNIEnv *env, jclass clazz, jstring libDir, jstring jvmFile,
         jobjectArray options, jstring mainClass, jobjectArray appArgs) {
     (void) clazz;
@@ -287,7 +287,7 @@ Java_io_github_huang404yan_platypus_launcher_runtime_JvmBridge_nativeStart(
 }
 
 JNIEXPORT jstring JNICALL
-Java_io_github_huang404yan_platypus_launcher_runtime_JvmBridge_nativeLastError(
+Java_io_github_huang404yan_platypus_launcher_preview_runtime_JvmBridge_nativeLastError(
         JNIEnv *env, jclass clazz) {
     (void) clazz;
     return (*env)->NewStringUTF(env, g_last_error);

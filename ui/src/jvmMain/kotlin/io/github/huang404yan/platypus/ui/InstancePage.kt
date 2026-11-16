@@ -48,6 +48,7 @@ import io.github.huang404yan.platypus.core.instance.InstanceDeleter
 import io.github.huang404yan.platypus.core.instance.InstanceScanner
 import io.github.huang404yan.platypus.core.instance.LoaderKind
 import io.github.huang404yan.platypus.core.instance.LocalInstance
+import io.github.huang404yan.platypus.core.instance.MemoryDefaults
 import io.github.huang404yan.platypus.core.instance.ScanResult
 import io.github.huang404yan.platypus.core.instance.formatBytes
 import io.github.huang404yan.platypus.core.instance.instanceKey
@@ -405,7 +406,7 @@ fun InstancePage(
                 rootText = stored.defaultGameRoot
             }
             if (stored != null) {
-                defaultMemoryMb = Instance.clampMemoryMb(stored.defaultMemoryMb)
+                defaultMemoryMb = MemoryDefaults.resolve(stored.defaultMemoryMb, stored.defaultMemoryAuto, SystemMemory.totalMb)
             }
         }
         if (rootText.isNotBlank()) rescan()

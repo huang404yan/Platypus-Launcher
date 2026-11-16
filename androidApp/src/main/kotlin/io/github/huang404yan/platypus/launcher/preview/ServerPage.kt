@@ -1,4 +1,4 @@
-package io.github.huang404yan.platypus.launcher
+package io.github.huang404yan.platypus.launcher.preview
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable

@@ -67,6 +67,7 @@ import io.github.huang404yan.platypus.core.auth.StoredAccount
 import io.github.huang404yan.platypus.core.edition.Edition
 import io.github.huang404yan.platypus.core.instance.Instance
 import io.github.huang404yan.platypus.core.instance.InstanceLayouts
+import io.github.huang404yan.platypus.core.instance.MemoryDefaults
 import io.github.huang404yan.platypus.core.instance.InstanceScanner
 import io.github.huang404yan.platypus.core.instance.ScanResult
 import io.github.huang404yan.platypus.core.instance.instanceKey
@@ -617,7 +618,7 @@ fun LaunchPage(
                 if (rootText.isBlank() && stored.defaultGameRoot.isNotBlank()) {
                     rootText = stored.defaultGameRoot
                 }
-                defaultMemoryMb = Instance.clampMemoryMb(stored.defaultMemoryMb)
+                defaultMemoryMb = MemoryDefaults.resolve(stored.defaultMemoryMb, stored.defaultMemoryAuto, SystemMemory.totalMb)
                 clientIdValue = stored.microsoftClientId
                 // 要在下面的 rescan() 之前就位：它是「扫完后选谁」的一级兜底。
                 lastInstanceKey = stored.lastInstanceKey
@@ -657,7 +658,7 @@ fun LaunchPage(
                 val stored = withContext(Dispatchers.IO) { runCatching { settingsRepository.load() }.getOrNull() }
                 if (stored != null) {
                     clientIdValue = stored.microsoftClientId
-                    defaultMemoryMb = Instance.clampMemoryMb(stored.defaultMemoryMb)
+                    defaultMemoryMb = MemoryDefaults.resolve(stored.defaultMemoryMb, stored.defaultMemoryAuto, SystemMemory.totalMb)
                 }
             }
             if (rootText.isNotBlank()) rescan()

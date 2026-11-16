@@ -134,11 +134,17 @@ internal fun installDir(): File? {
     return jar.absoluteFile.parentFile?.parentFile
 }
 
-/** 窗口图标从 jar 内的 icon/platypus.png 读取；读不到就不带图标，不阻断启动。 */
+/**
+ * 窗口图标按通道取 jar 内的 icon/platypus-adult.png 或 icon/platypus-baby.png。
+ *
+ * 以前只有一份写死的 icon/platypus.png，而那份是幼体的图 —— 于是正式版窗口、
+ * 任务栏、Alt-Tab 里的图标全是幼体，跟安装包图标也不一致。读不到就不带图标，不阻断启动。
+ */
 private fun loadWindowIcon(): BitmapPainter? {
-    val bytes = Thread.currentThread().contextClassLoader
-        ?.getResourceAsStream("icon/platypus.png")
-        ?.use { it.readBytes() }
+    val name = if (Brand.isPreview) "icon/platypus-baby.png" else "icon/platypus-adult.png"
+    val loader = Thread.currentThread().contextClassLoader
+    val bytes = loader?.getResourceAsStream(name)?.use { it.readBytes() }
+        ?: loader?.getResourceAsStream("icon/platypus-adult.png")?.use { it.readBytes() }
         ?: return null
     return runCatching { BitmapPainter(Image.makeFromEncoded(bytes).toComposeImageBitmap()) }.getOrNull()
 }
