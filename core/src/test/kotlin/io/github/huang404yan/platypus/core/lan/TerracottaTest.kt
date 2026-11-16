@@ -217,14 +217,25 @@ class TerracottaTest {
     }
 
     @Test
-    fun `下载地址有三个源且都指向同一个版本`() {
+    fun `下载地址只剩官方一条，指向内置版本`() {
         val urls = Terracotta.downloadUrls()
-        assertEquals(3, urls.size)
-        urls.forEach { url ->
-            assertTrue(url.startsWith("https://"), "不是 https：" + url)
-            assertTrue(url.contains(Terracotta.VERSION), "版本号不在地址里：" + url)
-            assertTrue(url.endsWith(Terracotta.packageName()), "文件名不对：" + url)
-        }
+        assertEquals(1, urls.size, "2026-11-16 起去掉 cnb.cool / gitee 两个转存，只留官方：$urls")
+        val url = urls.single()
+        assertTrue(url.startsWith("https://github.com/burningtnt/Terracotta/releases/download/"), url)
+        assertTrue(url.contains(Terracotta.VERSION), "版本号不在地址里：" + url)
+        assertTrue(url.endsWith(Terracotta.packageName()), "文件名不对：" + url)
+    }
+
+    @Test
+    fun `可以按别的版本号拼下载地址`() {
+        val url = Terracotta.downloadUrls("9.9.9").single()
+        assertTrue(url.contains("v9.9.9/"), url)
+        assertTrue(url.endsWith("terracotta-9.9.9-windows-x86_64-pkg.tar.gz"), url)
+    }
+
+    @Test
+    fun `packageName 跟着版本号走`() {
+        assertEquals("terracotta-" + Terracotta.VERSION + "-windows-x86_64-pkg.tar.gz", Terracotta.packageName())
     }
 
     @Test

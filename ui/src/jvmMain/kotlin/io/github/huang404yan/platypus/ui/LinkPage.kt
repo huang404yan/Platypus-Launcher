@@ -116,10 +116,11 @@ fun LinkPage(
             // 排在第一位是因为点进这一页的人，九成就是为它来的。
             TerracottaSection(gameRoot = initialGameRoot) { text -> notice = text }
 
-            LinkCard(title = "跨网直连", badge = "要公网 IPv6") {
+            LinkCard(title = "跨网直连（公网 IP + 端口映射）", badge = "不用装东西") {
                 Text(
-                    "双方都有公网 IPv6 时，把下面这个地址发过去，他在「加入服务器」里粘上就能进，不用装任何东西。" +
-                        "家里没有公网 IPv6（大多数宽带都没有）就别在这儿折腾，用上面的陶瓦。",
+                    "不用装陶瓦的两条路：对方有公网 IPv6 时直接给他「[IPv6]:端口」；" +
+                        "只有公网 IPv4 时，得先在自家路由器上把这个端口映射到本机，再把「公网IP:端口」给他。" +
+                        "两条都要游戏先「对局域网开放」，端口填聊天栏里那串数字。",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -147,19 +148,59 @@ fun LinkPage(
 
                 val port = portText.toIntOrNull()?.takeIf { it in 1..65535 }
                 val publicV6 = addresses.filter { it.kind == LocalBinding.Kind.IPV6 }
+                // 公网 IPv4 与运营商级 NAT 都归在 OTHER：前者做了端口映射能用，后者基本没救，
+                // 得分开说，否则用户会拿一个 100.64.x.x 去映射半天。
+                val publicV4 = addresses.filter {
+                    it.kind == LocalBinding.Kind.OTHER && !LocalAddresses.isCarrierNat(it.host)
+                }
+                val carrierNat = addresses.filter {
+                    it.kind == LocalBinding.Kind.OTHER && LocalAddresses.isCarrierNat(it.host)
+                }
+                // 做端口映射时要填「内网地址」，直接把它摆出来，省得用户自己去 ipconfig 里翻。
+                val lanAddresses = addresses.filter { it.kind == LocalBinding.Kind.LAN }
                 when {
                     port == null -> LinkHint("端口要填 1–65535 的数字。", error = true)
-                    publicV6.isEmpty() -> Text(
-                        "这台机器没有公网 IPv6。要么找运营商要，要么用上面的陶瓦。",
+                    publicV6.isEmpty() && publicV4.isEmpty() -> Text(
+                        "这台机器读不到公网地址：没有公网 IPv6，网卡上也没有公网 IPv4" +
+                            "（家用宽带通常就是这样，本机只有一个 192.168.x.x）。" +
+                            "先把局域网这条路走通，跨网络就用上面的陶瓦。",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
-                    else -> for (binding in publicV6) {
-                        LocalAddressRow(
-                            binding = binding,
-                            port = port,
-                            onCopy = { copy(binding.withPort(port), "公网 IPv6 地址") },
-                        )
+                    else -> {
+                        if (publicV6.isNotEmpty()) {
+                            LinkHint("公网 IPv6｜对方也有 IPv6 时，把下面这条发过去就能进，不用动路由器。")
+                            for (binding in publicV6) {
+                                LocalAddressRow(
+                                    binding = binding,
+                                    port = port,
+                                    onCopy = { copy(binding.withPort(port), "公网 IPv6 地址") },
+                                )
+                            }
+                        }
+                        if (publicV4.isNotEmpty()) {
+                            LinkHint(
+                                "公网 IPv4｜先在路由器上把这个端口映射到本机" +
+                                    "（路由器后台找「端口转发 / 虚拟服务器」，外部端口与本机端口都填 " + port +
+                                    "，内网地址填 " +
+                                    (lanAddresses.firstOrNull()?.host ?: "本机在局域网里的那个地址") +
+                                    "），映射完再把下面这条发过去。",
+                            )
+                            for (binding in publicV4) {
+                                LocalAddressRow(
+                                    binding = binding,
+                                    port = port,
+                                    onCopy = { copy(binding.withPort(port), "公网 IPv4 地址") },
+                                )
+                            }
+                        }
+                        if (carrierNat.isNotEmpty()) {
+                            LinkHint(
+                                "检测到运营商级 NAT 地址（100.64.x.x）：路由器上映射了也对不上外网，" +
+                                    "要么找运营商要公网 IP，要么用上面的陶瓦。",
+                                error = true,
+                            )
+                        }
                     }
                 }
             }
@@ -550,10 +591,13 @@ private fun LocalAddressRow(binding: LocalBinding, port: Int, onCopy: () -> Unit
                 fontWeight = FontWeight.Medium,
             )
             Text(
-                if (binding.interfaceName.isNotBlank()) {
-                    "网卡 " + binding.interfaceName
-                } else {
-                    "公网 IPv6，对方也有 IPv6 时可以直接连"
+                // 副行说清这条地址是干什么用的。以前这里只会写「公网 IPv6」，补了公网 IPv4
+                // 之后就会把一条 IPv4 说成 IPv6，所以改成按类型分开说。
+                when (binding.kind) {
+                    LocalBinding.Kind.LAN -> "局域网地址" +
+                        (if (binding.interfaceName.isNotBlank()) "（网卡 " + binding.interfaceName + "）" else "")
+                    LocalBinding.Kind.IPV6 -> "公网 IPv6，对方也有 IPv6 时可以直接连"
+                    else -> "公网 IPv4，做完端口映射后对方才能连进来"
                 },
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,

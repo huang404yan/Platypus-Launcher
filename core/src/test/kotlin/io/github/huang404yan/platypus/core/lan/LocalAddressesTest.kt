@@ -2,6 +2,7 @@ package io.github.huang404yan.platypus.core.lan
 
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 class LocalAddressesTest {
@@ -81,6 +82,39 @@ class LocalAddressesTest {
     fun `拼端口时 IPv6 加方括号`() {
         assertEquals("192.168.1.2:25565", LocalBinding("192.168.1.2", LocalBinding.Kind.LAN).withPort(25565))
         assertEquals("[2001:db8::5]:25565", LocalBinding("2001:db8::5", LocalBinding.Kind.IPV6).withPort(25565))
+    }
+
+    // ── 运营商级 NAT 判定（2026-11-16 补公网直连时加） ──────────────
+
+    @Test
+    fun `100_64 段认作运营商级 NAT`() {
+        // 100.64.0.0/10 是 RFC 6598 给运营商级 NAT 留的段，这一段地址拿来做端口映射没有意义：
+        // 外面还有一层运营商的 NAT，别人连不进来。
+        assertTrue(LocalAddresses.isCarrierNat("100.64.0.1"))
+        assertTrue(LocalAddresses.isCarrierNat("100.100.20.30"))
+        assertTrue(LocalAddresses.isCarrierNat("100.127.255.254"))
+    }
+
+    @Test
+    fun `100_64 段之外不算运营商级 NAT`() {
+        assertFalse(LocalAddresses.isCarrierNat("100.63.255.255"), "100.63 不在 100.64/10 里")
+        assertFalse(LocalAddresses.isCarrierNat("100.128.0.1"), "100.128 不在 100.64/10 里")
+        // 真公网 IPv4：能直接做端口映射，不能被误判进 NAT 那类
+        assertFalse(LocalAddresses.isCarrierNat("203.0.113.9"))
+        assertFalse(LocalAddresses.isCarrierNat("192.168.1.2"))
+        // IPv6 与非 IP 字符串一律不算
+        assertFalse(LocalAddresses.isCarrierNat("2001:db8::5"))
+        assertFalse(LocalAddresses.isCarrierNat("localhost"))
+        assertFalse(LocalAddresses.isCarrierNat(""))
+    }
+
+    @Test
+    fun `运营商级 NAT 段仍然归在其它类`() {
+        // 判定只影响界面怎么解释它，不改 Kind —— 加枚举值会打断安卓端那份 LinkPage。
+        val picked = LocalAddresses.pick(listOf(entry("100.64.0.1")))
+        assertEquals(1, picked.size)
+        assertEquals(LocalBinding.Kind.OTHER, picked.single().kind)
+        assertTrue(LocalAddresses.isCarrierNat(picked.single().host))
     }
 
     @Test

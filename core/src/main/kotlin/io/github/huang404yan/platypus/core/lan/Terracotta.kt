@@ -70,11 +70,17 @@ object Terracotta {
     /** 发行包的文件名。 */
     fun packageName(): String = "terracotta-" + VERSION + "-windows-x86_64-pkg.tar.gz"
 
-    /** 三个下载源，按国内可达性排序。实测 cnb.cool 最快，gitee 次之。 */
-    fun downloadUrls(): List<String> = listOf(
-        "https://cnb.cool/HMCL-Terracotta/Terracotta/-/releases/download/v" + VERSION + "/" + packageName(),
-        "https://gitee.com/burningtnt/Terracotta/releases/download/v" + VERSION + "/" + packageName(),
-        "https://github.com/burningtnt/Terracotta/releases/download/v" + VERSION + "/" + packageName(),
+    /**
+     * 下载地址。
+     *
+     * 以前这里有三个源（cnb.cool / gitee / github），按国内可达性排过序。2026-11-16 起
+     * 只留 GitHub 官方一条：那两个是国内转存，各固定住一个旧版本号，而现在的规矩是
+     * 「跟着官方最新版走」（见 [TerracottaReleases]），转存不同步就会下到跟校验值对不上的包。
+     *
+     * [version] 可以传在线查到的版本；不传就用内置的 [VERSION]。
+     */
+    fun downloadUrls(version: String = VERSION): List<String> = listOf(
+        TerracottaReleases.officialUrl("v" + version, TerracottaReleases.assetNameOf(version)),
     )
 
     // ── 房间码 ─────────────────────────────────────────────────────────────────

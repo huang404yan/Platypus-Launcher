@@ -118,6 +118,17 @@ object LocalAddresses {
         return null
     }
 
+    /**
+     * 是不是运营商级 NAT 地址（100.64.0.0/10）。
+     *
+     * 这类地址看着像公网 IPv4，其实在运营商自己的 NAT 后面：本机路由器上做端口映射也映射不到
+     * 真正的公网，对外发出去对方连不上。界面拿它单独说一句，免得用户对着它折腾半天。
+     */
+    fun isCarrierNat(host: String): Boolean {
+        val v4 = parseV4(host) ?: return false
+        return v4[0] == 100 && v4[1] in 64..127
+    }
+
     private fun isLinkLocal(host: String): Boolean {
         if (host.startsWith("169.254.")) return true
         val lower = host.lowercase()

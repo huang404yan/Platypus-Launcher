@@ -32,6 +32,7 @@ import androidx.compose.ui.unit.dp
 import io.github.huang404yan.platypus.core.lan.Terracotta
 import io.github.huang404yan.platypus.core.lan.TerracottaClient
 import io.github.huang404yan.platypus.core.lan.TerracottaInstaller
+import io.github.huang404yan.platypus.core.lan.TerracottaReleases
 import io.github.huang404yan.platypus.core.lan.TerracottaState
 import io.github.huang404yan.platypus.core.lan.TerracottaStages
 import kotlinx.coroutines.CancellationException
@@ -74,6 +75,10 @@ internal fun TerracottaSection(gameRoot: String?, onNotice: (String) -> Unit = {
     val client = remember(dir) { dir?.let { TerracottaClient(it) } }
 
     var installed by remember(dir) { mutableStateOf(dir != null && Terracotta.isInstalled(dir)) }
+    // 本地记着的版本号与在线查到的最新版。前者来自安装时写下的小文件，后者只读不写。
+    var installedVersion by remember(dir) { mutableStateOf(dir?.let { TerracottaInstaller.readInstalledVersion(it) }.orEmpty()) }
+    var latestVersion by remember(dir) { mutableStateOf("") }
+    var latestProblem by remember(dir) { mutableStateOf("") }
     var state by remember(dir) { mutableStateOf(TerracottaState()) }
     var busy by remember(dir) { mutableStateOf("") }
     var notice by remember(dir) { mutableStateOf("") }
@@ -115,6 +120,17 @@ internal fun TerracottaSection(gameRoot: String?, onNotice: (String) -> Unit = {
             }
             delay(1000)
         }
+    }
+
+    // 装上之后问一句官方最新是哪个版本。只用于显示「有新版本」提示，不自动动用户的文件。
+    // 失败（限流、断网、空壳包没配地址）只留一句原因，不打扰用户。
+    LaunchedEffect(dir, installed) {
+        if (!installed) return@LaunchedEffect
+        val result = withContext(Dispatchers.IO) {
+            runCatching { TerracottaReleases.fetchLatest() }
+        }
+        latestVersion = result.getOrNull()?.version.orEmpty()
+        latestProblem = result.exceptionOrNull()?.message.orEmpty()
     }
 
     fun run(label: String, block: suspend () -> String) {
@@ -183,15 +199,21 @@ internal fun TerracottaSection(gameRoot: String?, onNotice: (String) -> Unit = {
                             run("正在安装陶瓦…") {
                                 // onProgress 必须写名字：ensure 的最后一个参数是 force（Boolean），
                                 // 尾随 lambda 会绑到 force 上，报「但这里要 Boolean」。
-                                val exe = TerracottaInstaller.ensure(dir, onProgress = { p ->
-                                    busy = if (p.total > 0L) {
-                                        p.step + "（" + (p.fraction * 100).toInt() + "%）"
-                                    } else {
-                                        p.step
-                                    }
-                                })
+                                val exe = TerracottaInstaller.ensure(
+                                    dir,
+                                    onProgress = { p ->
+                                        busy = if (p.total > 0L) {
+                                            p.step + "（" + (p.fraction * 100).toInt() + "%）"
+                                        } else {
+                                            p.step
+                                        }
+                                    },
+                                    checkUpdate = true,
+                                )
                                 installed = true
-                                "陶瓦装好了：" + exe.name + "。可以点「创建房间」了。"
+                                installedVersion = TerracottaInstaller.readInstalledVersion(dir).orEmpty()
+                                "陶瓦装好了（" + installedVersion.ifBlank { "版本未知" } + "）：" +
+                                    exe.name + "。可以点「创建房间」了。"
                             }
                         },
                         enabled = busy.isBlank(),
@@ -271,7 +293,56 @@ internal fun TerracottaSection(gameRoot: String?, onNotice: (String) -> Unit = {
                     },
                     enabled = busy.isBlank() && state.ok,
                 ) { Text("关闭陶瓦") }
+                Spacer(Modifier.width(8.dp))
+                OutlinedButton(
+                    onClick = {
+                        run("正在更新陶瓦…") {
+                            // 更新前先把正在跑的进程停掉：Windows 上正在执行的 exe 是锁着的，
+                            // 直接覆盖会解压失败，报一个「拒绝访问」让人摸不着头脑。
+                            withContext(Dispatchers.IO) { runCatching { client?.shutdown() } }
+                            lastStage = ""
+                            overrideText = ""
+                            state = TerracottaState()
+                            val exe = TerracottaInstaller.ensure(
+                                dir,
+                                onProgress = { p ->
+                                    busy = if (p.total > 0L) {
+                                        p.step + "（" + (p.fraction * 100).toInt() + "%）"
+                                    } else {
+                                        p.step
+                                    }
+                                },
+                                checkUpdate = true,
+                            )
+                            installedVersion = TerracottaInstaller.readInstalledVersion(dir).orEmpty()
+                            installed = true
+                            // 装完再问一次在线最新。不能直接把 latestVersion 写成 installedVersion ——
+                            // 查不到官方版本时 ensure 会退回内置版本，那样写会把「其实没查到」说成「已是最新」。
+                            val fresh = withContext(Dispatchers.IO) {
+                                runCatching { TerracottaReleases.fetchLatest() }
+                            }
+                            latestVersion = fresh.getOrNull()?.version.orEmpty()
+                            latestProblem = fresh.exceptionOrNull()?.message.orEmpty()
+                            "陶瓦现在是 " + installedVersion.ifBlank { "版本未知" } + "：" + exe.name
+                        }
+                    },
+                    enabled = busy.isBlank(),
+                ) { Text(if (latestVersion.isNotBlank() && latestVersion != installedVersion) "更新到 " + latestVersion else "检查更新") }
             }
+
+            // 版本一行：本地这份是哪版、官方最新是哪版。查不到就说查不到，不装作没事。
+            Text(
+                when {
+                    installedVersion.isBlank() && latestVersion.isBlank() -> "版本：未知（这份是早期装的，没有版本记录）"
+                    latestVersion.isBlank() -> "版本：" + installedVersion + "。没查到官方最新版" +
+                        (if (latestProblem.isNotBlank()) "（" + latestProblem + "）" else "") + "。"
+                    installedVersion.isBlank() -> "版本：未知（这份是早期装的）。官方最新是 " + latestVersion + "。"
+                    installedVersion == latestVersion -> "版本：" + installedVersion + "（已是最新）。"
+                    else -> "版本：" + installedVersion + "，官方最新是 " + latestVersion + "。"
+                },
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
 
             // 房间码：房主态显示；游客态不显示（游客拿到的是别人的码，自己那份没有意义）
             val room = state.room

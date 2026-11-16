@@ -19,7 +19,7 @@ GitHub Release 的说明也从这里取对应小节。
 
 | 版本 | 日期 | 一句话 |
 |---|---|---|
-| 0.8.0-preview.20 | 未发布 | 侧栏顺序重排、模组清单带图标、内存只留设置页一条连续滑条、下载页只下载、默认游戏目录搬出 C 盘、Java 自动补与可删、孵化版启动门禁、正式版按账号验一次、开源版可打空壳包 |
+| 0.8.0-preview.20 | 未发布 | 侧栏顺序重排、模组清单带图标、内存只留设置页一条连续滑条、下载页只下载、默认游戏目录搬出 C 盘、Java 自动补与可删、孵化版启动门禁、正式版按账号验一次、开源版可打空壳包、陶瓦跟官方最新版走、联机补公网 IPv4 直连 |
 | 0.8.0-preview.19 | 未发布 | 侧栏身份标志、顶栏五项均分与两端可折叠、启动参数下移 |
 | 0.8.0-preview.18 | 未发布 | 副页面不再叠字、启动页身份三格与版本卡片网格、目录与 Java 收成可折叠 |
 | 0.8.0-preview.17 | 未发布 | 桌面改成顶部五项 + 左栏二级、启动页身份三格与内存三态、版本设置七个分区、联机分两栏 |
@@ -40,6 +40,8 @@ GitHub Release 的说明也从这里取对应小节。
 ## 0.8.0-preview.20（未发布）
 
 > 本节把几轮改动并在一起记：先是侧栏顺序与模组图标，接着是内存与模组的两摊重做，最后是正式版验证口径与开源版的空壳开关。
+
+最后还有一摊是联机页：陶瓦从「三个国内转存 + 写死版本号」改成「直接问官方最新是哪个」，跨网直连从「只认公网 IPv6」补上「公网 IPv4 + 端口映射」。
 
 preview.19 把配置项挪到侧栏底部之后，顺序反过来别扭了：上面先是身份，中间夹着启动参数，「启动游戏」这个大按钮却被推到了它们中间。这一版调顺序，顺带把「模组一行行小字」换成有图的样子。
 
@@ -68,6 +70,8 @@ preview.19 把配置项挪到侧栏底部之后，顺序反过来别扭了：上
 - **孵化版没填 Client ID 时「启动游戏」灰掉，旁边多一个「测试启动」**。仓库公开之后安装包里不带微软的 Client ID（那一份从来就不该进仓库），孵化版发出去的用户十有八九没填过 —— 结果是点正版登录报错、点启动倒是能起来，两个入口的说法互相矛盾。现在孵化版检测不到 ID 就把启动按钮灰掉，并在按钮上方写明缺什么、去「设置 → 账号」哪一页填；想先跑起来看别的功能，就勾左栏的「测试启动」（跳过 ID 检查，只跳过这一道 —— 登录该失败还是失败）。正式版不受影响：构建方注入 ID，这道门禁根本不出现。
 - **正式版只验一次账号，但验得比原来实**。以前「要不要登录」只看 `firstRunAt` 这一个时间戳，写过一次就永远放行 —— 换一个号、或者那号其实没买过游戏，也照样过。现在判定改成按**当前选中的那个账号**：`StoredAccount` 多一个 `entitledAt`，只有登录时向微软 `GET /entitlements/mcstore` 确认过持有记录才会写进去（那句请求本来就在 `MicrosoftAuthClient.authenticate` 里，只是以前没落盘）。所以「验过一次」这句话现在有据可查，而不是「弹过一次窗」。老账号文件里没有这个字段，用 `lastLoginAt` 兜底 —— 那个年代登录同样走了同一条校验，不兜底等于让老用户白挨一次关门。为什么只验一次而不是每次启动：PCL-CE、HMCL 都是这个口径，启动器不该变成每天要掏一次的东西；加强的部分放在「验什么」上（真的查持有记录），不放在「验几次」上。
 - **开源版可以打成一个不带下载服务的空壳包**（构建时加 `-Pplatypus.shell`，或环境变量 `PLATYPUS_SHELL=true`）。仓库公开之后，谁都能编出一个带全套下载地址的包，镜像与 maven 全指到别人的机器上；所以给发布方留一个开关：打开之后包里**根本不含可用的服务地址**，界面照旧，版本清单、加载器列表、在线安装、整合包、Modrinth 搜索与自动下载全部显示「这个包不带下载与搜索服务。去「设置 → 下载」填一个镜像地址」。设置 → 下载 里多一组「服务地址」，填一个镜像根（`https://你的镜像/`）就整页复活 —— 约定是根替代所有官方主机、路径照抄 BMCLAPI 布局（`/mc/game/version_manifest_v2.json`、`/<sha1 前两位>/<sha1>`）。为什么用构建开关而不是运行期判断版本：运行期判断的话地址还躺在 jar 里，改一行常量就绕过去了；空壳包连常量都只有一份真值在 `Endpoints`，业务类全部从取值器拼。本机调试与自助构建不加这个开关，一切照旧。
+- **陶瓦改成「问官方最新是哪一版」，不再吃写死的版本号**（联机页）。以前那一版把 `0.4.2` 连同下载地址与校验值一起写死在代码里，还挂了 cnb.cool / gitee / github 三个源；官方一发新版，用户点「安装 / 更新陶瓦」拿到的还是旧的，而且靠的是别人机器上的转存。现在安装前先问一句 GitHub 的 `/releases/latest`：取 tag 当版本号、取 `windows-x86_64-pkg.tar.gz` 那个资产、下载走官方 `browser_download_url`，校验值用 GitHub 直接给的 `digest`（`sha256:...`）；只有恰好等于内置的 0.4.2 时才用写死在代码里的 SHA-512（那一份是我们实测过的，比任何在线值都可信）。查不到（限流、断网、空壳包没填地址）就安静地退回内置版本，并在进度里说一句，不让「装陶瓦」整体失败。顺带把三个源砍成一个官方源 —— 转存站固定的是旧版本号，留着只会把「已经有新版了」这件事盖住。已装的版本记在陶瓦目录的 `.installed-version` 里，界面上多一行版本说明，有新版时按钮自己变成「更新到 0.4.3」。为什么更新前先关一次陶瓦：Windows 上正在跑的 exe 是锁着的，不先停会在解压那一步报「拒绝访问」。
+- **跨网直连补上「公网 IPv4 + 端口映射」这条路**（联机页）。原来那张卡只认公网 IPv6，家里没有 IPv6 的人打开就是一排字「这台机器没有公网 IPv6，要么找运营商要，要么用陶瓦」，而实际上不少宽带是给公网 IPv4 的 —— 只要在路由器上把端口映射到本机就能连。现在卡片分两段说：有 IPv6 的直接给 `[IPv6]:端口`（不用动路由器）；有公网 IPv4 的先把本机的内网地址摆出来，写清「路由器后台找『端口转发 / 虚拟服务器』，外部端口与本机端口都填 N，内网地址填 192.168.x.x」，映射完再把 `公网IP:端口` 发过去。另外认一个坑：`100.64.0.0/10` 是 RFC 6598 给运营商级 NAT 留的段，这类地址就算在路由器上映射了也对不上外网，卡片里单独红字说明，免得用户拿它试半天。
 
 ### 修了什么
 
@@ -103,15 +107,18 @@ preview.19 把配置项挪到侧栏底部之后，顺序反过来别扭了：上
 - 正式版的那次验证只在引导没走过时发生。走完之后换一个没用过的号，不会再拦一次（这是刻意的：PCL-CE 与 HMCL 都是「说过一次就够」）。真换了没买过游戏的号，进服务器在下线时会被挡，不会在这里被挡。
 - 空壳包（`-Pplatypus.shell`）里，微软正版登录、离线登录、外置登录（authlib-injector）照常能用 —— 那几条链路走的是微软官方端点与用户自己填的地址，不属于「下载服务」。真正停用的只有版本清单、加载器列表、在线安装、整合包、Modrinth 搜索与自动下载。
 - 空壳包的「服务地址」要按 BMCLAPI 的布局填（同一个根替代所有官方主机，路径保持原样）。填一个只镜像了版本清单的地址，能拉到版本列表，但装到一半会失败在 `libraries` 或 `assets` 那一步。
+- 「已装版本的版本号」只有 2026-11-16 之后装的才有（记在陶瓦目录的 `.installed-version` 里）。早先装的那份显示「版本未知」，点一次「检查更新」就会补上。
+- 陶瓦的在线版本检查会请求 `api.github.com`。空壳包（`-Pplatypus.shell`）里这个根会被换成镜像根，没填服务地址时不做在线检查、直接用内置版本。
+- 公网直连只做到「把该填的地址与端口映射步骤说清楚」。路由器型号千差万别，启动器不替用户改路由器，也不做 UPnP / NAT-PMP 打洞（那要额外依赖，且多数家用路由器默认关着）。
 
 ### 校验
 
 - `gradlew :core:test :ui:jvmTest :app-desktop:compileKotlin :app-desktop:createDistributable -PskipWix` → `BUILD SUCCESSFUL`，0 条 `e: `、0 条 FAILED。
-- 全量单测 **86 个类 1057 个用例，0 失败 0 错误 0 跳过**（core 81 类 1011 例 + ui 5 类 46 例）。其中 14 例在 `ManagedJavaTest` —— 托管根就是启动器目录下的 java、托管根不叫 runtime 免得和 jpackage 自带的 JRE 撞车、老位置是游戏目录下的 runtime、老位置那份也删得掉、认出组件目录里的 java、bin 名大小写、系统 JDK 推不出托管目录、可执行文件不在 bin 下不认、组件名不能是双点、多代托管根都能认、非托管不给删、托管且路径在根里才给删、目录没了画不出按钮、没有托管根不给删。界面上的滑条手感、竖条动画、行点击没有可断言的口径，靠编译与手动验收。
+- 全量单测 **87 个类 1077 个用例，0 失败 0 错误 0 跳过**（core 82 类 1031 例 + ui 5 类 46 例）。本轮新增 20 例：`TerracottaReleaseTest` 16 例（资产名按版本拼、官方地址带 v 前缀、查最新版走 `Endpoints` 的 GitHub 根、从真实响应样本里挑 Windows 包并读出 size 与 digest、没有 `tag_name` 就报错不猜版本、响应不是 JSON 对象时给人话、发行版里没 Windows 包时点名是哪个版本缺、API 没给 `browser_download_url` 时按规则拼、digest 大小写归一、digest 长度/字符/算法不对一律给 null、没装过读不出已装版本、已是最新时不再重下且不留 `.part`、内置版本描述与常量一致、SHA-256 与 SHA-512 对 `abc` 的实算值对上公开向量）、`LocalAddressesTest` 新增 3 例（`100.64.0.0/10` 认作运营商级 NAT、段外不算且真公网 IPv4 不被误判、NAT 段仍归在 `OTHER` 不改枚举）。`TerracottaTest` 里那条「下载地址有三个源」按新口径改成「只剩官方一条」，另加两例（可按别的版本号拼地址、`packageName` 跟着版本号走）。其中 14 例在 `ManagedJavaTest` —— 托管根就是启动器目录下的 java、托管根不叫 runtime 免得和 jpackage 自带的 JRE 撞车、老位置是游戏目录下的 runtime、老位置那份也删得掉、认出组件目录里的 java、bin 名大小写、系统 JDK 推不出托管目录、可执行文件不在 bin 下不认、组件名不能是双点、多代托管根都能认、非托管不给删、托管且路径在根里才给删、目录没了画不出按钮、没有托管根不给删。界面上的滑条手感、竖条动画、行点击没有可断言的口径，靠编译与手动验收。
 - 图标、滑条、行点击的**肉眼验收由用户手动做**：桌面端点击验证不由智能体代劳。
-- 桌面免安装目录按本轮代码重建过：`app-desktop/build/compose/binaries/main/app/Platypus Preview/` 整目录 135,630,960 字节（202 个文件），`Platypus Preview.exe` 597,504 字节（18:14 生成）。解包复核新代码进包：`ui-jvm-0.8.0-preview.20-8e2eba74ef65f018769f92ab3e93479f.jar` 共 526 条目，`LaunchPageKt$LaunchPage$installJavaSilently$1.class` 与 `LaunchPageKt$LaunchPage$detectJava$1.class` 都在（自动补 Java 的实证），`LaunchPageKt.class` 常量池里有 `testLaunch` / `showTestLaunch`（测试启动的实证），`JavaTabKt.class` 里有 `pendingDelete`（删除按钮的实证），`SettingsPageKt.class` 里有 `serverBase` / `saveServerBase`（服务地址输入框的实证）；`core-0.8.0-preview.20-4fa95d289c11c75860eec2eb2b66dc23.jar` 共 671 条目，`core/Endpoints.class` 与 `core/BuildInfo.class` 都在，`core/runtime/ManagedJava.class` 里有 `legacyRootOf` / `homeIn`；`app-desktop-0.8.0-preview.20-1ee0ef464aee984b9053a77ad6764f9.jar` 的 `runtime/DesktopJavaRuntimeService.class` 里有 `remove` / `lastRemoveError` / `launcherDir`。
+- 桌面免安装目录按本轮代码重建过：`app-desktop/build/compose/binaries/main/app/Platypus Preview/` 整目录 135,665,781 字节（202 个文件），`Platypus Preview.exe` 597,504 字节（19:06 生成）。解包复核新代码进包：`ui-jvm-0.8.0-preview.20-ca7a54caff36dec6e8bd29ea6f7119f.jar` 共 532 条目，`TerracottaSectionKt.class` 常量池里有 `installedVersion` / `latestVersion` / `latestProblem`（陶瓦版本行的实证），`LinkPageKt.class` 里有 `isCarrierNat` / `carrierNat` / `lanAddresses`（公网 IPv4 与端口映射的实证），上一轮的 `LaunchPageKt.class` 里仍有 `testLaunch` / `showTestLaunch`、`JavaTabKt.class` 里仍有 `pendingDelete`；`core-0.8.0-preview.20-5996f4d2e6edf121383fb94fc0e48279.jar` 共 676 条目，新增 `core/lan/TerracottaRelease.class` 与 `core/lan/TerracottaReleases.class`，`TerracottaReleases.class` 里有 `latestApiUrl` / `fetchLatest` / `parseDigest`，`TerracottaInstaller.class` 里有 `readInstalledVersion` / `sha256Of` / `builtinRelease` / `resolveRelease` / `checkUpdate`，`LocalAddresses.class` 里有 `isCarrierNat`；`core/runtime/ManagedJava.class` 里仍有 `legacyRootOf` / `homeIn`，`runtime/DesktopJavaRuntimeService.class` 里仍有 `remove` / `lastRemoveError` / `launcherDir`。
 - **空壳开关实跑过**：`-Pplatypus.shell=true` 下 `:core:compileKotlin`、`:ui:compileKotlinJvm :app-desktop:compileKotlin`、`:core:jar` 全部 EXIT=0、0 条 `e: `，生成的 `BuildInfo.kt` 里 `const val SHELL: Boolean = true`；随后不带开关重跑恢复 `false`（工作区当前状态）。扫空壳 jar 的 `.class` 字节串核对地址残留：`piston-meta.mojang.com`、`api.modrinth.com`、`maven.neoforged.net`、`api.curseforge.com` 只在 `Endpoints.class` 里出现，`bmclapi2.bangbang93.com` 在 `Endpoints.class` 与 `DownloadSources.class`，`fill.papermc.io` 在 `Endpoints.class` 与 `ServerInstaller.class` —— 业务类已全部改成从取值器拼，不存在「改一行常量就复活」的第二处。
-- 本轮新增的 `EndpointsTest` 15 例：完整版原样返回、完整版 `serviceReady` 恒真、`normalizeBase` 去空格与尾斜杠、接受引号包裹、只认 http(s)、只写协议头不算地址、认不出的主机不改（外置登录地址）、官方主机换根保留路径、`launchermeta` 不会被 `launcher` 前缀先吃掉、资源与库也走镜像、没填根时官方地址变空串、**没填根也不该动用户自己填的地址**、`join` 根空返回空串、`join` 容忍两边斜杠、`dir` 给老代码留带尾斜杠的根。最后那条「不该动用户地址」在初版实现上是红的：`rewriteHost` 先判「没填根」再判「认不认得出主机」，把外置登录地址也清空了，实跑报 `expected:<[https://littleskin.cn/api/yggdrasil]> but was:<[]>`；顺序调过来才过。
+- 本轮的 `EndpointsTest` 15 例（上一轮加的）：完整版原样返回、完整版 `serviceReady` 恒真、`normalizeBase` 去空格与尾斜杠、接受引号包裹、只认 http(s)、只写协议头不算地址、认不出的主机不改（外置登录地址）、官方主机换根保留路径、`launchermeta` 不会被 `launcher` 前缀先吃掉、资源与库也走镜像、没填根时官方地址变空串、**没填根也不该动用户自己填的地址**、`join` 根空返回空串、`join` 容忍两边斜杠、`dir` 给老代码留带尾斜杠的根。最后那条「不该动用户地址」在初版实现上是红的：`rewriteHost` 先判「没填根」再判「认不认得出主机」，把外置登录地址也清空了，实跑报 `expected:<[https://littleskin.cn/api/yggdrasil]> but was:<[]>`；顺序调过来才过。
 - `msi` / `zip` / `apk` 未按本轮代码重出 —— 发布时统一出三端，免得中间过程反复打包。
 - 安卓端只做了编译验证（`:androidApp:compileDebugKotlin` → 0 条 `e: `），本轮没有改安卓端界面。
 - 真实模组的图标覆盖率实测（本机 75 个 jar）：只有 56 个 jar 里带 `icon.png`，但按实现的候选顺序能出图 **73 / 75**；出不了图的只有 `bwncr` 与 `EMIProfessions` 两个。
