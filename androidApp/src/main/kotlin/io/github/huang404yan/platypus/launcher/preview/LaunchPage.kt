@@ -55,6 +55,8 @@ import io.github.huang404yan.platypus.core.runtime.AndroidJavaCatalog
 import io.github.huang404yan.platypus.core.runtime.AndroidJavaRuntimeService
 import io.github.huang404yan.platypus.core.runtime.GameJavaRules
 import io.github.huang404yan.platypus.core.runtime.JavaRuntime
+import io.github.huang404yan.platypus.core.saves.AutoBackupPolicy
+import io.github.huang404yan.platypus.core.saves.SavesAutoBackup
 import io.github.huang404yan.platypus.core.settings.JsonSettingsRepository
 import io.github.huang404yan.platypus.core.settings.LauncherSettings
 import io.github.huang404yan.platypus.launcher.preview.runtime.JvmBridge
@@ -306,6 +308,36 @@ internal fun LaunchPage() {
     }
 
     /**
+     * 游戏正常退出后跑一轮自动备份，返回一句要拼到提示里的话。
+     *
+     * 策略从 settings.json 现读而不是缓存：用户可能刚在「存档」页把间隔改过，
+     * 读一次只有几毫秒，省这点时间换来「改了不生效」的困惑不划算。
+     * 备份失败不抛 —— 游戏已经跑完了，不该因为备份把成功的那一局说成失败。
+     */
+    suspend fun autoBackup(preparation: AndroidLaunchPreparation): String {
+        return runCatching {
+            val gameRoot = File(root.trim().ifBlank { defaultGameRoot() })
+            val stored = JsonSettingsRepository(JsonSettingsRepository.defaultFile(gameRoot)).load()
+            val policy: AutoBackupPolicy = LauncherSettings.policyOf(stored)
+            if (!policy.enabled) {
+                ""
+            } else {
+                val result = SavesAutoBackup.run(
+                    gameDir = preparation.env.gameDir,
+                    gameRoot = gameRoot,
+                    policy = policy,
+                )
+                when {
+                    // 有失败就不算成，哪怕别的世界备成了：用户得知道有一个没进备份。
+                    result.failed.isNotEmpty() -> "自动备份没做成：" + result.summary() + "。"
+                    result.hasWork -> "已自动备份存档：" + result.summary() + "。"
+                    else -> ""
+                }
+            }
+        }.getOrElse { "自动备份没做成：" + (it.message ?: it.javaClass.simpleName) }
+    }
+
+    /**
      * 真正启动：[JvmBridge.start] 会一直在调用线程上跑到游戏退出，所以必须扔进后台线程。
      *
      * 失败时把原因留在界面上 —— 这里几乎每一种失败（没有 JNI 层、加载不了 libjvm.so、
@@ -336,10 +368,23 @@ internal fun LaunchPage() {
                 runCatching { JvmBridge.start(current) }
                     .getOrElse { JvmStartResult.Failed("启动时抛了异常：" + describe(it)) }
             }
+            // 正常退出才自动备份：进程非零退出、或者 JVM 没起来时，存档可能正处在
+            // 写盘的中间状态，这时候打包容易把一个半截的世界钉成「最后一份好备份」。
+            val backupNote = if (outcome is JvmStartResult.Ok) {
+                withContext(Dispatchers.IO) { autoBackup(current) }
+            } else {
+                ""
+            }
             starting = false
-            startNotice = when (outcome) {
-                is JvmStartResult.Ok -> if (langNote.isBlank()) "游戏进程结束了。" else langNote + "游戏进程结束了。"
-                is JvmStartResult.Failed -> if (langNote.isBlank()) outcome.message else langNote + outcome.message
+            startNotice = buildString {
+                append(langNote)
+                append(backupNote)
+                append(
+                    when (outcome) {
+                        is JvmStartResult.Ok -> "游戏进程结束了。"
+                        is JvmStartResult.Failed -> outcome.message
+                    },
+                )
             }
         }
     }

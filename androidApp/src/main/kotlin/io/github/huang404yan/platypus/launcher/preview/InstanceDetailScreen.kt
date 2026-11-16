@@ -99,6 +99,10 @@ internal fun InstanceDetailScreen(
     var deleteSavesToo by remember(instance.directory) { mutableStateOf(false) }
     var deleting by remember(instance.directory) { mutableStateOf(false) }
 
+    // 存档是整页替换的（与桌面端「版本设置 → 存档」一样是「返回详情」那种），
+    // 不塞成详情页里的一张卡：世界多的时候那一列会很长，且它自己有一堆按钮与对话框。
+    var showSaves by remember(instance.directory) { mutableStateOf(false) }
+
     LaunchedEffect(instance.directory) {
         loading = true
         try {
@@ -284,6 +288,12 @@ internal fun InstanceDetailScreen(
             }
             onSaved(updated)
         }
+    }
+
+    // 存档整页替换详情：它自己有一列世界、一列备份和三个对话框，塞成卡片会太长。
+    if (showSaves) {
+        SavesScreen(instance = instance, gameRoot = gameRoot, onBack = { showSaves = false })
+        return
     }
 
     Column(
@@ -473,6 +483,16 @@ internal fun InstanceDetailScreen(
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+        }
+
+        // 存档放在「删掉这个实例」之前：删实例时默认保不保留存档，得先知道自己有没有存档。
+        DetailCard("存档与备份") {
+            Text(
+                "每个世界都能单独备份成一个 zip；删世界会先自动备份。自动备份的开关与间隔也在这里。",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            OutlinedButton(onClick = { showSaves = true }) { Text("打开存档…") }
         }
 
         if (d.warnings.isNotEmpty()) {
