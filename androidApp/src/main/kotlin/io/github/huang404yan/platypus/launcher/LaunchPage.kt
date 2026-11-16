@@ -1,4 +1,4 @@
-package io.github.huang404yan.platypus.launcher.preview
+package io.github.huang404yan.platypus.launcher
 
 import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -55,8 +55,8 @@ import io.github.huang404yan.platypus.core.runtime.GameJavaRules
 import io.github.huang404yan.platypus.core.runtime.JavaRuntime
 import io.github.huang404yan.platypus.core.settings.JsonSettingsRepository
 import io.github.huang404yan.platypus.core.settings.LauncherSettings
-import io.github.huang404yan.platypus.launcher.preview.runtime.JvmBridge
-import io.github.huang404yan.platypus.launcher.preview.runtime.JvmStartResult
+import io.github.huang404yan.platypus.launcher.runtime.JvmBridge
+import io.github.huang404yan.platypus.launcher.runtime.JvmStartResult
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch

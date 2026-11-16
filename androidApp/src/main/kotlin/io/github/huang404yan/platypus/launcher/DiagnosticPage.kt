@@ -1,4 +1,4 @@
-package io.github.huang404yan.platypus.launcher.preview
+package io.github.huang404yan.platypus.launcher
 
 import android.app.ActivityManager
 import android.content.ClipData
@@ -52,7 +52,7 @@ import io.github.huang404yan.platypus.core.runtime.AndroidJavaCatalog
 import io.github.huang404yan.platypus.core.runtime.AndroidJavaRuntimeService
 import io.github.huang404yan.platypus.core.runtime.GameJavaRules
 import io.github.huang404yan.platypus.core.runtime.JavaRuntime
-import io.github.huang404yan.platypus.launcher.preview.runtime.JvmBridge
+import io.github.huang404yan.platypus.launcher.runtime.JvmBridge
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext

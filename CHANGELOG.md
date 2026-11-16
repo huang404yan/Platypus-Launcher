@@ -19,6 +19,7 @@ GitHub Release 的说明也从这里取对应小节。
 
 | 版本 | 日期 | 一句话 |
 |---|---|---|
+| [`1.0.0`](#10020261116) | 2026-11-16 | 第一个正式版：`0.8.0-preview.20` 的全部内容进正式线，安卓包名去掉 `.preview`、改名「鸭嘴兽启动器」，空壳回到它本来的位置（可选构建开关，不再是孵化版的同义词） |
 | 0.8.0-preview.20 | 未发布 | 侧栏顺序重排、模组清单带图标、内存只留设置页一条连续滑条、下载页只下载、默认游戏目录搬出 C 盘、Java 自动补与可删、孵化版启动门禁、正式版按账号验一次、开源版可打空壳包、陶瓦跟官方最新版走、联机补公网 IPv4 直连 |
 | 0.8.0-preview.19 | 未发布 | 侧栏身份标志、顶栏五项均分与两端可折叠、启动参数下移 |
 | 0.8.0-preview.18 | 未发布 | 副页面不再叠字、启动页身份三格与版本卡片网格、目录与 Java 收成可折叠 |
@@ -36,6 +37,41 @@ GitHub Release 的说明也从这里取对应小节。
 | [`0.8.0-preview.6`](#080-preview620261114) | 2026-11-14 | 切页不再打断长任务、联机页能「点一下就进」 |
 
 > 更早的 `0.8.0-preview.1`–`5` 是仓库公开前的内部迭代，说明留在对应 tag 的 Release 里，没有并进这份记录。
+
+## 1.0.0（2026-11-16）
+
+第一个正式版。内容就是 `0.8.0-preview.20` 那一批（内存只留一条滑条、模组照 PCL 改点行启停、
+Java 自动补与可删、托管 Java 挪到启动器目录、陶瓦跟官方最新版走、联机补公网 IPv4 直连、
+正式版按账号验一次），另加这一版才做的三件事。
+
+### 多了什么
+
+- **版本号从 `0.8.0-preview.20` 进位到 `1.0.0`**，正式线开张。版本号是唯一的通道开关（`core/Brand.kt` 的 `isPreview` 认 `-preview` 后缀），所以切号这一下顺带改了三处默认行为：默认配色从 `PERRY`（蓝橙）变成 `NATURAL`（深色）、桌面产物目录名从 `Platypus Preview` 变成 `Platypus Launcher`、首次启动按正式版口径走。
+- **安卓端包名去掉 `.preview`**：`io.github.huang404yan.platypus.launcher`，应用名「鸭嘴兽启动器」，`versionCode` 10000。这不是改一个字段就完事的：源码目录从 `.../launcher/preview/` 整棵搬到 `.../launcher/`（17 个 `.kt`），包声明与互相引用跟着改，JNI 那两个导出符号 `Java_io_github_huang404yan_platypus_launcher_preview_runtime_JvmBridge_nativeStart` / `..._nativeLastError` 也去掉中间的 `_preview` —— 名字对不上，`System.loadLibrary` 之后调方法会直接 `UnsatisfiedLinkError`。构建脚本里那条 `check(applicationId == expectedId)` 反过来给这件事上锁：版本号不含 `-preview` 却还用着预览包名，构建直接失败。
+- **空壳回到它本来的位置：一个可选构建开关，不再等于「孵化版」**。之前把两件事绑在一起说（孵化版 = 空壳），实际是两回事：孵化版是**通道**（走 `0.x-preview.N`、不注入凭据、谁都能自己编），空壳是**构建选项**（`-Pplatypus.shell=true`，包里连服务地址都不带）。现在 `README.md` 与 `releases/README.md` 按「正式版 / 孵化版 / 空壳包（可选）」三档重写，出包命令也分开列。开关与代码一行没删 —— 要发一个不替别人扛镜像流量的包，加上参数就能出。
+
+### 修了什么
+
+- **正式版没法登录时会把程序锁死，修掉了**。首次引导的拦住条件是「正式版 + 引导没走过 + 账号不合格」，而那时弹窗在正式版里 `dismissible = false` —— 只有一个「去登录」按钮、点外面也关不掉。这在前一版不成问题（包里带着 ID），可一旦包没注入 ID（谁从源码自己编一份就是这种情况），点「去登录」只会撞在「先去申请一个」上，绕不出去也用不了。现在 `blocked` 多一个 `clientIdReady` 前置、`dismissible` 补 `|| !clientIdReady` 兜底：缺 ID 时弹窗照弹（讲清缺什么、去哪儿填），但不再拦人，关掉就能用。**注意这不等于「没 ID 也能登录」**：微软登录那条路仍然缺什么报什么。
+- **联机页里一句「PCL 那张卡的用途是…」删掉了 PCL 字样**（`ui/src/jvmMain/kotlin/io/github/huang404yan/platypus/ui/LinkPage.kt`）。这张卡讲的是「手上还有一个别的客户端，想和这边一起开」，提别人的产品名既没必要，也容易被读成「这功能是抄那家的」。
+- **README 里那句「孵化版就是开源版，是个空壳」与代码不符，改掉了**。代码里 `-Pplatypus.shell` 与版本号没有任何联动：本机不加这个参数编出来的孵化版一直是完整包，只有主动加参数才是空壳。文档照旧会让拿到孵化版的人以为「下载页空白是正常的」。
+- **`FirstRun.kt` 里那段「随安装包带出去的 ID 等于所有下载者共用一份别人的注册」删了**。它跟「正式版由发行方内置 ID、下载的人什么都不用填」这条口径正面冲突，而 1.0.0 起正式版就是这个做法。
+- **两端帮助页的通道说明跟着改**（`ui/.../HelpPage.kt`、`androidApp/.../HelpPage.kt`）。安卓那句原来直接写「孵化版：也就是你现在用的这个」—— 现在装的是正式版包，这句话当场就是错的；改成按版本号认（带 `-preview` 是孵化版）。桌面那句「正式版由构建方注入」改成「由发行方注入」，与 `releases/README.md` 用词统一。
+
+### 已知限制
+
+- **这一版 `1.0.0` 的包里没有注入微软应用 ID**（`BuildInfo.MS_CLIENT_ID` 是空串），所以微软正版登录走不通 —— 弹窗会说明，想用就自己申请一个填进「设置 → 账号」。正式发布前必须补上并在出包时传 `-Pplatypus.msClientId=`。
+- 安卓端仍然只到「进游戏之前的全部准备」，真机起 JVM 那条路（Android 10 起不允许从可写目录 `dlopen`）与图形转译层都没接。与前一版相比没有变化。
+- `NOTICE` 仍然没有被打进产物：jpackage 段里没有 `licenseFile` 配置，安装目录只有 `exe` / `app/` / `runtime/` 三项。许可全文现在只在仓库里。
+- 空壳包的「服务地址」要按 BMCLAPI 布局填、公网直连只做到「把步骤说清楚」、批量更新只覆盖 Modrinth 查得到的那些 —— 这三条与 `0.8.0-preview.20` 一节里的同名限制一致，没有变化。
+
+### 校验
+
+- `gradlew :core:test :ui:jvmTest :app-desktop:compileKotlin :app-desktop:createDistributable -PskipWix` → `BUILD SUCCESSFUL`，0 条 `e: `；`:app-desktop:packageMsi -PskipWix -PwixDir=D:\ruanjian\kaifa\wix314` → `BUILD SUCCESSFUL in 30s`；`:androidApp:assembleDebug` → `BUILD SUCCESSFUL in 31s`，0 条 `e: `。包名搬迁与 JNI 改名之后先单独跑过一次四端编译（`:core` / `:ui` / `:app-desktop` / `:androidApp:compileDebugKotlin`，53s 全绿）。
+- 全量单测 **87 个类 1086 个用例，0 失败 0 错误 0 跳过**（core 82 类 1040 例 + ui 5 类 46 例）。比前一版多 5 例，都与这一版的行为修正有关：`FirstRunTest` 多了「正式版没内置ID时不能把人拦死」，并把这个夹具的默认 `clientId` 从空串改成形状合法的样本 —— 改之前有三条老用例（「正式版没登录正版账号时要拦住」等）会红，因为它们断言的是「没 ID 也拦」，而这正是这一版要推翻的行为。
+- 产物（`releases/stable/`，只在本机暂存，没发 Release）：`Platypus-Launcher-1.0.0-win-x64.msi` **69,947,544 字节** sha256 `1d2d35e989699b12ec85b85ef6b0c99b1b7a6d5f7c0a0ec90ca3d2385af9e7e5`；`Platypus-Launcher-1.0.0-win-x64.zip` **68,273,800 字节**（202 条目，顶层 `Platypus Launcher/Platypus Launcher.exe`）sha256 `af43712cd6acbfb636b575a703df8f59d6c8d42f0869720ab12580254da371dd`；`Platypus-Launcher-1.0.0-android.apk` **13,923,373 字节** sha256 `73b1e17b33d4de9dcb4f78a9284ee855ca78934e9b86d789838e58e8430d0b1f`。免装目录整 202 个文件 / 135,671,767 字节，`Platypus Launcher.exe` 605,184 字节。
+- 包内实证：`BuildInfo.kt` 生成内容为 `VERSION = "1.0.0"` / `MS_CLIENT_ID = ""` / `SHELL = false`；从 `app/core-1.0.0-*.jar` 里读 `BuildInfo.class` 的常量池，同样只有 `1.0.0`，没有 `0.8.0-preview.20` 残留。apk 用 `aapt2 dump badging` 读出 `package: name='io.github.huang404yan.platypus.launcher' versionCode='10000' versionName='1.0.0'`，`lib/` 下四个 ABI 都有 `libplatypus-jvm.so`。
+- 免装版冒烟：`Start-Process` 起 `Platypus Launcher.exe`，12 秒后进程仍在（pid 21268），随后强停。它按预期在安装目录下建出了 `game/`（默认游戏目录改成安装目录之后就是这样），冒烟完已把那个空目录删掉。
 
 ## 0.8.0-preview.20（未发布）
 

@@ -1,4 +1,4 @@
-package io.github.huang404yan.platypus.launcher.preview
+package io.github.huang404yan.platypus.launcher
 
 import android.content.Intent
 import android.net.Uri

@@ -1,4 +1,4 @@
-package io.github.huang404yan.platypus.launcher.preview
+package io.github.huang404yan.platypus.launcher
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -387,8 +387,9 @@ private val ANDROID_HELP_CHAPTERS: List<HelpChapter> = listOf(
             HelpSection(
                 heading = "两条通道",
                 lines = listOf(
-                    "正式版：版本号从 1.0.0 起，安装包自带正版登录要的应用 ID，第一次启动会要求先登录一个正版账号。",
-                    "孵化版：也就是你现在用的这个，版本号带 -preview。它等于测试版也等于开源版，安装包里不带任何人的私有凭据，正版登录的应用 ID 要你自己填一个。",
+                    "看版本号就能分清：带 -preview 的是孵化版，不带的是正式版（1.0.0 起）。",
+                    "正式版：安装包自带正版登录要的应用 ID，第一次启动会要求先登录一个正版账号，验证一次就够了。",
+                    "孵化版：等于测试版也等于开源版，安装包里不带任何人的私有凭据，正版登录的应用 ID 要你自己填一个。",
                     "两者包名不同，可以同时装在一台手机上。",
                 ),
             ),

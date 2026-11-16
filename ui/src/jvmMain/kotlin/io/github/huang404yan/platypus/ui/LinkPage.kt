@@ -207,7 +207,7 @@ fun LinkPage(
 
             LinkCard(title = "本地程序联机", badge = "拉起一个程序") {
                 Text(
-                    "PCL 那张卡的用途是「手上还有一个别的客户端，想和这边一起开」。这里只做最直接的部分：记住那个 exe，点一下就起来。",
+                    "这张卡的用途是「手上还有一个别的客户端，想和这边一起开」。这里只做最直接的部分：记住那个 exe，点一下就起来。",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )

@@ -16,11 +16,18 @@ class FirstRunTest {
             activeAccountUuid = active,
         )
 
+    /** 形状合法的样本 ID，只用来表示「这一份包内置了 ID」；不是任何真实凭据。 */
+    private val SAMPLE_ID = "00000000-0000-0000-0000-000000000000"
+
+    /**
+     * 正式版夹具。默认**带 ID**：正常发出去的正式版由构建方把 ID 编进包里，
+     * 不带 ID 的那一份（谁从源码自己编的）是特例，测的时候显式传 `clientId = ""`。
+     */
     private fun formal(
         firstRunAt: Long = 0L,
         signedIn: Boolean = false,
         accountsLoaded: Boolean = true,
-        clientId: String = "",
+        clientId: String = SAMPLE_ID,
         ownsGame: Boolean = true,
     ) = FirstRun.state(
         settings(firstRunAt = firstRunAt, clientId = clientId),
@@ -152,6 +159,37 @@ class FirstRunTest {
     }
 
     @Test
+    fun `包里带了应用ID就不再让人去填`() {
+        // 正式版由构建方把 ID 编进 BuildInfo.MS_CLIENT_ID，下载的人什么都不用填。
+        // 对着这样一份包再讲「去填一个 ID」，只会让人以为坏了。
+        val body = formal(
+            signedIn = false,
+            accountsLoaded = true,
+            clientId = SAMPLE_ID,
+        ).body
+        assertFalse(body.contains("没内置应用 ID"), body)
+        assertFalse(body.contains("应用 ID"), body)
+    }
+
+    @Test
+    fun `正式版没内置ID时不能把人拦死`() {
+        // 拦住他去登录，他也没有能用的 ID：点「去登录」只会撞在「先去申请一个」上，
+        // 而这个窗在正式版里又关不掉 —— 那就成了装完就用不了。
+        val state = formal(signedIn = false, accountsLoaded = true, clientId = "")
+        assertFalse(state.blocked)
+        assertTrue(state.dismissible)
+        assertTrue(state.show)   // 首次引导本身照弹，只是不拦
+    }
+
+    @Test
+    fun `从源码自己编的正式版没ID时要说清缺什么`() {
+        // 仓库里那一份永远是空串，谁从源码编一份正式版就会缺 ID。
+        val body = formal(signedIn = false, accountsLoaded = true, clientId = "").body
+        assertTrue(body.contains("没内置应用 ID"), body)
+        assertTrue(body.contains("设置 → 账号"), body)
+    }
+
+    @Test
     fun `走完引导写成的时间戳不会是零`() {
         // 写成 0 的话下次启动又会弹一次，而且用户看不出为什么。
         assertEquals(1L, FirstRun.doneAt(0L))
@@ -185,7 +223,7 @@ class FirstRunTest {
 
     @Test
     fun `填了合法的应用ID就算准备好了`() {
-        val state = formal(clientId = "00000000-0000-0000-0000-000000000000")
+        val state = formal(clientId = SAMPLE_ID)
         assertTrue(state.clientIdReady)
         assertEquals(null, state.clientProblem)
     }

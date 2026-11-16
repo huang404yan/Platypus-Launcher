@@ -5,10 +5,10 @@ plugins {
 
 android {
     // 包名一经发布不可改。两条线各用独立包名：
-    //   正式版 io.github.huang404yan.platypus.launcher
-    //   孵化版 io.github.huang404yan.platypus.launcher.preview（当前构建）
-    // 两者是同一台设备上可以并存的两个应用，孵化的改动迁到正式线时换包名重出一次。
-    namespace = "io.github.huang404yan.platypus.launcher.preview"
+    //   正式版 io.github.huang404yan.platypus.launcher（当前构建，1.0.0 起）
+    //   孵化版 io.github.huang404yan.platypus.launcher.preview
+    // 两者是同一台设备上可以并存的两个应用，切回孵化线时把这里与源码 package 一起加回 .preview。
+    namespace = "io.github.huang404yan.platypus.launcher"
     compileSdk = 37
     // 应用内起 JVM 那一层是 C 写的（见 src/main/cpp/jvm_bridge.c）。
     // 版本写死在这里而不是靠 AGP 猜：不同 NDK 版本对 dlopen 的默认行为不一样，
@@ -16,11 +16,11 @@ android {
     ndkVersion = "28.2.13676358"
 
     defaultConfig {
-        applicationId = "io.github.huang404yan.platypus.launcher.preview"
+        applicationId = "io.github.huang404yan.platypus.launcher"
         minSdk = 26
         targetSdk = 37
-        versionCode = 80020
-        versionName = "0.8.0-preview.20"
+        versionCode = 10000
+        versionName = "1.0.0"
 
         // 通道由版本号决定：0.x-preview.N 是孵化版，1.0.0 起是正式版。
         // 名字与包名都跟着它走，发正式版时忘了改包名会在这里直接构建失败。
