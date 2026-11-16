@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -27,7 +28,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
@@ -44,12 +44,14 @@ import io.github.huang404yan.platypus.core.instance.InstanceEdits
 import io.github.huang404yan.platypus.core.instance.InstanceLayouts
 import io.github.huang404yan.platypus.core.instance.InstanceMigration
 import io.github.huang404yan.platypus.core.instance.formatBytes
-import io.github.huang404yan.platypus.core.mods.ModEntry
-import io.github.huang404yan.platypus.core.mods.ModScanner
+import io.github.huang404yan.platypus.core.packs.PackEntry
+import io.github.huang404yan.platypus.core.packs.PackFileOps
+import io.github.huang404yan.platypus.core.packs.PackKind
+import io.github.huang404yan.platypus.core.packs.PackScanResult
+import io.github.huang404yan.platypus.core.packs.PackScanner
 import io.github.huang404yan.platypus.core.runtime.GameJavaRules
 import io.github.huang404yan.platypus.core.runtime.JavaRuntime
 import io.github.huang404yan.platypus.core.runtime.findExactMajor
-import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -89,19 +91,36 @@ internal val SETUP_SECTIONS = listOf(
     SETUP_EXPORT to "导出整合包",
 )
 
+/** 详情页里「要删的东西属于哪一类」。和 pendingDelete 一起用，只在这个文件里有意义（模组的删除已搬进 InstalledModsSection）。 */
+private const val KIND_RESOURCE_PACK = "resourcepack"
+private const val KIND_SHADER = "shader"
+
 @Composable
 internal fun InstanceDetailPanel(
     instance: Instance,
     backend: LauncherBackend?,
     onBack: () -> Unit,
     onNotice: (String) -> Unit,
+    /**
+     * 跳到「下载」页的某个子标签（传 Navigation 里的 DOWNLOAD_TAB_* 常量）。
+     *
+     * 这一页只负责「这个版本装了什么、要不要关掉」；找新的模组 / 光影是下载页的事，
+     * 所以这里只给一个跳板，不在详情页里再搓一个搜索框 —— 那边的筛选会读这个版本的
+     * 加载器与游戏版本，重复实现一遍必然两边不一致。
+     */
+    onOpenDownload: (String) -> Unit = {},
 ) {
     var details by remember(instance.directory) { mutableStateOf<InstanceDetails?>(null) }
     var loading by remember(instance.directory) { mutableStateOf(true) }
     var runtimes by remember(instance.directory) { mutableStateOf<List<JavaRuntime>>(emptyList()) }
 
     var javaPath by remember(instance.directory, instance.javaPath) { mutableStateOf(instance.javaPath.orEmpty()) }
-    var memoryText by remember(instance.directory, instance.memoryMb) { mutableStateOf(instance.memoryMb.toString()) }
+    // 内存只留一个整数 —— 界面上是滑条选档，没有手打字符串这一步了，
+    // 保留字符串会多出一条「解析失败」的分支，而滑条永远不会给出非数字。
+    var memoryMb by remember(instance.directory, instance.memoryMb) { mutableStateOf(instance.memoryMb) }
+    // 设置页的「默认内存」。勾了「跟随默认」的实例，滑条上显示的、真正进 -Xmx 的都是这个数
+    // （规则见 Instance.effectiveMemoryMb）；它异步读到，所以下面还有一个 LaunchedEffect 回填。
+    var defaultMemoryMb by remember { mutableStateOf(Instance.DEFAULT_MEMORY_MB) }
     var jvmArgsText by remember(instance.directory) { mutableStateOf(instance.extraJvmArgs.joinToString("\n")) }
     // 版本隔离：关掉之后 --gameDir 指回游戏根目录，存档/模组/配置与同目录下别的版本共用。
     // 只有标准布局（versions/<id>）才给这个开关，别的目录关不关都是同一个地方。
@@ -112,6 +131,17 @@ internal fun InstanceDetailPanel(
 
     var notice by remember(instance.directory) { mutableStateOf("") }
     var saving by remember(instance.directory) { mutableStateOf(false) }
+
+    LaunchedEffect(instance.directory) {
+        val repository = backend?.settings ?: return@LaunchedEffect
+        val stored = withContext(Dispatchers.IO) { runCatching { repository.load() }.getOrNull() }
+        if (stored != null) {
+            val fallback = Instance.clampMemoryMb(stored.defaultMemoryMb)
+            defaultMemoryMb = fallback
+            // 跟随默认的实例：滑条初值要显示生效的那个数，而不是 instances.json 里存的老数。
+            if (instance.memoryFollowsDefault) memoryMb = fallback
+        }
+    }
     //
     // 实例目录里还留着多少东西没搬到游戏根目录。只在「开关拨到关」时才需要看 ——
     // 开着隔离时那份东西正是游戏在用的，谈不上「没搬」。
@@ -125,12 +155,30 @@ internal fun InstanceDetailPanel(
     // 左栏当前分区。默认「总览」：用户从启动页点「版本设置」进来，先要看的是「这是个什么版本」。
     var section by remember(instance.directory) { mutableStateOf(SETUP_OVERALL) }
 
-    // 这个版本目录里真实存在的模组 / 资源包 / 光影文件名。
-    var modFiles by remember(instance.directory) { mutableStateOf<List<File>>(emptyList()) }
-    var packFiles by remember(instance.directory) { mutableStateOf<List<File>>(emptyList()) }
-    var shaderFiles by remember(instance.directory) { mutableStateOf<List<File>>(emptyList()) }
+    // 这个版本目录里真实存在的模组 / 资源包 / 光影。
+    // 直接用 core 的扫描结果（不是裸文件名表）：这一页要能直接启用、停用、删掉它们，
+    // 扫描结果里已经带着「文件名 → 启用与否」和包元数据，界面不用自己再拼一遍。
+    var packScan by remember(instance.directory) { mutableStateOf<PackScanResult?>(null) }
+    var shaderScan by remember(instance.directory) { mutableStateOf<PackScanResult?>(null) }
+    // 删除前问一句。值是「哪种东西」+「哪个文件名」，两者一起才够删。
+    var pendingDelete by remember(instance.directory) { mutableStateOf<Pair<String, String>?>(null) }
 
     val scope = rememberCoroutineScope()
+
+    /**
+     * 重扫这个版本目录里的模组、资源包、光影。
+     *
+     * 三种东西都走 core 的扫描器（和「下载」页同一套规则）：停用是改文件名不是删文件，
+     * 所以扫出来的「启用 / 停用」就是文件名的真实状态，界面不用另存一份开关。
+     */
+    suspend fun rescanContent(baseDir: File) {
+        packScan = withContext(Dispatchers.IO) {
+            runCatching { PackScanner.scan(PackKind.RESOURCE_PACK, baseDir) }.getOrNull()
+        }
+        shaderScan = withContext(Dispatchers.IO) {
+            runCatching { PackScanner.scan(PackKind.SHADER, baseDir) }.getOrNull()
+        }
+    }
 
     LaunchedEffect(instance.directory) {
         loading = true
@@ -141,9 +189,7 @@ internal fun InstanceDetailPanel(
             }
             val baseDir = details?.gameDir
             if (baseDir != null) {
-                modFiles = withContext(Dispatchers.IO) { jarsIn(File(baseDir, "mods")) }
-                packFiles = withContext(Dispatchers.IO) { jarsIn(File(baseDir, "resourcepacks")) }
-                shaderFiles = withContext(Dispatchers.IO) { jarsIn(File(baseDir, "shaderpacks")) }
+                rescanContent(baseDir)
             }
         } finally {
             loading = false
@@ -202,6 +248,47 @@ internal fun InstanceDetailPanel(
         }
     }
 
+    /** 资源包 / 光影启用 / 停用（.zip ↔ .zip.disabled）。 */
+    fun togglePack(kind: PackKind, entry: PackEntry, enabled: Boolean) {
+        val baseDir = details?.gameDir ?: return
+        notice = ""
+        scope.launch {
+            val error = withContext(Dispatchers.IO) {
+                runCatching { PackFileOps.setEnabled(PackScanner.dirOf(kind, baseDir), entry.fileName, enabled) }
+                    .exceptionOrNull()
+            }
+            notice = if (error == null) {
+                (if (enabled) "已启用 " else "已停用 ") + entry.fileName
+            } else {
+                "改名失败：" + (error.message ?: error.toString())
+            }
+            rescanContent(baseDir)
+        }
+    }
+
+    /**
+     * 删除一个模组 / 资源包 / 光影。
+     *
+     * 走 core 的 delete —— 它用的是 File.delete()，**不进回收站**，所以调用前必须过确认框。
+     * 想「先不用」的话用启用/停用（改文件名），那才是可逆的。
+     */
+    fun deleteContent(kind: String, fileName: String) {
+        val baseDir = details?.gameDir ?: return
+        notice = ""
+        scope.launch {
+            val error = withContext(Dispatchers.IO) {
+                runCatching {
+                    when (kind) {
+                        KIND_SHADER -> PackFileOps.delete(PackScanner.dirOf(PackKind.SHADER, baseDir), fileName)
+                        else -> PackFileOps.delete(PackScanner.dirOf(PackKind.RESOURCE_PACK, baseDir), fileName)
+                    }
+                }.exceptionOrNull()
+            }
+            notice = if (error == null) "已删除 " + fileName else "删除失败：" + (error.message ?: error.toString())
+            rescanContent(baseDir)
+        }
+    }
+
     fun save() {
         if (backend == null) {
             notice = "后端未装配：改不了实例设置。"
@@ -212,7 +299,7 @@ internal fun InstanceDetailPanel(
         val result = when (
             val edited = InstanceEdits.fromInput(
                 instance,
-                memoryText,
+                memoryMb.toString(),
                 jvmArgsText,
                 javaPath,
                 isolated = if (canToggleIsolation) isolated else null,
@@ -224,7 +311,11 @@ internal fun InstanceDetailPanel(
             }
             is InstanceEditResult.Ok -> edited
         }
-        val updated = result.instance
+        // 滑条上的数和「跟随默认」时的生效值一致 → 继续保持跟随；拖到别处才脱离。
+        // 与启动页 saveMemory 同一条口径，两边不能各判一套。
+        val following = instance.memoryFollowsDefault &&
+            memoryMb == Instance.effectiveMemoryMb(instance, defaultMemoryMb)
+        val updated = result.instance.copy(memoryFollowsDefault = following)
         val memoryMb = updated.memoryMb
         saving = true
         scope.launch {
@@ -245,6 +336,8 @@ internal fun InstanceDetailPanel(
                     "已关掉版本隔离：存档、模组、配置现在读写 " + details?.gameRoot?.absolutePath + " 下那一份（和同目录其他版本共用）。"
                 canToggleIsolation && updated.isolated != instance.isolated ->
                     "已打开版本隔离：存档、模组、配置读写 " + updated.directory + " 下那一份。"
+                following ->
+                    "已保存：这一版跟随设置里的默认内存（" + memoryMb + " MB）。"
                 else -> InstanceEdits.savedMessage(result)
             }
             // 保存成功后调用方会立刻把详情页关掉（InstancePage 的 onNotice 里 detailKey = null），
@@ -269,6 +362,30 @@ internal fun InstanceDetailPanel(
     if (browsingSaves) {
         SavesPanel(instance = instance, backend = backend, onBack = { browsingSaves = false })
         return
+    }
+
+    // 删除确认。core 的 delete 用的是 File.delete()，删了不进回收站，
+    // 所以这里不能像「停用」那样点一下就完事。
+    pendingDelete?.let { (kind, fileName) ->
+        AlertDialog(
+            onDismissRequest = { pendingDelete = null },
+            title = { Text("删掉这个文件？") },
+            text = {
+                Text(
+                    "会直接从磁盘删掉 " + fileName + "，不进回收站。" +
+                        "只是暂时不想用的话，点那一行改成停用更稳 —— 停用是改文件名，随时能改回来。",
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    pendingDelete = null
+                    deleteContent(kind, fileName)
+                }) { Text("删掉") }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingDelete = null }) { Text("算了") }
+            },
+        )
     }
 
     Column(Modifier.fillMaxSize()) {
@@ -308,94 +425,59 @@ internal fun InstanceDetailPanel(
             ) {
                 when (section) {
                     SETUP_MODS -> {
-                        DetailCard("这个版本的 Mod") {
-                            DetailLine("模组目录", File(d.gameDir, "mods").absolutePath)
-                            DetailLine("已装", modFiles.size.toString() + " 个 jar")
-                            Text(
-                                "放进来就生效，删掉就没了 —— 这一页只做清点，装新模组去「下载 → Mod」（那里的筛选会读这个版本的加载器与游戏版本）。",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                                OutlinedButton(onClick = { openFolder(File(d.gameDir, "mods")) }) { Text("打开模组目录") }
-                            }
-                            if (modFiles.isEmpty()) {
-                                Text(
-                                    "mods 目录还是空的。",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
-                            } else {
-                                // 这里以前是 spacedBy(2.dp) 的一串纯文件名 —— 二十几行小字贴在一起，
-                                // 用户的原话是「离得有些近」。改成一行一个 jar：左边从 jar 里抽出来的
-                                // icon.png，右边这个文件自己的名字。
-                                // 读 jar 元数据要开 zip 读 fabric.mod.json，40 个文件在主线程上同步跑会
-                                // 卡住整个界面，所以挪到 IO 线程，第一次绘制先给空列表。
-                                val entries by produceState(initialValue = emptyList<ModEntry>(), d.gameDir, modFiles) {
-                                    value = withContext(Dispatchers.IO) {
-                                        modFiles.take(40).map { ModScanner.describe(it, enabled = true) }
-                                    }
-                                }
-                                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    entries.forEach { entry ->
-                                        Row(
-                                            Modifier.fillMaxWidth(),
-                                            horizontalArrangement = Arrangement.spacedBy(10.dp),
-                                            verticalAlignment = Alignment.CenterVertically,
-                                        ) {
-                                            ModIcon(entry, size = 28.dp)
-                                            Text(
-                                                entry.title,
-                                                style = MaterialTheme.typography.labelSmall,
-                                                maxLines = 1,
-                                                modifier = Modifier.weight(1f),
-                                            )
-                                            Text(
-                                                formatBytes(entry.sizeBytes),
-                                                style = MaterialTheme.typography.labelSmall,
-                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                            )
-                                        }
-                                    }
-                                }
-                                if (modFiles.size > 40) {
-                                    Text(
-                                        "还有 " + (modFiles.size - 40) + " 个没列出来，去目录里看。",
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    )
-                                }
-                            }
-                        }
+                        // 模组维护整块搬进了 InstalledModsSection：启停、删除、检查更新、多选更新、
+                        // 查冲突、搬隔离前的旧模组都在那儿。这一页只提供落点（实例）和「去下载」的出口。
+                        InstalledModsSection(
+                            instance = instance,
+                            onOpenDownload = { onOpenDownload(DOWNLOAD_TAB_MODS) },
+                        )
                     }
                     SETUP_PACKS -> {
                         DetailCard("资源包与光影") {
                             DetailLine("资源包目录", File(d.gameDir, "resourcepacks").absolutePath)
-                            DetailLine("已装资源包", packFiles.size.toString() + " 个")
+                            DetailLine(
+                                "已装资源包",
+                                ((packScan?.packs?.size ?: 0) + (packScan?.disabled?.size ?: 0)).toString() + " 个",
+                            )
                             DetailLine("光影目录", File(d.gameDir, "shaderpacks").absolutePath)
-                            DetailLine("已装光影", shaderFiles.size.toString() + " 个")
+                            DetailLine(
+                                "已装光影",
+                                ((shaderScan?.packs?.size ?: 0) + (shaderScan?.disabled?.size ?: 0)).toString() + " 个",
+                            )
                             Text(
-                                "先后顺序要在游戏的「选项 → 资源包」里调，启动器改不了那个顺序。",
+                                "点一行就是启用 / 停用（改文件名成 .zip.disabled，文件还在原地）。先后顺序要在游戏的「选项 → 资源包」里调，启动器改不了那个顺序。",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                                 OutlinedButton(onClick = { openFolder(File(d.gameDir, "resourcepacks")) }) { Text("打开资源包目录") }
                                 OutlinedButton(onClick = { openFolder(File(d.gameDir, "shaderpacks")) }) { Text("打开光影目录") }
+                                OutlinedButton(onClick = { onOpenDownload(DOWNLOAD_TAB_SHADERS) }) { Text("去下载光影") }
                             }
-                            for (file in (packFiles + shaderFiles).take(20)) {
-                                Text(file.name, style = MaterialTheme.typography.labelSmall, maxLines = 1)
-                            }
+                            PackContentSection(
+                                title = "资源包",
+                                scan = packScan,
+                                kind = PackKind.RESOURCE_PACK,
+                                enabled = !saving,
+                                onToggle = { entry, want -> togglePack(PackKind.RESOURCE_PACK, entry, want) },
+                                onDelete = { entry -> pendingDelete = KIND_RESOURCE_PACK to entry.fileName },
+                            )
+                            PackContentSection(
+                                title = "光影",
+                                scan = shaderScan,
+                                kind = PackKind.SHADER,
+                                enabled = !saving,
+                                onToggle = { entry, want -> togglePack(PackKind.SHADER, entry, want) },
+                                onDelete = { entry -> pendingDelete = KIND_SHADER to entry.fileName },
+                            )
                         }
                     }
                     SETUP_LAUNCH -> {
                         DetailCard("内存与启动参数") {
-                            OutlinedTextField(
-                                value = memoryText,
-                                onValueChange = { memoryText = it },
-                                modifier = Modifier.fillMaxWidth(),
-                                label = { Text("最大内存（MB，范围 " + Instance.MIN_MEMORY_MB + "–" + Instance.MAX_MEMORY_MB + "）") },
-                                singleLine = true,
+                            MemorySlider(
+                                valueMb = memoryMb,
+                                onChange = { memoryMb = it },
+                                enabled = !saving,
                             )
                             OutlinedTextField(
                                 value = jvmArgsText,
@@ -405,7 +487,7 @@ internal fun InstanceDetailPanel(
                                 minLines = 3,
                             )
                             Text(
-                                "内存默认按版本与已装内容自动算；在启动页勾掉「自动分配」才用这里填的数。",
+                                "这个数直接进 -Xmx：点「保存」写进实例，启动页左栏也是同一个数，两边改都算数。",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
@@ -538,13 +620,74 @@ private fun SetupNav(current: String, enabled: Boolean, onPick: (String) -> Unit
     }
 }
 
-/** 读一个目录下的 jar（模组 / 资源包 / 光影都用这一个）。目录不存在就给空表。 */
-private fun jarsIn(dir: File): List<File> =
-    runCatching {
-        (dir.listFiles() ?: emptyArray())
-            .filter { it.isFile && (it.name.endsWith(".jar", true) || it.name.endsWith(".zip", true)) }
-            .sortedBy { it.name.lowercase() }
-    }.getOrDefault(emptyList())
+/** 一个资源包 / 光影列表。空的就明说，别留一段空白让人以为没扫。 */
+@Composable
+private fun PackContentSection(
+    title: String,
+    scan: PackScanResult?,
+    kind: PackKind,
+    enabled: Boolean,
+    onToggle: (PackEntry, Boolean) -> Unit,
+    onDelete: (PackEntry) -> Unit,
+) {
+    val all = scan?.let { it.packs + it.disabled }.orEmpty()
+    Text(
+        title + " · " + all.size + " 个",
+        style = MaterialTheme.typography.labelLarge,
+        modifier = Modifier.padding(top = 4.dp),
+    )
+    if (all.isEmpty()) {
+        Text(
+            "还没有" + kind.label + "。放进 " + kind.dirName + "/ 就生效。",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        return
+    }
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        all.forEach { entry ->
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable(enabled = enabled) { onToggle(entry, !entry.enabled) },
+                colors = CardDefaults.cardColors(
+                    containerColor = if (entry.enabled) {
+                        MaterialTheme.colorScheme.surface
+                    } else {
+                        MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+                    },
+                ),
+            ) {
+                Row(
+                    Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        Text(entry.title, style = MaterialTheme.typography.labelMedium, maxLines = 1)
+                        Text(
+                            formatBytes(entry.sizeBytes) +
+                                (entry.packFormat?.let { " · pack_format " + it } ?: "") +
+                                " · " + if (entry.enabled) "已启用，点这条可停用" else "已停用，点这条可启用",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                        )
+                        entry.problem?.let {
+                            Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error)
+                        }
+                    }
+                    TextButton(onClick = { onDelete(entry) }, enabled = enabled) {
+                        Text("删除", style = MaterialTheme.typography.labelSmall)
+                    }
+                }
+            }
+        }
+    }
+    scan?.warnings?.forEach {
+        Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+}
 
 @Composable
 private fun JavaCard(

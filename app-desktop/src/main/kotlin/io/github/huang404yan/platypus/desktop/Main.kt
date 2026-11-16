@@ -28,8 +28,12 @@ import java.io.File
  * 再小就没法并排放下侧栏与表单了——各页面自己还有滚动兜底。
  */
 fun main(args: Array<String>) {
-    val root = args.firstOrNull()
-        ?: System.getenv("PLATYPUS_GAME_DIR")
+    // 目录优先级：命令行参数 > 环境变量 > 安装目录下的 game\ > %APPDATA%\.minecraft。
+    // 第三条是这一版才加的：以前默认落在 C 盘的用户目录里，便携版拷到别的机器、
+    // 或者用户想把整个启动器连游戏一起搬走时，游戏数据会留在原地。
+    val root = args.firstOrNull()?.takeIf { it.isNotBlank() }
+        ?: System.getenv("PLATYPUS_GAME_DIR")?.takeIf { it.isNotBlank() }
+        ?: installGameRoot()
         ?: defaultGameRoot()
 
     if (root.isNotBlank()) {
@@ -86,6 +90,38 @@ fun main(args: Array<String>) {
             )
         }
     }
+}
+
+/**
+ * 安装目录下的 game\：便携版默认就把游戏放这儿，不往 C 盘写。
+ *
+ * 安装目录从 jpackage 启动器的 jpackage.app-path（exe 的绝对路径）拿；
+ * 直接跑 jar 的场合退回「自己这个 jar 往上两级」，也就是 app\<产品名>\app\ 的再上一层。
+ * 目录建不出来（比如装在 Program Files 下没有写权限）就返回 null，让调用方退回
+ * %APPDATA%\.minecraft —— 不能因为默认值选不出来就起不来。返回空串不行：
+ * 空串不是 null，`?:` 不会触发，root 会变成「没有默认目录」。
+ */
+private fun installGameRoot(): String? {
+    val base = installDir() ?: return null
+    val candidate = File(base, "game")
+    val usable = runCatching { candidate.isDirectory || candidate.mkdirs() }.getOrDefault(false)
+    if (!usable) return null
+    println("[dir] 默认游戏目录 = " + candidate.absolutePath)
+    return candidate.absolutePath
+}
+
+/** 启动器安装目录；两个来源都拿不到就返回 null。 */
+private fun installDir(): File? {
+    System.getProperty("jpackage.app-path")?.takeIf { it.isNotBlank() }?.let { path ->
+        return runCatching { File(path).absoluteFile.parentFile }.getOrNull()
+    }
+    val jar = runCatching {
+        val cls = Class.forName("io.github.huang404yan.platypus.desktop.MainKt")
+        val location = cls.protectionDomain?.codeSource?.location ?: return@runCatching null
+        File(location.toURI())
+    }.getOrNull() ?: return null
+    // <安装目录>\app\<jar>：再往上两级才是安装目录。
+    return jar.absoluteFile.parentFile?.parentFile
 }
 
 /** 窗口图标从 jar 内的 icon/platypus.png 读取；读不到就不带图标，不阻断启动。 */

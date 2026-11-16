@@ -1,5 +1,6 @@
 package io.github.huang404yan.platypus.ui
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -15,7 +16,6 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.Checkbox
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -76,6 +76,12 @@ fun PacksPage(
     kind: PackKind = PackKind.SHADER,
     /** 左栏「刷新」按钮的信号：每点一次加一，页面拿它当 LaunchedEffect 的 key。 */
     refreshTick: Int = 0,
+    /**
+     * 从版本设置的「去下载光影 / 资源包」跳过来时带的实例 key。
+     *
+     * 只在当前选择落空时用它 —— 用户自己挑过别的实例之后，不能每刷一次就被拽回去。
+     */
+    focusInstanceKey: String = "",
 ) {
     val scope = rememberCoroutineScope()
 
@@ -121,7 +127,10 @@ fun PacksPage(
         val merged = mergeInstances(registered, scanned?.instances.orEmpty())
         instances = merged
         if (merged.none { instanceKey(it) == selectedKey }) {
-            selectedKey = merged.firstOrNull()?.let { instanceKey(it) }.orEmpty()
+            val focused = focusInstanceKey.takeIf { it.isNotBlank() }?.let { key ->
+                merged.firstOrNull { instanceKey(it) == key || it.directory.equals(key, ignoreCase = true) }
+            }
+            selectedKey = (focused ?: merged.firstOrNull())?.let { instanceKey(it) }.orEmpty()
         }
         return merged
     }
@@ -606,15 +615,30 @@ private fun InstalledPackRow(
     onDelete: () -> Unit,
 ) {
     var confirmDelete by remember { mutableStateOf(false) }
-    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
+    // 整行就是开关：点一下停用，再点一下启用。原来的勾选框在 2026-11-16 去掉 ——
+    // 用户要的是「点关闭再次点击启用」，一个行级点击比一个 24dp 的小方块好按得多。
+    Card(
+        modifier = Modifier.fillMaxWidth().clickable { onToggleEnabled(!entry.enabled) },
+        colors = CardDefaults.cardColors(
+            containerColor = if (entry.enabled) {
+                MaterialTheme.colorScheme.surface
+            } else {
+                MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+            },
+        ),
+    ) {
         Column(Modifier.fillMaxWidth().padding(10.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
             Row(
                 Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Checkbox(checked = entry.enabled, onCheckedChange = { onToggleEnabled(it) })
                 Text(entry.title, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
+                Text(
+                    if (entry.enabled) "已启用 · 点这条可停用" else "已停用 · 点这条可启用",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
                 TextButton(onClick = { confirmDelete = true }) { Text("删除") }
             }
             entry.displayName?.let {
@@ -658,32 +682,41 @@ private fun InstalledPackRow(
 @Composable
 private fun PackSearchRow(project: ModProject, busy: Boolean, targetDir: String, onInstall: () -> Unit) {
     Card {
-        Column(Modifier.fillMaxWidth().padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text(project.title, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
+        // 和「下载 → Mod」的 SearchResultRow 同一个形状：左边一张预览图，右边文字。
+        // 光影与资源包在 Modrinth 上同样有 icon_url，以前这里只有字，看着比 Mod 页糙一截。
+        Row(
+            Modifier.fillMaxWidth().padding(10.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            verticalAlignment = Alignment.Top,
+        ) {
+            ModIcon(project, size = 44.dp)
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(project.title, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
+                    Text(
+                        project.downloadsLabel + " 次下载",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                project.author?.let {
+                    Text("作者 " + it, style = MaterialTheme.typography.labelSmall)
+                }
                 Text(
-                    project.downloadsLabel + " 次下载",
+                    project.description,
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 3,
                 )
-            }
-            project.author?.let {
-                Text("作者 " + it, style = MaterialTheme.typography.labelSmall)
-            }
-            Text(
-                project.description,
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 3,
-            )
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text(
-                    project.slug,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.weight(1f),
-                )
-                Button(onClick = onInstall, enabled = !busy) { Text("装进 " + targetDir + "/") }
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        project.slug,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.weight(1f),
+                    )
+                    Button(onClick = onInstall, enabled = !busy) { Text("装进 " + targetDir + "/") }
+                }
             }
         }
     }

@@ -39,6 +39,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import io.github.huang404yan.platypus.core.download.DownloadReport
 import io.github.huang404yan.platypus.core.instance.DeletionPlan
@@ -105,6 +106,9 @@ fun InstancePage(
     onOpenSetup: (Instance) -> Unit = {},
 ) {
     var rootText by remember { mutableStateOf(initialGameRoot ?: defaultGameRoot()) }
+    // 「设置 → 启动 → 默认内存」的那个数。新建表单的滑条从它起步 ——
+    // 以前表单写死 Instance.DEFAULT_MEMORY_MB，设置里改了默认值对新实例根本不生效。
+    var defaultMemoryMb by remember { mutableStateOf(Instance.DEFAULT_MEMORY_MB) }
     var result by remember { mutableStateOf<ScanResult?>(null) }
     var registered by remember { mutableStateOf<List<Instance>>(emptyList()) }
     var message by remember { mutableStateOf("") }
@@ -112,7 +116,6 @@ fun InstancePage(
     var showForm by remember { mutableStateOf(false) }
     var phase by remember { mutableStateOf<NewPhase>(NewPhase.Idle) }
 
-    var editingKey by remember { mutableStateOf<String?>(null) }
     var editNotice by remember { mutableStateOf("") }
 
     /** 正在确认删除的实例（null = 没有弹窗）。 */
@@ -173,18 +176,27 @@ fun InstancePage(
         }
     }
 
-    fun saveEdit(instance: Instance, memoryText: String) {
+    /**
+     * 把卡片上滑条选的内存写进实例。滑条只会给出档位里的整数，越界由 clampMemoryMb 兜底。
+     *
+     * 2026-11-16：卡片的「编辑态 + 手填 MB + 保存/取消」换成了常驻的 [MemorySlider]，
+     * 所以这里不再需要 editingKey 那套进出编辑的流程 —— 点档位就直接落盘。
+     */
+    fun saveMemoryMb(instance: Instance, memoryMb: Int) {
         if (backend == null) {
             editNotice = "后端未装配：没法写实例登记。"
             return
         }
-        val parsed = memoryText.trim().toIntOrNull()
-        if (parsed == null) {
-            editNotice = "内存要填整数，单位 MB。"
-            return
-        }
-        val clamped = Instance.clampMemoryMb(parsed)
-        val updated = instance.copy(memoryMb = clamped, registered = true)
+        val clamped = Instance.clampMemoryMb(memoryMb)
+        // 与启动页 saveMemory、详情页 save 同一条口径：拖回「跟随默认」的那个数就继续跟随，
+        // 拖到别处就脱离跟随。三处各判一套的话，同一个数在不同页面会得到不同的落盘结果。
+        val following = instance.memoryFollowsDefault &&
+            clamped == Instance.effectiveMemoryMb(instance, defaultMemoryMb)
+        val updated = instance.copy(
+            memoryMb = clamped,
+            registered = true,
+            memoryFollowsDefault = following,
+        )
         scope.launch {
             val error = withContext(Dispatchers.IO) {
                 runCatching { backend.instances.save(updated) }.exceptionOrNull()
@@ -193,12 +205,11 @@ fun InstancePage(
                 editNotice = "保存失败：" + describe(error)
                 return@launch
             }
-            editNotice = if (clamped != parsed) {
-                "已按允许范围（" + Instance.MIN_MEMORY_MB + "–" + Instance.MAX_MEMORY_MB + " MB）改成 " + clamped + " MB。"
+            editNotice = if (following) {
+                "已保存：" + clamped + " MB（跟随设置里的默认内存）。"
             } else {
                 "已保存：" + clamped + " MB。"
             }
-            editingKey = null
             rescan()
         }
     }
@@ -296,7 +307,7 @@ fun InstancePage(
         }
     }
 
-    fun createInstance(versionId: String, name: String, memoryText: String) {
+    fun createInstance(versionId: String, name: String, memoryMbInput: Int) {
         if (backend == null) {
             message = "后端未装配：新建实例需要桌面端注入 Java 与实例存储实现。"
             return
@@ -311,12 +322,7 @@ fun InstancePage(
             message = "先填一个版本号，比如 1.20.1。"
             return
         }
-        val parsed = memoryText.trim().toIntOrNull()
-        if (parsed == null) {
-            message = "内存要填整数，单位 MB。"
-            return
-        }
-        val memoryMb = Instance.clampMemoryMb(parsed)
+        val memoryMb = Instance.clampMemoryMb(memoryMbInput)
         val dir = File(dirText)
         val displayName = name.trim().ifBlank { id }
 
@@ -398,6 +404,9 @@ fun InstancePage(
             if (stored != null && initialGameRoot.isNullOrBlank() && stored.defaultGameRoot.isNotBlank()) {
                 rootText = stored.defaultGameRoot
             }
+            if (stored != null) {
+                defaultMemoryMb = Instance.clampMemoryMb(stored.defaultMemoryMb)
+            }
         }
         if (rootText.isNotBlank()) rescan()
     }
@@ -466,6 +475,7 @@ fun InstancePage(
         if (showForm) {
             NewInstanceCard(
                 gameDir = rootText.trim(),
+                defaultMemoryMb = defaultMemoryMb,
                 busy = busy,
                 phase = phase,
                 onCancel = {
@@ -524,16 +534,9 @@ fun InstancePage(
                         key(instanceKey(instance)) {
                             InstanceCard(
                                 instance = instance,
-                                editing = editingKey == instanceKey(instance),
-                                onStartEdit = {
-                                    editingKey = instanceKey(instance)
-                                    editNotice = ""
-                                },
-                                onCancelEdit = {
-                                    editingKey = null
-                                    editNotice = ""
-                                },
-                                onSaveEdit = { text -> saveEdit(instance, text) },
+                                // 跟随默认内存的实例，卡片上显示与滑条都用生效值（见 Instance.effectiveMemoryMb）。
+                                effectiveMemoryMb = Instance.effectiveMemoryMb(instance, defaultMemoryMb),
+                                onMemoryChange = { picked -> saveMemoryMb(instance, picked) },
                                 onRegister = { register(instance) },
                                 onLaunch = { onLaunch(instance) },
                                 onRemove = { removeRegistration(instance) },
@@ -640,14 +643,16 @@ private fun DeleteConfirmDialog(
 @Composable
 private fun NewInstanceCard(
     gameDir: String,
+    /** 表单初值：设置页的「默认内存」。 */
+    defaultMemoryMb: Int,
     busy: Boolean,
     phase: NewPhase,
     onCancel: () -> Unit,
-    onSubmit: (versionId: String, name: String, memoryText: String) -> Unit,
+    onSubmit: (versionId: String, name: String, memoryMb: Int) -> Unit,
 ) {
     var versionText by remember { mutableStateOf("") }
     var nameText by remember { mutableStateOf("") }
-    var memoryText by remember { mutableStateOf(Instance.DEFAULT_MEMORY_MB.toString()) }
+    var memoryMb by remember(defaultMemoryMb) { mutableStateOf(Instance.clampMemoryMb(defaultMemoryMb)) }
 
     Card(
         Modifier.fillMaxWidth(),
@@ -681,15 +686,14 @@ private fun NewInstanceCard(
                     singleLine = true,
                     enabled = !busy,
                 )
-                OutlinedTextField(
-                    value = memoryText,
-                    onValueChange = { memoryText = it },
-                    modifier = Modifier.weight(0.7f),
-                    label = { Text("内存 MB") },
-                    singleLine = true,
-                    enabled = !busy,
-                )
             }
+            // 内存也走滑条：三个输入框并排时那一格只有 100dp 宽，写「32768」会被截断。
+            MemorySlider(
+                valueMb = memoryMb,
+                onChange = { memoryMb = it },
+                enabled = !busy,
+                showHint = false,
+            )
             Text(
                 "会下载原版客户端、库与资源，按需补 Java 运行时，最后登记成实例。本地已有该版本时不会重下。",
                 style = MaterialTheme.typography.bodySmall,
@@ -729,7 +733,7 @@ private fun NewInstanceCard(
 
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
                 Button(
-                    onClick = { onSubmit(versionText, nameText, memoryText) },
+                    onClick = { onSubmit(versionText, nameText, memoryMb) },
                     enabled = !busy && gameDir.isNotBlank() && versionText.isNotBlank(),
                 ) {
                     Text(if (busy) "正在创建…" else "创建")
@@ -742,50 +746,66 @@ private fun NewInstanceCard(
     }
 }
 
-/** 单个实例卡片：左半边是信息，右半边是动作；编辑态把动作行换成内存输入框。 */
+/**
+ * 单个实例卡片：上面是信息，下面是动作，最底下一条内存滑条。
+ *
+ * 尺寸（2026-11-16 定）：宽 336dp、高 340dp 固定。宽度本来各卡就一样，出现「大小不一致」
+ * 的是高度 —— 实例名长短、目录深浅、有没有 Java 那一行都会改内容高度，FlowRow 于是排成
+ * 参差不齐的瀑布。这里把高度写死，信息区吃 weight(1f)（多出来的部分截断），
+ * 动作行与内存滑条贴着底部，于是同一行的卡片必然同高同宽。
+ */
 @Composable
 private fun InstanceCard(
     modifier: Modifier = Modifier,
     instance: Instance,
-    editing: Boolean,
-    onStartEdit: () -> Unit,
-    onCancelEdit: () -> Unit,
-    onSaveEdit: (String) -> Unit,
+    /** 这一版实际给多少内存：跟随默认时是设置页那个数，否则等于 instance.memoryMb。 */
+    effectiveMemoryMb: Int,
+    onMemoryChange: (Int) -> Unit,
+    /** 「详情」= 版本设置：内存、JVM 参数、Mod / 资源包 / 光影、隔离、导出都在那里。 */
+    onDetails: () -> Unit,
     onRegister: () -> Unit,
     onLaunch: () -> Unit,
     onRemove: () -> Unit,
     onDelete: () -> Unit,
-    onDetails: () -> Unit,
     enabled: Boolean,
 ) {
-    var memoryText by remember(instance.memoryMb, editing) { mutableStateOf(instance.memoryMb.toString()) }
-
     Card(
-        modifier.width(336.dp),
+        modifier.width(336.dp).height(340.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
     ) {
-        Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Column(Modifier.fillMaxWidth().fillMaxHeight().padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Row(
-                Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
+                Modifier.fillMaxWidth().weight(1f),
+                verticalAlignment = Alignment.Top,
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
             ) {
-                Column(Modifier.weight(1f)) {
-                    Text(instance.name, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
-                    Spacer(Modifier.height(2.dp))
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text(
+                        instance.name,
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
                     Text(
                         "游戏 " + instance.gameVersion +
                             (instance.loaderVersion?.let { " · 加载器 " + it } ?: ""),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
                     )
                     Text(
                         instance.directory,
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
                     )
                     Text(
-                        instance.memoryMb.toString() + " MB" + if (instance.registered) " · 已登记" else " · 仅扫描到",
+                        effectiveMemoryMb.toString() + " MB" +
+                            (if (instance.memoryFollowsDefault) " · 跟随默认" else "") +
+                            if (instance.registered) " · 已登记" else " · 仅扫描到",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -795,49 +815,43 @@ private fun InstanceCard(
                             "Java：" + java,
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
                         )
                     }
                 }
                 LoaderBadge(instance.loader)
             }
 
-            if (editing) {
-                Row(
-                    Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(10.dp),
-                ) {
-                    OutlinedTextField(
-                        value = memoryText,
-                        onValueChange = { memoryText = it },
-                        modifier = Modifier.weight(1f),
-                        label = {
-                            Text(
-                                "最大内存（MB，范围 " + Instance.MIN_MEMORY_MB + "–" + Instance.MAX_MEMORY_MB + "）",
-                            )
-                        },
-                        singleLine = true,
-                    )
-                    Button(onClick = { onSaveEdit(memoryText) }) { Text("保存") }
-                    OutlinedButton(onClick = onCancelEdit) { Text("取消") }
-                }
-            } else {
-                Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Button(onClick = onLaunch, enabled = enabled) { Text("去启动") }
-                    if (instance.registered) {
-                        OutlinedButton(onClick = onStartEdit, enabled = enabled) { Text("改内存") }
-                        OutlinedButton(onClick = onRemove, enabled = enabled) { Text("移除登记") }
-                    } else {
-                        OutlinedButton(onClick = onStartEdit, enabled = enabled) { Text("改内存") }
-                    }
-                    // 删除文件对「已登记」和「仅扫描到」都开放：用户清理磁盘时不关心当初是谁登记的。
-                    OutlinedButton(onClick = onDetails, enabled = enabled) { Text("详情") }
-                    OutlinedButton(onClick = onDelete, enabled = enabled) { Text("删除文件…") }
-                    if (!instance.registered) {
-                        OutlinedButton(onClick = onRegister, enabled = enabled) { Text("登记成实例") }
-                    }
+            // 动作按钮用 FlowRow 折行：卡片宽度固定而按钮文字随「已登记 / 仅扫描到」变化，
+            // 用 Row 会在窄卡上把最后一个按钮挤出边界。
+            FlowRow(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                Button(onClick = onLaunch, enabled = enabled) { Text("去启动") }
+                OutlinedButton(onClick = onDetails, enabled = enabled) { Text("详情") }
+                // 删除文件对「已登记」和「仅扫描到」都开放：用户清理磁盘时不关心当初是谁登记的。
+                OutlinedButton(onClick = onDelete, enabled = enabled) { Text("删除文件…") }
+                if (instance.registered) {
+                    OutlinedButton(onClick = onRemove, enabled = enabled) { Text("移除登记") }
+                } else {
+                    OutlinedButton(onClick = onRegister, enabled = enabled) { Text("登记成实例") }
                 }
             }
+
+            // 内存滑条常驻在卡片底部：以前要先点「改内存」进编辑态才能填数，
+            // 现在直接拖或点档位就落盘（见调用方的 saveMemoryMb）。
+            MemorySlider(
+                valueMb = effectiveMemoryMb,
+                onChange = onMemoryChange,
+                enabled = enabled,
+                // 卡片里只留滑条与数值：十个档位按钮在这儿要折三四行，
+                // 卡片就得跟着长高，一屏里的卡片大小就不齐了。要跳档去「详情」里点。
+                showPresets = false,
+                showHint = false,
+            )
         }
     }
 }

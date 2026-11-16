@@ -80,7 +80,7 @@ const val SETTINGS_TAB_OTHER = "other"
  * 设置页：启动器级别的三件事——离线用户名、默认游戏目录、默认内存。
  *
  * 都直接决定「双击能不能玩起来」：名字写死改不了、目录每次重填、新实例内存给错，
- * 都会把用户堵在启动前。实例自己的内存仍然在启动页改、存在 instances.json 里，
+ * 都会把用户堵在启动前。实例自己的内存仍在「版本设置」里改、存在 instances.json 里，
  * 这里只决定「新建实例的初值」。
  *
  * 读写都走 [io.github.huang404yan.platypus.core.settings.SettingsRepository]，
@@ -158,9 +158,8 @@ fun SettingsPage(
     var autoBackupKeep by remember { mutableStateOf(AutoBackupPolicy.DEFAULT.keep.toString()) }
     var curseForgeKey by remember { mutableStateOf("") }
 
-    // 内存三态里的前两态：自动分配（默认开）、内存优化（默认关）。
-    // 第三态是「问过一次就不再问」，只在启动页那个弹窗里写，这一页只读不写。
-    var memoryAuto by remember { mutableStateOf(true) }
+    // 内存优化（默认关）。「自动分配」开关 2026-11-16 删了：core 里没人读它，
+    // -Xmx 只认实例上的 memoryMb，留着就是个假的开关。
     var memoryOptimize by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
@@ -177,7 +176,6 @@ fun SettingsPage(
         autoBackupHours = settings.autoBackupHours.toString()
         autoBackupKeep = settings.autoBackupKeep.toString()
         curseForgeKey = settings.curseForgeApiKey
-        memoryAuto = settings.memoryAuto
         memoryOptimize = settings.memoryOptimize
         loaded = true
         loadedFrom = (repository as? JsonSettingsRepository)?.path.orEmpty()
@@ -225,7 +223,6 @@ fun SettingsPage(
                         autoBackupHours = clampedHours,
                         autoBackupKeep = clampedKeep,
                         curseForgeApiKey = curseForgeKey,
-                        memoryAuto = memoryAuto,
                         memoryOptimize = memoryOptimize,
                     ),
                 )
@@ -301,7 +298,6 @@ fun SettingsPage(
                         autoBackupHours = backupPolicyNow().intervalHours,
                         autoBackupKeep = backupPolicyNow().keep,
                         curseForgeApiKey = curseForgeKey,
-                        memoryAuto = memoryAuto,
                         memoryOptimize = memoryOptimize,
                     ),
                 )
@@ -347,7 +343,6 @@ fun SettingsPage(
                         autoBackupHours = backupPolicyNow().intervalHours,
                         autoBackupKeep = backupPolicyNow().keep,
                         curseForgeApiKey = curseForgeKey,
-                        memoryAuto = memoryAuto,
                         memoryOptimize = memoryOptimize,
                     ),
                 )
@@ -386,7 +381,6 @@ fun SettingsPage(
                         autoBackupHours = backupPolicyNow().intervalHours,
                         autoBackupKeep = backupPolicyNow().keep,
                         curseForgeApiKey = curseForgeKey,
-                        memoryAuto = memoryAuto,
                         memoryOptimize = memoryOptimize,
                     ),
                 )
@@ -412,7 +406,6 @@ fun SettingsPage(
         autoBackupEnabled = AutoBackupPolicy.DEFAULT.enabled
         autoBackupHours = AutoBackupPolicy.DEFAULT.intervalHours.toString()
         autoBackupKeep = AutoBackupPolicy.DEFAULT.keep.toString()
-        memoryAuto = true
         memoryOptimize = false
         noticeIsError = false
         notice = "已填回默认值，点「保存」才生效。"
@@ -447,7 +440,6 @@ fun SettingsPage(
                         autoBackupHours = backupPolicyNow().intervalHours,
                         autoBackupKeep = backupPolicyNow().keep,
                         curseForgeApiKey = cleaned,
-                        memoryAuto = memoryAuto,
                         memoryOptimize = memoryOptimize,
                     ),
                 )
@@ -485,7 +477,6 @@ fun SettingsPage(
                         autoBackupHours = backupPolicyNow().intervalHours,
                         autoBackupKeep = backupPolicyNow().keep,
                         curseForgeApiKey = curseForgeKey,
-                        memoryAuto = memoryAuto,
                         memoryOptimize = memoryOptimize,
                     ),
                 )
@@ -507,7 +498,7 @@ fun SettingsPage(
     ) {
         Text("设置", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
         Text(
-            "这里的改动会存成一份 JSON，下次打开程序还在。实例自己内存请去启动页改。",
+            "这里的改动会存成一份 JSON，下次打开程序还在。某一版要单独设内存，去那张卡片的「版本设置」改。",
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -557,8 +548,6 @@ fun SettingsPage(
                     onGameRootChange = { gameRoot = it },
                     memoryText = memoryText,
                     onMemoryChange = { memoryText = it },
-                    memoryAuto = memoryAuto,
-                    onMemoryAutoChange = { memoryAuto = it },
                     memoryOptimize = memoryOptimize,
                     onMemoryOptimizeChange = { memoryOptimize = it },
                     loaded = loaded,
@@ -597,9 +586,9 @@ fun SettingsPage(
  * 跟「这一局用谁的身份」是同一件事，所以挪到启动页左栏那三格底下填。
  * 留在设置页只会让人以为得先去注册一个名字才能玩。
  *
- * 内存这一块是三态：自动分配（开关）、手动指定（关掉开关才出现输入框）、
- * 内存优化（勾选，会往 JVM 参数里加几条）。三态的取舍写在
- * [io.github.huang404yan.platypus.core.settings.LauncherSettings] 的 KDoc 里。
+ * 内存这一块只有一条滑条加一排常用档位（2026-11-16 改）：内存就是「给多少」一个数，
+ * 而「自动分配」从来没接进 JVM 参数（core 里没人读 memoryAuto，-Xmx 只认实例上的
+ * memoryMb），留着开关只会让人以为它在起作用。内存优化仍是独立勾选。
  */
 @Composable
 private fun LaunchTab(
@@ -607,8 +596,6 @@ private fun LaunchTab(
     onGameRootChange: (String) -> Unit,
     memoryText: String,
     onMemoryChange: (String) -> Unit,
-    memoryAuto: Boolean,
-    onMemoryAutoChange: (Boolean) -> Unit,
     memoryOptimize: Boolean,
     onMemoryOptimizeChange: (Boolean) -> Unit,
     loaded: Boolean,
@@ -640,25 +627,15 @@ private fun LaunchTab(
         }
 
         SettingCard(
-            "内存",
-            "自动分配按版本与已装内容估算，不用每次改数字；关掉开关就按你填的那个数走。",
+            "默认内存",
+            "新建实例时用这个数。标着「跟随默认」的实例也跟着它走 —— 在这里改一次，" +
+                "那些实例一起变；在版本卡片或「版本设置」里把滑条拖到别的数，就改成单独设了。",
         ) {
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f)) {
-                    Text("自动分配", style = MaterialTheme.typography.bodyLarge)
-                    Text(
-                        if (memoryAuto) {
-                            "按版本与已装内容算，启动页左栏会显示实际给了多少。"
-                        } else {
-                            "关掉了，按下面你填的那个数走。"
-                        },
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-                Switch(checked = memoryAuto, onCheckedChange = onMemoryAutoChange, enabled = loaded)
-            }
-
+            MemorySlider(
+                valueMb = memoryText.trim().toIntOrNull() ?: Instance.DEFAULT_MEMORY_MB,
+                onChange = { onMemoryChange(it.toString()) },
+                enabled = loaded,
+            )
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
                 Checkbox(checked = memoryOptimize, onCheckedChange = onMemoryOptimizeChange, enabled = loaded)
                 Column(Modifier.weight(1f).padding(top = 12.dp)) {
@@ -670,31 +647,12 @@ private fun LaunchTab(
                     )
                 }
             }
-
-            if (!memoryAuto) {
-                OutlinedTextField(
-                    value = memoryText,
-                    onValueChange = onMemoryChange,
-                    modifier = Modifier.fillMaxWidth(),
-                    label = { Text("内存（MB）") },
-                    singleLine = true,
-                    enabled = loaded,
-                    isError = memoryText.trim().toIntOrNull() == null,
-                    supportingText = {
-                        Text(
-                            "允许范围 " + Instance.MIN_MEMORY_MB + "–" + Instance.MAX_MEMORY_MB + " MB，默认 " +
-                                Instance.DEFAULT_MEMORY_MB + " MB。",
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    },
-                )
-            } else {
-                Text(
-                    "现在是自动分配，这里填的数只在新建实例时当上限参考：" + memoryText + " MB。",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
+            Text(
+                "范围 " + Instance.MIN_MEMORY_MB + "–" + Instance.MAX_MEMORY_MB + " MB，按 128 MB 一档；" +
+                    "上限再看本机物理内存收窄（留 1 GB 给系统）。下面那排是常停的几档，点一下就跳过去。",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
     }
 }

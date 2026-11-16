@@ -76,12 +76,12 @@ data class LauncherSettings(
      */
     val curseForgeApiKey: String = "",
     /**
-     * 内存是否由启动器自动分配（默认开）。
+     * **已废弃**：界面上不再有「自动分配」这个开关（2026-11-16 删）。
      *
-     * 关掉这一项才会用 [defaultMemoryMb] / 实例自己的 memoryMb 手填数。
-     * 为什么要这个开关而不是直接给个输入框：绝大多数玩家不知道 4096 够不够，
-     * 而填小了会在开光影时 OOM、填大了会让 8G 内存的机器整台卡住 ——
-     * 让启动器按版本与已装内容自己算，比让用户猜安全。
+     * 它从来没有接进 JVM 参数 —— [io.github.huang404yan.platypus.core.launch.LaunchPlanner]
+     * 直接取实例上的 memoryMb，LaunchArguments 拿它拼 -Xmx，中间没人看这个字段。
+     * 现在留着只为读旧 settings.json 时别报错（@Serializable 有默认值，删了也能读，
+     * 但保留字段可以避免「存回去就把用户原来的值丢了」）；不要在新代码里读它。
      */
     val memoryAuto: Boolean = true,
     /**
@@ -98,6 +98,14 @@ data class LauncherSettings(
      *（它改的是 JVM 参数，不是界面偏好）。点过「以后都这样」就不再问。
      */
     val memoryAskSkipped: Boolean = false,
+    /**
+     * 上次真正启动过的实例（[io.github.huang404yan.platypus.core.instance.instanceKey] 的写法）。
+     *
+     * 启动页扫完目录后按「实例页点名 > 当前选中 > 上次启动的那个 > 列表第一个」挑，
+     * 这样隔天再开程序，默认停在昨天玩的那个版本上，而不是按名字排在最前面的那个。
+     * 存 key 而不是 uuid：实例目录被挪走、重新扫描后 id 会变，目录才是稳定身份。
+     */
+    val lastInstanceKey: String = "",
     /**
      * 首次启动引导走完的时刻（毫秒）；0 表示还没走过。
      *
@@ -127,6 +135,7 @@ data class LauncherSettings(
             theme = raw.theme.trim().lowercase(),
             downloadSource = raw.downloadSource.trim().lowercase(),
             curseForgeApiKey = raw.curseForgeApiKey.trim().trim('"').trim(),
+            lastInstanceKey = raw.lastInstanceKey.trim(),
             // 负数一律当没走过：时间戳只可能从 0 往上长，负值是手改文件或写坏的结果。
             firstRunAt = raw.firstRunAt.coerceAtLeast(0L),
             autoBackupHours = raw.autoBackupHours.coerceIn(

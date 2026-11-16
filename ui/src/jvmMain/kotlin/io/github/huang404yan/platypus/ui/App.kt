@@ -110,6 +110,15 @@ fun App(
         var overlay by remember { mutableStateOf<Overlay?>(null) }
         var overlayInstance by remember { mutableStateOf<Instance?>(null) }
 
+        // 副页面关掉之后，底下那一页要重扫一次。版本选择页里新登记或刚下载的实例只写进
+        // instances.json，启动页手里那份 registered 还停在打开副页面之前 —— 不通知它，
+        // 就会出现「明明登记成功了，主页的版本卡片里没有」。
+        var overlayTick by remember { mutableStateOf(0) }
+        fun closeOverlay() {
+            overlay = null
+            overlayTick++
+        }
+
         fun openSetup(instance: Instance) {
             overlayInstance = instance
             overlay = Overlay.InstanceSetup(instanceKey(instance))
@@ -126,7 +135,7 @@ fun App(
                     // （常见于想回内容区顶部）不该把二级项踢回默认。
                     if (target != page) subSelection.remove(target.name)
                     page = target
-                    overlay = null
+                    closeOverlay()
                 },
             )
             Row(Modifier.weight(1f).fillMaxWidth()) {
@@ -150,6 +159,8 @@ fun App(
                     // tick 只在「下载」页与「设置」页有意义（两处都有需要重读的清单）；
                     // 别的页面忽略它，免得切页时误触发。
                     val tick = if (page == Page.DOWNLOAD || page == Page.SETTINGS) refreshTick else 0
+                    // 启动页另有一路信号：副页面关掉（overlayTick）时重扫登记表。
+                    // 只在那时加一，不跟左列「刷新」按钮混用 —— 那个是给下载页重拉网络列表的。
                     when (page) {
                         Page.LAUNCH -> LaunchPage(
                             backend = backend,
@@ -164,17 +175,41 @@ fun App(
                                 subSelection[Page.SETTINGS.name] = SETTINGS_TAB_ACCOUNT
                                 page = Page.SETTINGS
                             },
+                            refreshTick = overlayTick,
                         )
                         Page.DOWNLOAD -> when (sub) {
-                            DOWNLOAD_TAB_MODS -> ModsPage(initialGameRoot, backend, tick)
+                            DOWNLOAD_TAB_MODS -> ModsPage(
+                                initialGameRoot = initialGameRoot,
+                                backend = backend,
+                                refreshTick = tick,
+                                // 「装的是什么」和「这个版本装了什么」是同一件事的两头：
+                                // 从详情页跳过来时带上那个实例，用户不用再选一遍。
+                                focusInstanceKey = focusKey.orEmpty(),
+                            )
                             // 整合包页没有可刷新的清单（见 Navigation.kt 里那一项的说明），不传 tick
                             DOWNLOAD_TAB_MODPACK -> ModpackPage(initialGameRoot, backend) { page = Page.LAUNCH }
-                            DOWNLOAD_TAB_DATAPACKS ->
-                                PacksPage(initialGameRoot, backend, PackKind.DATAPACK, tick)
-                            DOWNLOAD_TAB_RESOURCEPACKS ->
-                                PacksPage(initialGameRoot, backend, PackKind.RESOURCE_PACK, tick)
-                            DOWNLOAD_TAB_SHADERS ->
-                                PacksPage(initialGameRoot, backend, PackKind.SHADER, tick)
+                            DOWNLOAD_TAB_DATAPACKS -> PacksPage(
+                                initialGameRoot = initialGameRoot,
+                                backend = backend,
+                                kind = PackKind.DATAPACK,
+                                refreshTick = tick,
+                                focusInstanceKey = focusKey.orEmpty(),
+                            )
+                            DOWNLOAD_TAB_RESOURCEPACKS -> PacksPage(
+                                initialGameRoot = initialGameRoot,
+                                backend = backend,
+                                kind = PackKind.RESOURCE_PACK,
+                                refreshTick = tick,
+                                focusInstanceKey = focusKey.orEmpty(),
+                            )
+                            DOWNLOAD_TAB_SHADERS -> PacksPage(
+                                initialGameRoot = initialGameRoot,
+                                backend = backend,
+                                kind = PackKind.SHADER,
+                                refreshTick = tick,
+                                // 详情页「去下载光影」跳过来时带上那个实例
+                                focusInstanceKey = focusKey.orEmpty(),
+                            )
                             // 服务端不登记实例，所以没有「装完去启动」的回调
                             DOWNLOAD_TAB_SERVER -> ServerPage(initialGameRoot, backend)
                             else -> DownloadsPage(initialGameRoot, backend, tick) { page = Page.LAUNCH }
@@ -243,24 +278,34 @@ fun App(
                         Overlay.InstanceSelect -> InstancePage(
                             backend = backend,
                             initialGameRoot = initialGameRoot,
-                            onBack = { overlay = null },
+                            onBack = { closeOverlay() },
                             onLaunch = { instance ->
                                 focusKey = instanceKey(instance)
                                 page = Page.LAUNCH
-                                overlay = null
+                                closeOverlay()
                             },
                             onOpenSetup = { instance -> openSetup(instance) },
                         )
                         is Overlay.InstanceSetup -> {
                             val instance = overlayInstance
                             if (instance == null) {
-                                overlay = null
+                                closeOverlay()
                             } else {
                                 InstanceDetailPanel(
                                     instance = instance,
                                     backend = backend,
-                                    onBack = { overlay = null },
+                                    onBack = { closeOverlay() },
                                     onNotice = { println("[setup] " + it) },
+                                    // 跳下载页：先记下二级项再切一级页，同时把覆盖层关掉；
+                                    // 不关的话覆盖层还盖在上面，用户会以为按钮没反应。
+                                    onOpenDownload = { sub ->
+                                        // 顺手把这个实例记成启动页的焦点：下载页据此
+                                        // 自动挑中「刚才在详情里看的那个」，而不是列表第一个。
+                                        overlayInstance?.let { focusKey = instanceKey(it) }
+                                        subSelection[Page.DOWNLOAD.name] = sub
+                                        page = Page.DOWNLOAD
+                                        closeOverlay()
+                                    },
                                 )
                             }
                         }
