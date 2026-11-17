@@ -4,7 +4,7 @@
 
 # 鸭嘴兽启动器（Platypus Launcher）
 
-从零编写的 Minecraft 启动器。桌面端与安卓端共用一套界面代码，安卓优先，Windows 与 Linux 随后。
+从零编写的 Minecraft 启动器。桌面端与安卓端共用一套界面代码，Windows、Linux 与安卓三端同步发布。
 
 > **免责声明**
 >
