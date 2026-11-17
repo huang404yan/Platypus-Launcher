@@ -4,7 +4,7 @@
 
 # 鸭嘴兽启动器（Platypus Launcher）
 
-一个从零写的 Minecraft 启动器。桌面和安卓共用一套界面代码，目标是两端都用得顺手：安卓优先，Windows 与 Linux 跟上。
+从零编写的 Minecraft 启动器。桌面端与安卓端共用一套界面代码，安卓优先，Windows 与 Linux 随后。
 
 > **免责声明**
 >
@@ -19,33 +19,24 @@
 | 中文名 | 鸭嘴兽启动器 | 鸭嘴兽·孵化版 |
 | 英文名 | Platypus Launcher | Platypus Preview |
 | 版本号 | `1.0.0` 起进位 | `0.x-preview.N` |
-| 渠道 | 本项目构建发布 | 谁都能自己编，由其他人制作 |
+| 渠道 | 本项目构建发布 | 任何人可自行构建分发 |
 | 包内容 | 完整：下载、加载器、模组搜索、联机 | 完整（与正式版同一份代码，只是不走官方发布） |
-| 内置应用 ID | 由本项目注入 | 不注入，想用正版登录就自己申请一个 |
-| 首次启动 | 要求登录一个正版账号（验证一次） | 不强制，只弹一次说明 |
+| 内置应用 ID | 由本项目注入 | 不注入，需自行申请 |
+| 首次启动 | 需登录正版账号（验证一次） | 不强制，仅弹一次说明 |
 | Android applicationId | `io.github.huang404yan.platypus.launcher` | `io.github.huang404yan.platypus.launcher.preview` |
 | 命令行 | `platypus-launcher` | `platypus-launcher-preview` |
 
-两个包名不同，所以能装在同一台手机上共存。
+两者包名不同，可安装在同一台设备上共存。
 
-**正式版**由本项目构建并发布，功能完整、内置应用 ID，第一次打开要求登录一个正版账号 ——
-验证一次就够了，之后一直记着。允许它离线进游戏等于给盗版留一条明面上的入口，
-而「这个启动器不帮你盗版」本来就是这类项目站得住的前提。
+**正式版**由本项目构建并发布，功能完整、内置应用 ID。第一次打开需要登录正版账号，验证一次后长期有效。正式版不提供离线进游戏的路径：离线启动等同于盗版，本项目的立足点之一就是不做这件事。
 
-**孵化版就是开源版。** 它的意义是 **「谁能编，谁就能发」**：任何人 fork 这个仓库、
-自己编一份发出去，就是他自己的一份孵化版。所以这条线不强制正版登录（对着能随手改的源码设卡
-没有意义），也不由本项目注入应用 ID —— 想用正版账号就自己去申请一个。
-走哪条线只看版本号：带 `-preview` 就是孵化版，不带就是正式版（`core/Brand.kt` 的 `isPreview`）。
+**孵化版即开源版**，主旨是「谁能编，谁就能发」：任何人 fork 本仓库、自行构建并分发，即为其自己的孵化版。因此这条线不强制正版登录（对公开可改的源码设卡无效），也不由本项目注入应用 ID，需要用正版账号时请自行申请。版本号带 `-preview` 即孵化版，不带为正式版，判断依据见 [`Brand.kt`](core/src/main/kotlin/io/github/huang404yan/platypus/core/Brand.kt) 的 `isPreview`。
 
-**空壳包是可选的构建开关，不是「孵化版」的同义词。** 拿 `-Pplatypus.shell=true` 编，
-包里就不带任何下载与搜索服务地址：版本清单、加载器、模组搜索这些要联网的东西，
-都得在「设置 → 下载 → 服务地址」填一个镜像根才能用，没填之前界面照旧能看、本机已有的实例
-照旧能改，只是下载页与模组搜索是空的。这个形态是给「想发一个不替别人扛镜像流量」的构建者准备的，
-**本项目官方发布的两条线都是完整包**，不带这个开关。
+**空壳包是可选构建开关，与「孵化版」不是同义词。** 使用 `-Pplatypus.shell=true` 构建时，包内不含任何下载与搜索服务地址：版本清单、加载器、模组搜索等联网功能需要在「设置 → 下载 → 服务地址」中填入镜像根地址后才能使用；未填写时界面可正常浏览、本机已有实例可正常修改，仅下载页与模组搜索为空。此形态面向不希望替他人承担镜像流量的构建者。**本项目官方发布的两条线均为完整包**，不启用该开关。
 
-仓库里放的是孵化版的全部源码，没有一行留在仓库外面；正式版只发编译好的安装包。
+仓库包含孵化版的全部源码；正式版只发布编译好的安装包。
 
-不是 PCL、HMCL、Prism 的分支。这几个项目只在产品形态上参考过，代码一行没抄 —— 见 `CONTRIBUTING.md`。
+本项目不是 PCL、HMCL、Prism 的分支，仅在产品形态上参考过这几个项目，未复制任何代码，详见 `CONTRIBUTING.md`。
 
 ## 需要什么
 
@@ -63,17 +54,17 @@
 ./gradlew :app-desktop:run
 ```
 
-Windows 下用 `gradlew.bat`。首次构建会下大约 300 MB 依赖。
+Windows 下使用 `gradlew.bat`。首次构建约需下载 300 MB 依赖。
 
-**安卓端**另外要 Android SDK：编译要 Platform 37 与 Build-Tools，编 JNI 层要 NDK `28.2.13676358`。把路径写进 `local.properties` 的 `sdk.dir=`，然后：
+**安卓端**另需 Android SDK：编译需要 Platform 37 与 Build-Tools，编译 JNI 层需要 NDK `28.2.13676358`。将路径写入 `local.properties` 的 `sdk.dir=`，然后：
 
 ```bash
 ./gradlew :androidApp:assembleDebug
 ```
 
-没有 NDK 也能编出安装包，只是里面不含启动游戏要用的那几个 `.so`。
+缺少 NDK 时仍可构建安装包，但包内不含启动游戏所需的 `.so` 文件。
 
-**出 Windows 安装包（msi）**还要 WiX 3.14，用 `-PskipWix` 与 `-PwixDir=<WiX 目录>` 指过去。只出免安装 zip 就不用管它。
+**打 Windows 安装包（msi）**还需要 WiX 3.14，通过 `-PskipWix` 与 `-PwixDir=<WiX 目录>` 指定其位置。只需免安装 zip 时无需配置。
 
 ## 目录
 
@@ -93,35 +84,35 @@ app-desktop/     桌面端入口
 androidApp/      安卓端入口
 ```
 
-`GameRuntime` 是两端的分界线：桌面实现是起一个 java 进程，安卓实现是应用内 JVM 加图形转译。上层只认这个接口，所以模组、存档、整合包那些页面两端是同一份代码。
+`GameRuntime` 是两端的分界线：桌面端实现为启动一个 java 进程，安卓端实现为应用内 JVM 加图形转译。上层只依赖该接口，因此模组、存档、整合包等页面在两端共用同一份代码。
 
-两端侧栏是同一套七项：**启动 / 实例 / 下载 / 联机 / 帮助 / 设置 / 关于**。装东西的都在「下载」下（原版与加载器、模组、光影资源包、服务端），用之前配一次的都在「设置」下（常规、账号、Java、诊断）。安卓上二级项在侧栏里展开，桌面端常驻。
+两端侧栏为同一套七项：**启动 / 实例 / 下载 / 联机 / 帮助 / 设置 / 关于**。需要下载内容的入口都在「下载」下（原版与加载器、模组、光影资源包、服务端），需要预先配置一次的在「设置」下（常规、账号、Java、诊断）。安卓端二级项在侧栏内展开，桌面端常驻显示。
 
-安卓端的应用内 JVM 已经接到 `JNI_CreateJavaVM`，但真机上还起不来：Android 10 起不允许从可写目录 `dlopen` 原生库，而运行时一定解在可写目录里。图形转译层也还没接。这条线目前能用到「进游戏之前的全部准备」（选身份、选运行时、拼参数、跑自检）。
+安卓端的应用内 JVM 已接入 `JNI_CreateJavaVM`，但真机上尚未跑通：Android 10 起禁止从可写目录 `dlopen` 原生库，而运行时必然解压到可写目录。图形转译层也尚未接入。该链路目前可完成进游戏之前的全部准备（选择身份、选择运行时、拼装参数、运行自检）。
 
 ## 下载
 
-编译好的包不在这个仓库里，走 [Releases](https://github.com/huang404yan/Platypus-Launcher/releases) 的附件。仓库只放源码与构建必需的文件 —— 二进制进了历史就删不掉，只会把仓库撑大。
+编译好的包不在本仓库中，请前往 [Releases](https://github.com/huang404yan/Platypus-Launcher/releases) 下载附件。仓库只保留源码与构建必需的文件：二进制一旦进入提交历史便无法删除，只会持续增大仓库体积。
 
-正版登录要用一串微软给的应用 ID。任何随安装包发出去的 ID 都等于让所有下载者共用一份别人名下的应用注册，被限流、被收紧、被认定滥用，都不是拿到包的人能处理的：
+正版登录需要一个由微软分配的应用 ID。任何随安装包一起下发的 ID，都意味着所有下载者共用同一份他人名下的应用注册；一旦遭遇限流、收紧或滥用判定，拿到包的人无法自行处理：
 
-- **正式版**由本项目注入（`-Pplatypus.msClientId=` 或 `PLATYPUS_MS_CLIENT_ID`），下载的人什么都不用填。
-- **孵化版**不内置。想用正版账号就自己去申请一个（免费，三分钟，步骤在界面「设置 → 账号」第一张卡里，字段与取值顺序见 `core/auth/ClientIds.kt`）。
+- **正式版**由本项目注入（`-Pplatypus.msClientId=` 或 `PLATYPUS_MS_CLIENT_ID`），下载者无需填写任何内容。
+- **孵化版**不内置。需使用正版账号时请自行申请（免费，约三分钟，操作步骤见界面「设置 → 账号」第一张卡片，字段与取值顺序见 [`ClientIds.kt`](core/src/main/kotlin/io/github/huang404yan/platypus/core/auth/ClientIds.kt)）。
 
-自己打一份：
+自行构建：
 
 ```bash
-# 孵化版（完整包，凭据与镜像由你自己那份注入或用别的办法配）
+# 孵化版（完整包；凭据与镜像需由你自行注入或另行配置）
 ./gradlew :app-desktop:createDistributable
 
-# 再进一步：连下载与搜索的服务地址都去掉的空壳包
+# 进一步：移除下载与搜索服务地址的空壳包
 ./gradlew :app-desktop:createDistributable -Pplatypus.shell=true
 ```
 
-两种包的边界与出包要求写在 `releases/README.md`，实现与理由见 `core/Endpoints.kt` 与 `core/edition/`。
+两种包的边界与构建要求见 `releases/README.md`，实现与设计理由见 [`Endpoints.kt`](core/src/main/kotlin/io/github/huang404yan/platypus/core/Endpoints.kt) 与 [`edition/`](core/src/main/kotlin/io/github/huang404yan/platypus/core/edition)。
 
 ## 许可与贡献
 
-Apache-2.0，见 `LICENSE` 与 `NOTICE`。改动之前请先看 `CONTRIBUTING.md`，里面最要紧的一条是不抄 GPL 项目的代码。
+项目以 Apache-2.0 授权，见 `LICENSE` 与 `NOTICE`。提交改动前请先阅读 `CONTRIBUTING.md`，其中最重要的一条是不复制 GPL 项目的代码。
 
 非官方项目，与 Mojang Studios 及 Microsoft 无关联。

@@ -1,91 +1,91 @@
 # 发布产物目录
 
-两条产品线分开放，互不覆盖。
+两条产品线分目录存放，互不覆盖。
 
 | 目录 | 产品 | 版本号规则 |
 |---|---|---|
 | `stable/` | 鸭嘴兽启动器 / Platypus Launcher | `1.0.0` 起进位 |
 | `preview/` | 鸭嘴兽·孵化版 / Platypus Preview | `0.x-preview.N` |
 
-两边各自再按平台分：`android/`、`windows/`、`linux/`。
+两侧各自再按平台分目录：`android/`、`windows/`、`linux/`。
 
-> **`stable/` 现在应该是空的。** 2026-11-16 曾按 `1.0.0` 出过一批（msi / zip / apk），
-> 用户试用后判定问题不少、不够格当第一个正式版，代码已退回 `0.8.0-preview.21` 继续修，
-> 那一批产物随之作废、可以删掉。正式线从修好之后重新从 `1.0.0` 起算。
+> **`stable/` 目前应为空。** 2026-11-16 曾按 `1.0.0` 出过一批（msi / zip / apk），
+> 试用后判定问题较多、不足以作为第一个正式版，代码已退回 `0.8.0-preview.21` 继续修复，
+> 该批产物随之作废，可以删除。正式线自修复完成后重新从 `1.0.0` 起算。
 
 ## 三种形态：正式版、孵化版（开源版）、空壳包
 
-从 1.0.0 起，产物分两条产品线，外加一个可选的构建开关。**发之前先认清自己要发哪一种。**
+自 1.0.0 起，产物分为两条产品线，另有可选的构建开关。**发布前须确认本次发布的是哪一种。**
 
 ### 一、正式版（`stable/`）
 
-- 由本项目构建发布，功能完整：下载、加载器安装、模组搜索、联机，全都带。
-- 内置微软应用 ID（`-Pplatypus.msClientId=` 或 `PLATYPUS_MS_CLIENT_ID`），下载的人什么都不用填。
-- 首次启动要求登录一个正版账号，**验证一次就够了**（PCL-CE、HMCL 都是这个口径）：
-  登录过一次之后一直记着，之后打开不会再问。允许它离线进游戏等于给盗版留一条明面上的入口，
-  而「这个启动器不帮你盗版」本来就是这类项目站得住的前提。
-- 源码不随包走，但仓库主干与它是同一份代码 —— 差别只有版本号与是否注入凭据。
-- 走哪条线只看版本号：带 `-preview` 就是孵化版，不带就是正式版（`core/Brand.kt` 的 `isPreview`）。
+- 由本项目构建并发布，功能完整：下载、加载器安装、模组搜索、联机均已包含。
+- 内置微软应用 ID（`-Pplatypus.msClientId=` 或 `PLATYPUS_MS_CLIENT_ID`），下载者无需填写任何内容。
+- 首次启动要求登录正版账号，**验证一次后长期有效**（PCL-CE、HMCL 均为同一口径）：
+  登录成功后持续记住，之后启动不再询问。允许离线进入游戏等同于为盗版提供明确入口，
+  而「该启动器不支持盗版」是此类项目得以立足的前提。
+- 源码不随包分发，但与仓库主干为同一份代码，差别仅在于版本号与是否注入凭据。
+- 所属产品线仅由版本号判定：含 `-preview` 为孵化版，不含则为正式版（见 [`Brand.kt`](../core/src/main/kotlin/io/github/huang404yan/platypus/core/Brand.kt) 的 `isPreview`）。
 
 ### 二、孵化版 / 开源版（`preview/`）
 
-- **功能上是完整包**：下载、加载器、模组搜索、联机都在，与服务地址相关的那套与正式版一致。
-- **是给其他人制作的**：这条线存在的意义是「谁能编，谁就能发」。任何人 fork 这个仓库、
-  按下面的命令打一份包，就是他自己的一份孵化版。
-- **不由本项目注入应用 ID**：谁要正版登录就自己申请一个填进「设置 → 账号」。
-  任何随包发出去的 ID 都等于让所有下载者共用一份别人名下的注册，那不是拿到包的人能处理的。
-- 因为源码完全公开，对着能随手改的代码设卡没有意义：孵化版不强制正版登录，
-  首次启动只弹一次窗说明。
-- 发布时必须勾 Pre-release、不标 Latest。
+- **功能上是完整包**：下载、加载器、模组搜索、联机均包含在内，服务地址相关部分与正式版一致。
+- **面向其他构建者**：这条线存在的意义是「能编译者即可发布」。任何人 fork 本仓库并按下列
+  命令构建出包，即为其自己的孵化版。
+- **不由本项目注入应用 ID**：需使用正版登录时请自行申请并填入「设置 → 账号」。
+  随包分发的任何 ID 都等于让所有下载者共用他人名下的注册，由此产生的后果超出获取安装包者所能处理的范围。
+- 源码完全公开，对可任意修改的代码设置校验并无实际作用：孵化版不强制正版登录，
+  首次启动仅弹出一次说明窗口。
+- 发布时必须勾选 Pre-release，且不标记 Latest。
 
-### 三、空壳包（可选开关，不是上面哪一条的同义词）
+### 三、空壳包（可选构建开关，与上述两条不是同一概念）
 
-`-Pplatypus.shell=true` 编出来的包**不带任何下载与搜索服务地址**：版本清单、加载器、
-模组搜索这些要联网的东西，都得用户自己去「设置 → 下载 → 服务地址」填一个镜像根才能用。
-没填之前界面照旧能看、本机已有的实例照旧能改，只是下载页与模组搜索是空的。
+以 `-Pplatypus.shell=true` 构建的包**不含任何下载与搜索服务地址**：版本清单、加载器、
+模组搜索等联网功能，须由用户在「设置 → 下载 → 服务地址」中填写镜像根后方可使用。
+填写之前界面可正常浏览、本机已有实例可正常修改，仅下载页与模组搜索为空。
 
-这个形态是给「想发一个不替别人扛镜像流量」的构建者准备的。**本项目官方发布的两条线都是完整包，
-不带这个开关**；本机调试与单测也跑在完整那一边。
+该形态面向不希望为他人承担镜像流量的构建者。**本项目官方发布的两条线均为完整包，
+不启用该开关**；本机调试与单元测试同样运行在完整包一侧。
 
 ### 出包命令
 
 ```bash
-# 正式版（完整，注入自己的 client ID）
+# 正式版（完整包，注入发行方自身的 client ID）
 ./gradlew :app-desktop:createDistributable -Pplatypus.msClientId=<你的 ID>
 
-# 孵化版（完整，不注入 ID —— 版本号里带 -preview 即可）
+# 孵化版（完整包，不注入 ID：版本号含 -preview 即可）
 ./gradlew :app-desktop:createDistributable
 
-# 空壳包（在上面任一种之上，再把服务地址去掉）
+# 空壳包（在上述任一形态之上再去除服务地址）
 ./gradlew :app-desktop:createDistributable -Pplatypus.shell=true
 ```
 
-空壳开关写进 `core/build/generated/.../BuildInfo.kt` 的 `SHELL`，运行期改不了；
-所有联网地址都从 `core/Endpoints.kt` 一个出口出，空壳包里它们全走用户填的镜像根。
+空壳开关写入 `core/build/generated/.../BuildInfo.kt` 的 `SHELL`，运行期不可更改；
+所有联网地址均由 [`Endpoints.kt`](../core/src/main/kotlin/io/github/huang404yan/platypus/core/Endpoints.kt) 统一输出，在空壳包中全部指向用户填写的镜像根。
 
-### 谁不许往里放什么
+### 禁止放入的内容
 
-**孵化版与空壳包**不许带私有凭据：任何一份随安装包发出去的 ID，都等于所有下载者共用一份
-别人名下的应用注册，被限流、被收紧、被认定滥用，都不是拿到包的人能处理的。仓库里那一份
-永远是空串，取值顺序在 `core/auth/ClientIds.kt`。正式版相反 —— 它**必须**由发行方注入
-自己申请的那份，那份 ID 属于发行方，不随源码走。
+**孵化版与空壳包**不得携带私有凭据：任何随安装包分发的 ID，都等于让所有下载者共用
+他人名下的应用注册，由此导致的限流、配额收紧或滥用认定，均超出获取安装包者所能处理的范围。
+仓库中该项恒为空串，取值顺序见 [`ClientIds.kt`](../core/src/main/kotlin/io/github/huang404yan/platypus/core/auth/ClientIds.kt)。正式版恰好相反：必须
+由发行方注入其自行申请的那一份，该 ID 归发行方所有，不随源码分发。
 
-两边的实现与理由见 `core/Endpoints.kt`（地址的唯一出口）与 `core/edition/`（两条通道的差异）。
+两侧的实现与设计理由见 [`Endpoints.kt`](../core/src/main/kotlin/io/github/huang404yan/platypus/core/Endpoints.kt)（地址的统一出口）与 [`edition/`](../core/src/main/kotlin/io/github/huang404yan/platypus/core/edition)（两条通道的差异）。
 
 ## 孵化版不占正式版版本号
 
-`0.x-preview.N` 与 `1.0.0` 是两条独立的号段，**互不占用**：
+`0.x-preview.N` 与 `1.0.0` 是两条独立的号段，互不占用：
 
-- 孵化版发到 `0.9-preview.N`、`0.10-preview.N` 都行，正式版照样从 `1.0.0` 开始。
-- 正式版一旦发布，版本号只往前走；孵化版继续停留在 `0.x-preview.N`，不会「抢」正式版的号。
-- 在 GitHub 上发 Release 时，孵化版**必须勾选 Pre-release**，不要标成 Latest，否则用户会把测试版当正式版下。
-- 同一版本号不允许同时出现在 `stable/` 和 `preview/` 下。
+- 孵化版可发至 `0.9-preview.N`、`0.10-preview.N`，正式版仍从 `1.0.0` 起算。
+- 正式版发布后版本号只向前推进；孵化版继续停留于 `0.x-preview.N`，不会占用正式版号段。
+- 在 GitHub 发布 Release 时，孵化版**必须勾选 Pre-release**，不得标记为 Latest，否则用户易将测试版误当正式版下载。
+- 同一版本号不得同时出现在 `stable/` 与 `preview/` 下。
 
-## 每个平台最多留 5 个
+## 每个平台最多保留 5 个
 
-按文件名里的版本号排序，超出 5 个时删最旧的。删之前确认新包能装上、能启动——**不许先删后测**。
+按文件名中的版本号排序，超出 5 个时删除最旧者。删除前须确认新包可安装、可启动：**不得先删后测**。
 
-注意空壳包与完整包的**文件名必须能区分**（见下面的命名），否则过几天就分不清哪个是给谁验的。
+空壳包与完整包的**文件名必须可区分**（见下节命名规则），否则无法辨别各产物对应的验证对象。
 
 ## 命名
 
@@ -96,93 +96,93 @@ Platypus-Launcher-<ver>-win-x64.zip
 Platypus-Launcher-<ver>-linux-x64.AppImage
 ```
 
-`<ver>` 就是完整版本号，带 preview 后缀，例如 `0.8.0-preview.1`、`1.0.0`。文件名里已经能区分正式版和孵化版，不要再加别的标记。
+`<ver>` 为完整版本号，含 preview 后缀时即为孵化版，例如 `0.8.0-preview.1`、`1.0.0`。文件名本身已可区分正式版与孵化版，无需附加其他标记。
 
-唯一例外是**空壳包**：它与完整版同版本号，只能靠文件名区分，统一加 `-shell` 后缀，
+唯一例外是**空壳包**：它与完整版版本号相同，仅能依靠文件名区分，统一加 `-shell` 后缀，
 例如 `Platypus-Launcher-0.8.0-preview.20-win-x64-shell.zip`。
-空壳包默认只出免装 zip（它本来就是给人验「填服务地址前后差多少」的）；要 msi 就同样加 `-shell`。
-**官方不复用这两个字**：正式版与孵化版的文件名都不带 `-shell`。
+空壳包默认仅提供免安装 zip（其用途是验证「填写服务地址前后的差异」）；如需 msi，同样加 `-shell`。
+**官方发布不使用该后缀**：正式版与孵化版的文件名均不带 `-shell`。
 
-### Windows 是两种形态，不是二选一
+### Windows 为两种形态，并非二选一
 
-jpackage 在 Windows 上只能产出 **msi 安装包** 或 **app-image 目录**，两者都交付：
+jpackage 在 Windows 上只能产出 **msi 安装包** 或 **app-image 目录**，两者均需交付：
 
-| 后缀 | 来源任务 | 用户拿到后怎么做 |
+| 后缀 | 来源任务 | 获取后的使用方式 |
 |---|---|---|
-| `.msi` | `:app-desktop:packageMsi` | 双击安装，有开始菜单快捷方式，可卸载 |
-| `.zip` | `:app-desktop:createDistributable` 后打包 app-image 目录 | 解压到任意位置，双击 `<包名>\<包名>.exe` 直接跑，不写注册表 |
+| `.msi` | `:app-desktop:packageMsi` | 双击安装，提供开始菜单快捷方式，可卸载 |
+| `.zip` | `:app-desktop:createDistributable` 后打包 app-image 目录 | 解压至任意位置，双击 `<包名>\<包名>.exe` 直接运行，不写入注册表 |
 
-**没有 `-win-x64.exe` 这个单文件**：jpackage 不产出独立 exe，早期的 `.exe` 命名是对产物形态的误判，已废弃。zip 里那个 exe 必须和同目录的 `app/`、`runtime/` 一起用，单独拷走跑不起来。
+**不存在 `-win-x64.exe` 单文件形态**：jpackage 不产出独立 exe，早期的 `.exe` 命名属于对产物形态的误判，已废弃。zip 中的 exe 必须与同目录的 `app/`、`runtime/` 配合使用，单独复制无法运行。
 
-两种形态里同一个版本可以同时存在（安装版给普通用户，zip 给不想装东西的人），但**合计**受下面的 5 个上限约束。
+同一版本可同时存在两种形态（安装版面向普通用户，zip 面向不希望安装的用户），但**合计数量**受下节 5 个上限约束。
 
 ### 打 msi 需要本机有 WiX
 
-jpackage 打 msi 依赖 WiX Toolset 3.x 的 `candle.exe` / `light.exe`。本机的 WiX 放在仓库外面（**不安装、不进仓库**），构建时由根 `build.gradle.kts` 复制进 `build/wix311/`：
+jpackage 打包 msi 依赖 WiX Toolset 3.x 的 `candle.exe` / `light.exe`。本机 WiX 置于仓库之外（**不安装、不进仓库**），构建时由根 `build.gradle.kts` 复制至 `build/wix311/`：
 
 ```
 # 三种方式任选其一（按优先级）
 gradle.bat -PskipWix -PwixDir=D:\ruanjian\kaifa\wix314 :app-desktop:packageMsi   # 1) 显式参数
 set PLATYPUS_WIX_DIR=D:\ruanjian\kaifa\wix314                                    # 2) 环境变量
-# 3) candle.exe 在 PATH 里，自动跟着找
+# 3) candle.exe 在 PATH 里，自动查找
 ```
 
-`-PwixDir` 指到 WiX 整包目录或它下面的 `bin/` 都可以。**必须配合 `-PskipWix`**：启动参数本身会禁用 downloadWix（不去 GitHub 下载），然后由上面的逻辑铺好 `build/wix311`。
+`-PwixDir` 可指向 WiX 整包目录或其下的 `bin/`。**必须配合 `-PskipWix`**：该启动参数禁用 downloadWix（不访问 GitHub 下载），再由上述逻辑铺好 `build/wix311`。
 
-`build/` 会被 `clean` 清掉，所以 `clean` 之后第一次打包 msi 会重新复制一次（约 117 MB，几秒）。只出 zip（`createDistributable`）时完全不需要 WiX。
+`build/` 会被 `clean` 清除，因此 `clean` 之后首次打包 msi 需重新复制一次（约 117 MB，耗时数秒）。仅出 zip（`createDistributable`）时不需要 WiX。
 
 ## 产物不进仓库
 
-这个目录（除本文件）已在 `.gitignore` 里，**只是本机的暂存区**。对外分发走 GitHub Releases 的附件：仓库历史只放源码与构建必需的文件，二进制一旦提交就删不掉，只会把仓库撑大（当前 5 个 Android 包已 60 MB，桌面安装包一个就 60 MB 上下，一年下来轻松过 GB）。
+本目录（除本文件外）已在 `.gitignore` 中，**仅作为本机暂存区**。对外分发通过 GitHub Releases 附件进行：仓库历史只保留源码与构建必需的文件，二进制文件一旦提交便无法从历史中移除，只会持续增大仓库体积（当前 5 个 Android 包约 60 MB，单个桌面安装包约 60 MB，一年累计可轻易超过 1 GB）。
 
-出包流程：本地构建 → 放进对应的 `<通道>/<平台>/` → 发 Release 时上传该文件 → 旧的本地包按上面的 5 个上限清理。
+出包流程：本地构建 → 放入对应的 `<通道>/<平台>/` → 发布 Release 时上传该文件 → 旧本地包按上述 5 个上限清理。
 
 ## 不放什么
 
-- 签名私钥、`keystore`、`*.jks` —— 永远不进仓库
-- 构建中间产物（`build/`、`.gradle/`）—— 已在 `.gitignore`
-- 调试版 —— 只放对外可安装的包
+- 签名私钥、`keystore`、`*.jks`：永不进仓库
+- 构建中间产物（`build/`、`.gradle/`）：已在 `.gitignore` 中
+- 调试版：仅放对外可安装的包
 
-### 公开分发的包不带别人的凭据，也不带任何隐私
+### 公开分发的包不携带他人凭据，也不携带任何隐私内容
 
-孵化版与空壳包都是公开分发、由其他人自己构建的包，下面是硬约束，出包前逐条过一遍：
+孵化版与空壳包均为公开分发、由他人自行构建的包，以下为硬性约束，出包前须逐条核对：
 
-- **不内置第三方 Client ID**。OAuth 的 `client_id` 不是密钥，但内置一个人家注册的 ID，
-  等于让所有下载者共用同一份配额、共享同一个被随时关闭的风险。孵化版出包时既不能传
-  `-Pplatypus.msClientId` 也不能设 `PLATYPUS_MS_CLIENT_ID`，`BuildInfo.MS_CLIENT_ID` 与
-  `MicrosoftEndpoints.DEFAULT_CLIENT_ID` 都必须是空串，正版登录由用户自己注册
-  （步骤在界面「设置 → 账号」第一张卡里，取值顺序见 `core/auth/ClientIds.kt`）。
-  **正式版是另一回事**：由构建方在自己机器上注册并注入，那份 ID 属于发行方，不随源码走。
-  正式版没注入 ID 时不会把程序锁死（首启弹窗能关、正文写明缺 ID），但微软登录走不通 ——
-  发正式版之前必须确认真的注入了。三条路的优先级见 `core/auth/ClientIds.kt`。
-- **空壳包还要确认真的没有服务地址**：`-Pplatypus.shell=true` 出包后，
-  `BuildInfo.kt` 里 `SHELL` 必须是 `true`，并且包里不要残留任何内置镜像根
-  （**官方发布的正式版与孵化版都不带这个开关**，它们应当是 `SHELL = false`）。
-- **不带任何隐私内容**：真实账号 / UUID / refresh_token、本机路径与用户名、
-  诊断页导出的现场、日志文件、`settings.json`、`accounts.json`、`.minecraft` 里的任何东西。
-- **不留申请指引的缺口**：Release 说明必须有一段讲「正版登录要先自己填一个应用 ID」，
-  并写清去哪儿填（界面「设置 → 账号」第一张卡）。指引只写在仓库里不算 —— 用户拿到的是附件。
+- **不内置第三方 Client ID**。OAuth 的 `client_id` 并非密钥，但内置他人注册的 ID
+  等于让所有下载者共用同一份配额，并共担该 ID 随时被关闭的风险。孵化版出包时既不得传入
+  `-Pplatypus.msClientId`，也不得设置 `PLATYPUS_MS_CLIENT_ID`，`BuildInfo.MS_CLIENT_ID` 与
+  `MicrosoftEndpoints.DEFAULT_CLIENT_ID` 均须为空串，正版登录由用户自行注册
+  （步骤见界面「设置 → 账号」第一张卡片，取值顺序见 [`ClientIds.kt`](../core/src/main/kotlin/io/github/huang404yan/platypus/core/auth/ClientIds.kt)）。
+  **正式版另作处理**：由构建方在本机注册并注入，该 ID 归发行方所有，不随源码分发。
+  正式版未注入 ID 时程序不会无法启动（首启弹窗可关闭，正文已写明缺少 ID），但微软登录不可用，
+  因此发布正式版前必须确认 ID 确已注入。三条取值路径的优先级见 [`ClientIds.kt`](../core/src/main/kotlin/io/github/huang404yan/platypus/core/auth/ClientIds.kt)。
+- **空壳包还须确认不含服务地址**：以 `-Pplatypus.shell=true` 出包后，
+  `BuildInfo.kt` 中的 `SHELL` 必须为 `true`，且包内不得残留任何内置镜像根
+  （**官方发布的正式版与孵化版不启用该开关**，其 `SHELL` 应为 `false`）。
+- **不携带任何隐私内容**：真实账号、UUID、refresh_token、本机路径与用户名、
+  诊断页导出的现场信息、日志文件、`settings.json`、`accounts.json` 以及 `.minecraft` 中的任何内容。
+- **不得缺少申请指引**：Release 说明中必须包含一段说明「正版登录需先自行填写应用 ID」，
+  并写明填写位置（界面「设置 → 账号」第一张卡片）。仅写在仓库中不算数，用户获取到的是附件。
 
-出包前自检（改完代码到打包之间跑一次）：
+出包前自检（自代码修改完成到打包之间执行一次）：
 
 ```bash
-# 排除 src/test：单测里那串 ID 只是「形状合法的样本」，不是真要用的凭据
+# 排除 src/test：单元测试中的 ID 仅为「格式合法的样本」，并非实际使用的凭据
 grep -rn "04b07795\|1950a258" --include=*.kt --exclude-dir=test .   # 应无输出
 grep -rn "C:\\Users\\|/home/[a-z]" --include=*.kt --include=*.json .   # 应无输出
 grep -n "DEFAULT_CLIENT_ID" core/src/main/kotlin/io/github/huang404yan/platypus/core/auth/MicrosoftAuth.kt
-# 第四条应打印：const val DEFAULT_CLIENT_ID = ""
+# 第四条应输出：const val DEFAULT_CLIENT_ID = ""
 ```
 
-孵化版与空壳包还要确认构建产物里那份是空的（前一条只查了源码里的常量，注入的值走的是另一条路）：
+孵化版与空壳包还须确认构建产物中该常量为空（上一条仅检查源码常量，注入值经由另一条路径）：
 
 ```bash
-# 出完包在构建目录里查一眼，内容应是 const val MS_CLIENT_ID: String = ""
+# 出包后在构建目录中核对，内容应为 const val MS_CLIENT_ID: String = ""
 grep -n "MS_CLIENT_ID" core/build/generated/platypus/kotlin/io/github/huang404yan/platypus/core/BuildInfo.kt
-# 环境变量别留在 shell 里（Windows 的 set 与 bash 的 env 都查一下）
+# 确认环境变量未残留于 shell（Windows 的 set 与 bash 的 env 均需检查）
 env | grep PLATYPUS_MS_CLIENT_ID    # 应无输出
-# 空壳包：这一行应打印 true
+# 空壳包：此行应输出 true
 grep -n "SHELL" core/build/generated/platypus/kotlin/io/github/huang404yan/platypus/core/BuildInfo.kt
 ```
 
-IDE 或命令行里为了调试设过 `-Pplatypus.msClientId=` / `PLATYPUS_MS_CLIENT_ID` 的话，
-出包前必须清掉，否则那个开发用的 ID 会静默进到孵化版包里。
+若曾为调试在 IDE 或命令行中设置过 `-Pplatypus.msClientId=` 或 `PLATYPUS_MS_CLIENT_ID`，
+出包前必须清除，否则该开发用 ID 会静默进入孵化版包。
