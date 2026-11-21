@@ -94,6 +94,8 @@ androidApp/      安卓端入口
 
 编译好的包不在本仓库中，请前往 [Releases](https://github.com/huang404yan/Platypus-Launcher/releases) 下载附件。仓库只保留源码与构建必需的文件：二进制一旦进入提交历史便无法删除，只会持续增大仓库体积。
 
+GitHub 访问不畅时可用 [Gitee 镜像](https://gitee.com/missing-page-404/Platypus-Launcher)。该镜像由 GitHub 直接导入，源码、提交历史与 tag 与上游一致，日常只读同步；**包体仍只在 GitHub Releases 发布**，镜像侧不挂附件。
+
 正版登录需要一个由微软分配的应用 ID。任何随安装包一起下发的 ID，都意味着所有下载者共用同一份他人名下的应用注册；一旦遭遇限流、收紧或滥用判定，拿到包的人无法自行处理：
 
 - **正式版**由本项目注入（`-Pplatypus.msClientId=` 或 `PLATYPUS_MS_CLIENT_ID`），下载者无需填写任何内容。
