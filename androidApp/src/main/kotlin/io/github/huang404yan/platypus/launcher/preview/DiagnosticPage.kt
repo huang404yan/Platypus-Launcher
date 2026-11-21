@@ -42,6 +42,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import io.github.huang404yan.platypus.core.Brand
 import io.github.huang404yan.platypus.core.auth.OfflineProfile
+import io.github.huang404yan.platypus.core.instance.GameRoots
 import io.github.huang404yan.platypus.core.instance.InstanceScanner
 import io.github.huang404yan.platypus.core.launch.AndroidLaunchArgs
 import io.github.huang404yan.platypus.core.launch.AndroidLaunchConfig
@@ -269,7 +270,7 @@ internal object Diagnostics {
         rows += DiagnosticRow("所有文件访问权限", if (managerGranted) "已授予" else "未授予", managerGranted)
         rows += DiagnosticRow("hasFileAccess()", hasFileAccess(context).toString(), hasFileAccess(context))
 
-        val base = Environment.getExternalStorageDirectory()
+        val base = storageRoot()
         rows += DiagnosticRow("外部存储根", base.absolutePath)
         rows += DiagnosticRow("根目录存在", if (base.isDirectory) "是" else "否", base.isDirectory)
         rows += DiagnosticRow("根目录可读", if (base.canRead()) "是" else "否", base.canRead())
@@ -569,20 +570,18 @@ internal object Diagnostics {
 
     private fun gameDirectories(): DiagnosticSection {
         val rows = mutableListOf<DiagnosticRow>()
-        val base = Environment.getExternalStorageDirectory().absolutePath
-        val candidates = listOf(
-            base + "/.minecraft",
-            base + "/minecraft",
-            base + "/games/PojavLauncher/.minecraft",
-            base + "/Android/data/net.kdt.pojavlaunch/files/.minecraft",
-            base + "/.platypus",
-        )
+        // 候选取自 GameRoots，与「默认游戏目录」用的是同一份清单：
+        // 诊断页看到的顺序就是选目录时的顺序，两边对不上会让人以为规则变了。
+        val root = storageRoot()
+        val candidates = listOf(GameRoots.androidDefaultGame(root).absolutePath) +
+            GameRoots.androidLegacyGameDirs(root).map { it.absolutePath } +
+            listOf(File(root, ".platypus").absolutePath)
         candidates.forEach { path ->
             val file = File(path)
             val versions = File(file, "versions")
             val count = if (versions.isDirectory) versions.list()?.size ?: 0 else 0
             rows += DiagnosticRow(
-                path.removePrefix(base),
+                path.removePrefix(root.absolutePath),
                 if (file.isDirectory) "存在，versions 下 " + count + " 项" else "不存在",
                 file.isDirectory,
             )

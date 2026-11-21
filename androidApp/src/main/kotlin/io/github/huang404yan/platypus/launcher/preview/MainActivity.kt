@@ -71,6 +71,7 @@ import io.github.huang404yan.platypus.core.Brand
 import io.github.huang404yan.platypus.core.Credit
 import io.github.huang404yan.platypus.core.CreditKind
 import io.github.huang404yan.platypus.core.Credits
+import io.github.huang404yan.platypus.core.instance.GameRoots
 import io.github.huang404yan.platypus.core.instance.Instance
 import io.github.huang404yan.platypus.core.instance.InstanceScanner
 import io.github.huang404yan.platypus.core.instance.JsonInstanceRepository
@@ -732,14 +733,21 @@ internal fun openAllFilesSettings(context: Context) {
         .onFailure { runCatching { context.startActivity(fallback) } }
 }
 
+/**
+ * 外部存储根（`/storage/emulated/0`）。
+ *
+ * 拿不到时退回 `/sdcard` 这层软链：宁可给一条可能不存在的路径，也不要让各页面
+ * 拿到空串 —— 空的 `File("")` 指向的是进程的当前目录，那会把东西写到谁也找不到的地方。
+ */
 @Suppress("DEPRECATION")
-internal fun defaultGameRoot(): String {
-    val base = Environment.getExternalStorageDirectory().absolutePath
-    val candidates = listOf(
-        "$base/.minecraft",
-        "$base/minecraft",
-        "$base/games/PojavLauncher/.minecraft",
-        "$base/Android/data/net.kdt.pojavlaunch/files/.minecraft",
-    )
-    return candidates.firstOrNull { File(it).isDirectory } ?: "$base/.minecraft"
-}
+internal fun storageRoot(): File = runCatching { Environment.getExternalStorageDirectory() }.getOrNull()
+    ?: File("/sdcard")
+
+/**
+ * 默认游戏目录。
+ *
+ * 规则在 [GameRoots.androidGameDir]：老位置（`/sdcard/.minecraft`、PojavLauncher 的目录）
+ * 里已经有东西就继续用老的，一个都没有才落到 `/sdcard/Platypus/game`。**不静默搬家** ——
+ * 升级一下就把用了半年的目录换掉，用户第一眼只会觉得存档全丢了。
+ */
+internal fun defaultGameRoot(): String = GameRoots.androidGameDir(storageRoot()).absolutePath

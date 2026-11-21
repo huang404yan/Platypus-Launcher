@@ -188,7 +188,7 @@ private val ANDROID_HELP_CHAPTERS: List<HelpChapter> = listOf(
             HelpSection(
                 heading = "第一步：给它一个目录",
                 lines = listOf(
-                    "启动器自己不造游戏目录，它去你指定的地方找。第一次进「实例」页会显示一个默认路径，多半是 /storage/emulated/0/.minecraft。",
+                    "启动器自己不造游戏目录，它去你指定的地方找。什么都没装过时，实例页显示的默认路径是 /storage/emulated/0/Platypus/game —— 一层看得见的目录，卸载启动器不会删它，存档也就不会跟着消失。",
                     "Android 11 起，读写别的应用的外部存储要单独授权。页面上那张卡会提示「还没给访问权限」，点了会跳到系统的「所有文件访问权限」页，找到「鸭嘴兽·孵化版」打开即可。",
                     "授权之后回到启动器，点「重新扫描」，找到的实例会按版本名列出来。",
                 ),
@@ -351,7 +351,7 @@ private val ANDROID_HELP_CHAPTERS: List<HelpChapter> = listOf(
                 heading = "找不到实例 / 扫出来是空的",
                 lines = listOf(
                     "九成是目录不对或没给权限。实例页最上面那张卡会分别说明。",
-                    "安卓上 .minecraft 常在 /storage/emulated/0/.minecraft；有些启动器把它放在 /storage/emulated/0/Android/data/<包名>/files/.minecraft，那个位置从 Android 11 起别的应用读不到。",
+                    "老版本的鸭嘴兽、以及别的启动器，多半把游戏目录放在 /storage/emulated/0/.minecraft；有些放在 /storage/emulated/0/Android/data/<包名>/files/.minecraft，那个位置从 Android 11 起别的应用读不到。这些老位置启动器仍然认，只要里面有东西就一直用老的，不会给你换掉。",
                 ),
             ),
             HelpSection(

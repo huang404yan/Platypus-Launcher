@@ -304,7 +304,7 @@ internal fun AccountPage() {
         )
 
         AccountCard(
-            title = "游戏目录（.minecraft）",
+            title = "游戏目录",
             hint = "账号与设置都放在这个目录下的 platypus/ 里。换了目录等于换了一整套登录状态。",
         ) {
             OutlinedTextField(

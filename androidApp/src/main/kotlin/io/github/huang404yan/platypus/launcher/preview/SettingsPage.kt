@@ -38,6 +38,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import io.github.huang404yan.platypus.core.Brand
 import io.github.huang404yan.platypus.core.download.DownloadPreference
+import io.github.huang404yan.platypus.core.instance.GameRootCopier
+import io.github.huang404yan.platypus.core.instance.GameRoots
 import io.github.huang404yan.platypus.core.instance.Instance
 import io.github.huang404yan.platypus.core.instance.InstanceLayouts
 import io.github.huang404yan.platypus.core.instance.MemoryDefaults
@@ -89,6 +91,9 @@ internal fun SettingsPage(theme: LauncherTheme = LauncherTheme.AUTO, onThemeChan
     // 同时下几个文件；0 = 自动（交给 DownloadPreference.effectiveConnections 折算）。
     var connections by remember { mutableStateOf(0) }
     var status by remember { mutableStateOf("") }
+    // 复制游戏目录的进度与结果，只在这一页显示。
+    var moving by remember { mutableStateOf(false) }
+    var note by remember { mutableStateOf("") }
     // 「自动」在安卓上按设备的物理内存算，与桌面端同一个 MemoryDefaults。
     // 拿不到（ActivityManager 异常、或旧机型不给 totalMem）就是 0，autoMb 会退回 2048。
     val context = LocalContext.current
@@ -225,7 +230,7 @@ internal fun SettingsPage(theme: LauncherTheme = LauncherTheme.AUTO, onThemeChan
             }
         }
 
-        SettingCard("游戏目录（.minecraft）", "扫描实例、下载、装模组都指向这里。") {
+        SettingCard("游戏目录", "扫描实例、下载、装模组都指向这里。存档就在这个目录里，卸载启动器不会删它。") {
             OutlinedTextField(
                 value = gameRoot,
                 onValueChange = { gameRoot = it },
@@ -233,11 +238,59 @@ internal fun SettingsPage(theme: LauncherTheme = LauncherTheme.AUTO, onThemeChan
                 singleLine = true,
             )
             val exists = File(gameRoot.trim()).isDirectory
+            // 这个目录是谁的、在不在，各说一句：用户改到别的启动器的目录时，
+            // 得能一眼看出「现在指向的是别人那套」，而不是等进游戏发现模组不对。
+            val source = GameRoots.androidSourceOf(storageRoot(), File(gameRoot.trim()))
             Text(
-                if (exists) "目录存在。" else "目录不存在（第一次下载时会建）。",
+                (if (exists) "目录存在" else "目录不存在（第一次下载时会建）") + " · " + source.label,
                 style = MaterialTheme.typography.labelSmall,
                 color = if (exists) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.error,
             )
+            if (source != GameRoots.AndroidSource.OUR_HOME) {
+                val target = GameRoots.androidDefaultGame(storageRoot())
+                Text(
+                    "新版默认放在 " + target.absolutePath + "：一层看得见的目录，卸载启动器也不动它。" +
+                        "现在这个位置换成新版会「多一个文件夹」，旧的不动，想合并可以复制过去。",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(
+                        onClick = {
+                            val from = File(gameRoot.trim())
+                            moving = true
+                            note = ""
+                            scope.launch {
+                                val result = withContext(Dispatchers.IO) {
+                                    GameRootCopier.copy(from, target) { done, bytes ->
+                                        note = "已复制 " + done + " 个文件 · " + fmtBytes(bytes)
+                                    }
+                                }
+                                moving = false
+                                note = if (result.ok) {
+                                    // 只填进输入框、不自动保存：写盘是用户点「保存」那一刻的事，
+                                    // 复制成功不等于他想换，把决定权留在最后一下。
+                                    gameRoot = target.absolutePath
+                                    "复制完成：" + result.files + " 个文件 · " + fmtBytes(result.bytes) +
+                                        if (result.skipped > 0) "，跳过 " + result.skipped + " 个同名文件" else ""
+                                } else {
+                                    val head = result.failures.take(3).joinToString("；")
+                                    "复制没全成：" + result.failures.size + " 个文件失败（" + head + "）"
+                                }
+                            }
+                        },
+                        enabled = !moving && exists,
+                    ) { Text(if (moving) "复制中…" else "复制到 " + target.name) }
+                    Text(
+                        "只复制不删原件，确认新的能进游戏再去删旧的。",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                if (note.isNotBlank()) {
+                    Text(note, style = MaterialTheme.typography.labelSmall)
+                }
+            }
         }
 
         SettingCard("新实例拿多少内存", "之后可以在实例页单独改。") {
