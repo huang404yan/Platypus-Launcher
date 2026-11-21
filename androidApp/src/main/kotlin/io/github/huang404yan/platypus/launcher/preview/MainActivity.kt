@@ -113,23 +113,31 @@ class MainActivity : ComponentActivity() {
             // 配色从设置里读一次就定了：整棵界面都走 MaterialTheme.colorScheme，
             // 换主题只要换这一层，页面代码一行都不用知道主题存在。
             var theme by remember { mutableStateOf(LauncherTheme.AUTO) }
+            // null 表示「还没读出来」：第一帧什么都不画，免得先闪一下主界面再跳到引导页。
+            var guideNeeded by remember { mutableStateOf<Boolean?>(null) }
             LaunchedEffect(Unit) {
                 theme = readThemePreference()
                 // 隔离默认值与下载连接数同样是进程级全局量，开程序时灌一次；设置页改完会就地覆写。
                 applyProcessDefaults()
+                guideNeeded = runCatching { androidGuideNeeded() }.getOrDefault(false)
             }
             // PlatypusTheme 自己已经铺了一层 background 色的 Surface：这里再包一层
             // 默认取 surface 的 Surface 会把那层盖住（浅色那套 surface 是纯白，
             // background 才是色卡里那个 #F4F7F6），底色就变成白的了。
             PlatypusTheme(theme) {
-                AppRoot(
-                    theme = theme,
-                    onThemeChange = { picked ->
-                        theme = picked
-                        // 落盘跟着切页走不了：这里是 Activity 级，没有 settings 仓库可用，
-                        // 所以由设置页自己写文件，写完再回调上来换皮。
-                    },
-                )
+                when (guideNeeded) {
+                    null -> Unit
+                    // 第一次打开先走引导：手机上要自己下 JRE 与图形转译库，藏在两个页面里没人找得到。
+                    true -> FirstRunGuideScreen(onDone = { guideNeeded = false })
+                    false -> AppRoot(
+                        theme = theme,
+                        onThemeChange = { picked ->
+                            theme = picked
+                            // 落盘跟着切页走不了：这里是 Activity 级，没有 settings 仓库可用，
+                            // 所以由设置页自己写文件，写完再回调上来换皮。
+                        },
+                    )
+                }
             }
         }
     }

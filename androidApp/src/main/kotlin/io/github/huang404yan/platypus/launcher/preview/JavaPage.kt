@@ -51,7 +51,7 @@ import java.io.File
  * 2. **只有四个大版本**。FCL 那份预编译资产里就 8 / 17 / 21 / 25 四个，
  *    其中 25 没有 32 位 x86 的包，所以那一档在 x86 设备上不出现。
  *
- * 这一版仍不能进游戏（runtime-android 的 JNI 与图形转译还没做），但它能做的事比上一版多了：
+ * 图形转译那一层不在这里（见启动页的「图形后端」），但这一页的产物是启动的前提：
  * 启动器**认得出**盘上那几份 JRE 各是几版、哪一套是完整的（[AndroidJavaRuntimeService]）。
  * 认版本不靠跑 `java -version`（应用内 JVM 只允许一个，安卓 10 起共享存储也不可执行），
  * 而是读 JRE 目录里的 `release` 文件 —— 所以「已装」的判据也从「两个标志文件在不在」
@@ -108,8 +108,7 @@ internal fun JavaPage() {
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         Text(
-            "注意：这一版的安卓端还不能进游戏（应用内起 JVM 与图形转译没做），" +
-                "但启动器已经认得出这些 Java 各是几版、哪份是完整的。",
+            "下好之后启动页会自己认出它是几版、整不完整。图形转译库在启动页的「图形后端」那里下。",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.tertiary,
         )

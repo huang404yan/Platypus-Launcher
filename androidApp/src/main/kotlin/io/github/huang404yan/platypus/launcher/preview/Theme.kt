@@ -11,6 +11,7 @@ import androidx.compose.ui.graphics.Color
 import io.github.huang404yan.platypus.core.Brand
 import io.github.huang404yan.platypus.core.download.DownloadPreference
 import io.github.huang404yan.platypus.core.instance.InstanceLayouts
+import io.github.huang404yan.platypus.core.setup.AndroidSetup
 import io.github.huang404yan.platypus.core.settings.JsonSettingsRepository
 import io.github.huang404yan.platypus.core.theme.LauncherTheme
 import io.github.huang404yan.platypus.core.theme.launcherThemeOf
@@ -117,6 +118,27 @@ internal suspend fun applyProcessDefaults() {
     InstanceLayouts.defaultIsolated = effective.defaultIsolation
     // 0 表示「自动」，核心那份会把它折算成代码里的默认并发数。
     DownloadPreference.connections = DownloadPreference.normalizeConnections(effective.downloadConnections)
+}
+
+/**
+ * 这台设备是不是还没走过安卓的初次引导。
+ *
+ * 与 [readThemePreference] 同一套「走两跳」的找法：设置文件跟着游戏目录走，而设置里
+ * 可能又写了另一个游戏目录。读不到一律当作**不需要引导** —— 宁可不弹，也不要在
+ * 读不出设置的情况下把人锁在一页准备界面里。
+ */
+internal suspend fun androidGuideNeeded(): Boolean {
+    val root = runCatching { File(defaultGameRoot()) }.getOrNull() ?: return false
+    val store = JsonSettingsRepository(JsonSettingsRepository.defaultFile(root))
+    val loaded = runCatching { store.load() }.getOrNull() ?: return false
+    val actual = loaded.defaultGameRoot.trim()
+    if (actual.isNotEmpty() && actual != root.absolutePath) {
+        val moved = runCatching {
+            JsonSettingsRepository(JsonSettingsRepository.defaultFile(File(actual))).load()
+        }.getOrNull()
+        if (moved != null) return AndroidSetup.needed(moved)
+    }
+    return AndroidSetup.needed(loaded)
 }
 
 /**

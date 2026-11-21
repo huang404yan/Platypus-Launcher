@@ -151,7 +151,16 @@ data class LauncherSettings(
      */
     val firstRunAt: Long = 0L,
     /**
-     * 界面模式：`full` 完整、`simple` 简洁；空串表示还没选过，按完整模式渲染。
+     * 安卓端初次引导走完的时刻（毫秒）；0 表示还没走过。
+     *
+     * 为什么不复用 [firstRunAt]：那一格在桌面端也读，而且它管的是「正版账号那扇门」。
+     * 手机上还有两件桌面没有的事 —— 应用内 JRE 与图形转译库 —— 缺了第一件事就寸步难行，
+     * 混进同一格会让「桌面上走过了、导出到手机」的设备直接跳过正准备的事。
+     * 分开记的代价只是多一格（见 [io.github.huang404yan.platypus.core.setup.AndroidSetup]）。
+     */
+    val androidGuideAt: Long = 0L,
+    /**
+     * 界面模式：`full` 完整、`simple` 简洁；空串表示还没选过，按默认档渲染（简洁，见 `UiMode.DEFAULT`）。
      *
      * 存 id 字符串而不是布尔或下标，理由同 [theme]：以后加第三档（自定义）不用改读法，
      * 认不出来的一律当完整模式（[io.github.huang404yan.platypus.ui.UiMode.of]）。
@@ -205,6 +214,7 @@ data class LauncherSettings(
             lastInstanceKey = raw.lastInstanceKey.trim(),
             // 负数一律当没走过：时间戳只可能从 0 往上长，负值是手改文件或写坏的结果。
             firstRunAt = raw.firstRunAt.coerceAtLeast(0L),
+            androidGuideAt = raw.androidGuideAt.coerceAtLeast(0L),
             autoBackupHours = raw.autoBackupHours.coerceIn(
                 AutoBackupPolicy.INTERVAL_RANGE.first,
                 AutoBackupPolicy.INTERVAL_RANGE.last,

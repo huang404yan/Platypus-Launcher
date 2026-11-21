@@ -73,7 +73,8 @@ data class AndroidLaunchPreparation(
  *
  * - 不起进程、不加载 libjvm.so（那要 JNI）。
  * - 不解压 natives（[prepare] 是纯读盘函数，解压交给调用方拿 [AndroidLaunchPreparation.plan] 去做）。
- * - 不下载图形后端（那几份 .so 现在还没随包分发，所以「渲染库文件」这条自检会挡住启动）。
+ * - 不下载图形后端：那几份 .so 不随安装包发，由 [AndroidGraphicsInstaller] 按需下到实例的
+ *   natives 目录里；这里只按盘上的实际情况判「渲染库文件」在不在。
  */
 object AndroidLaunchPlanner {
 

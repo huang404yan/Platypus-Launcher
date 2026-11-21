@@ -14,6 +14,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.MaterialTheme
@@ -22,6 +23,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -42,10 +44,14 @@ import io.github.huang404yan.platypus.core.instance.Instance
 import io.github.huang404yan.platypus.core.instance.InstanceScanner
 import io.github.huang404yan.platypus.core.instance.JsonInstanceRepository
 import io.github.huang404yan.platypus.core.instance.mergeInstances
+import io.github.huang404yan.platypus.core.launch.AndroidGraphicsBundle
+import io.github.huang404yan.platypus.core.launch.AndroidGraphicsCatalog
+import io.github.huang404yan.platypus.core.launch.AndroidGraphicsInstaller
 import io.github.huang404yan.platypus.core.launch.AndroidLaunchArgs
 import io.github.huang404yan.platypus.core.launch.AndroidLaunchConfig
 import io.github.huang404yan.platypus.core.launch.AndroidLaunchPreparation
 import io.github.huang404yan.platypus.core.launch.AndroidLaunchPlanner
+import io.github.huang404yan.platypus.core.launch.megabytes
 import io.github.huang404yan.platypus.core.launch.AndroidRenderer
 import io.github.huang404yan.platypus.core.launch.GameLanguage
 import io.github.huang404yan.platypus.core.launch.GameOptions
@@ -92,13 +98,11 @@ import java.io.File
  * 「没能加载 libjvm.so」上。这是系统限制，不是参数拼错。
  *
  * 所以界面照样给「启动」按钮，但把这句话写在按钮旁边：**能起是运气，起不来不是 bug**。
- * 图形那一层（GL4ES / Zink 转译）同样还没接 —— 即使 JVM 起来了，游戏窗口也挂不上去。
  *
- * ## 为什么不打包图形转译库
- *
- * GL4ES / Zink 那几份 `.so` 的许可证与体积都要求单独决策，所以不随包分发，
- * 这一版给的是「放进来用」的口子：按钮选一个 `.so` 文件，复制到实例的 natives 目录，
- * 文件名要对上后端要的那一个（GL4ES 是 libgl4es_114.so，Zink 是 libOSMesa.so）。
+ * 图形那一层（GL4ES / Zink 转译）由这一页的「图形后端」卡片按需下载 ——
+ * 那几份 `.so` 有四十来兆，随包分发等于让所有人替一个人付体积，所以选好后端点一下下到
+ * 实例自己的 natives 目录里。下过就不再下；也留了「手动放入」的口子给上游没有预编译包的
+ * 情况（LTW）。
  */
 @Composable
 internal fun LaunchPage() {
@@ -133,12 +137,43 @@ internal fun LaunchPage() {
     // 设置里选的语言，空串 = 跟随系统。真正落盘在 startGame 起 JVM 之前，
     // 因为那是唯一一次会读 options.txt 的时机（与桌面端同一个 GameOptions）。
     var gameLanguage by remember { mutableStateOf("") }
+    // 图形后端下载进度来自进程级单例：切走再回来还能看到下到哪儿了。
+    val graphicsState = GraphicsInstallRunner.state.collectAsState().value
 
     /** 这个实例的 natives 目录：一个实例一份，免得两个版本互相盖掉。 */
     fun nativeDirOf(instance: Instance?): File {
         val raw = instance?.directory.orEmpty().trim().trim('"')
         val name = raw.replace('\\', '/').trimEnd('/').substringAfterLast('/')
         return if (name.isBlank()) File(nativeRoot, "default") else File(nativeRoot, name)
+    }
+
+    // 引导页把一套图形后端下在 natives/default（那时还没有实例）。已经有实例的人不该为
+    // 此再下一次四十兆，所以第一次进到某个实例时把那份复制过来 —— 只复制，不删原件。
+    val sharedNativeDir = remember(nativeRoot) { File(nativeRoot, "default") }
+    var gfxCopiedAt by remember { mutableStateOf(0L) }
+    LaunchedEffect(abi, selected?.directory, graphicsState.doneAt) {
+        val bundle = AndroidGraphicsCatalog.bundleOf(renderer, abi.orEmpty()) ?: return@LaunchedEffect
+        val target = nativeDirOf(selected)
+        if (target.absolutePath == sharedNativeDir.absolutePath) return@LaunchedEffect
+        if (runCatching { bundle.isInstalled(target) }.getOrDefault(false)) return@LaunchedEffect
+        if (!runCatching { bundle.isInstalled(sharedNativeDir) }.getOrDefault(false)) return@LaunchedEffect
+        val copied = withContext(Dispatchers.IO) {
+            runCatching {
+                target.mkdirs()
+                var count = 0
+                for (file in bundle.files) {
+                    val source = File(sharedNativeDir, file.name)
+                    if (!source.isFile) continue
+                    source.copyTo(File(target, file.name), overwrite = true)
+                    count++
+                }
+                count
+            }.getOrDefault(0)
+        }
+        if (copied > 0) {
+            notice = "从 natives/default 复制了 " + copied + " 个图形后端文件到 " + target.absolutePath
+            gfxCopiedAt = System.currentTimeMillis()
+        }
     }
 
     /** 启动页只读身份，不建身份：读的是账号文件里已有的名单和当前选中的那一个。 */
@@ -539,53 +574,110 @@ internal fun LaunchPage() {
         }
 
         LaunchCard("图形后端") {
-            AndroidRenderer.supportedOn(abi.orEmpty()).forEach { option ->
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable { renderer = option }
-                        .padding(vertical = 6.dp),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                ) {
+            val gfxAbi = abi.orEmpty()
+            val gfxDir = nativeDirOf(selected)
+            val gfxBundle = remember(renderer, gfxAbi) { AndroidGraphicsCatalog.bundleOf(renderer, gfxAbi) }
+            // 装完那一刻盘上的东西变了，但 Composition 不知道 —— 用 doneAt 当钥匙重扫一次。
+            val gfxReady = remember(gfxBundle, gfxDir.absolutePath, graphicsState.doneAt, gfxCopiedAt) {
+                runCatching { gfxBundle?.isInstalled(gfxDir) ?: false }.getOrDefault(false)
+            }
+            val gfxOptions = remember(gfxAbi) { AndroidGraphicsCatalog.renderersOn(gfxAbi) }
+            if (gfxAbi.isBlank()) {
+                LaunchHint(
+                    "这台机器的架构（" + Build.SUPPORTED_ABIS.joinToString("、") +
+                        "）没有对应的图形后端预编译库。现在只有 " + AndroidGraphicsCatalog.ABIS.joinToString("、") + " 四套。",
+                )
+            } else {
+                gfxOptions.forEach { option ->
+                    val optionBundle = AndroidGraphicsCatalog.bundleOf(option, gfxAbi)
+                    val optionReady = optionBundle != null &&
+                        runCatching { optionBundle.isInstalled(gfxDir) }.getOrDefault(false)
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { renderer = option }
+                            .padding(vertical = 6.dp),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        Text(
+                            if (renderer == option) "●" else "○",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = if (renderer == option) {
+                                MaterialTheme.colorScheme.primary
+                            } else {
+                                MaterialTheme.colorScheme.onSurfaceVariant
+                            },
+                        )
+                        Column {
+                            Text(option.label, style = MaterialTheme.typography.bodyMedium)
+                            Text(
+                                if (optionBundle == null) {
+                                    "上游没有这个后端的预编译库，暂时选不了"
+                                } else {
+                                    option.note + " · " + (
+                                        if (optionReady) "已就绪" else "要下载 " + megabytes(optionBundle.totalBytes)
+                                        )
+                                },
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                }
+
+                Text(
+                    "放这里：" + gfxDir.absolutePath,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    fontFamily = FontFamily.Monospace,
+                )
+
+                val show = graphicsState.progress
+                if (show != null) {
+                    LinearProgressIndicator(progress = { show.fraction }, modifier = Modifier.fillMaxWidth())
+                }
+                if (graphicsState.message.isNotBlank()) {
                     Text(
-                        if (renderer == option) "●" else "○",
+                        graphicsState.message,
                         style = MaterialTheme.typography.bodySmall,
-                        color = if (renderer == option) {
-                            MaterialTheme.colorScheme.primary
+                        color = if (graphicsState.failed) {
+                            MaterialTheme.colorScheme.error
                         } else {
                             MaterialTheme.colorScheme.onSurfaceVariant
                         },
                     )
-                    Column {
-                        Text(option.label, style = MaterialTheme.typography.bodyMedium)
-                        Text(
-                            option.note,
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
+                }
+
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    if (graphicsState.busy) {
+                        OutlinedButton(onClick = { GraphicsInstallRunner.cancel() }) { Text("取消下载") }
+                    } else if (gfxBundle != null && !gfxReady) {
+                        Button(onClick = { GraphicsInstallRunner.start(gfxDir, gfxBundle) }) {
+                            Text("下载图形后端（约 " + megabytes(gfxBundle.totalBytes) + "）")
+                        }
+                    }
+                    OutlinedButton(onClick = { pickLibrary.launch(arrayOf("*/*")) }, enabled = !busy) {
+                        Text("手动放入 " + renderer.libraryName)
                     }
                 }
-            }
-            Text(
-                "要把它要的 " + renderer.libraryName + " 放进：" + nativeDirOf(selected).absolutePath,
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                fontFamily = FontFamily.Monospace,
-            )
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedButton(onClick = { pickLibrary.launch(arrayOf("*/*")) }, enabled = !busy) {
-                    Text("放入 " + renderer.libraryName)
+                if (gfxBundle != null && gfxReady && !graphicsState.busy) {
+                    OutlinedButton(
+                        onClick = {
+                            val removed = AndroidGraphicsInstaller.remove(gfxDir, gfxBundle)
+                            notice = "删掉了 " + removed + " 个文件（" + gfxDir.absolutePath + "）"
+                        },
+                        enabled = !busy,
+                    ) { Text("删掉这套后端") }
                 }
                 OutlinedButton(onClick = { extractNatives() }, enabled = !busy && prep?.plan != null) {
                     Text("解压原版 natives")
                 }
+                LaunchHint(
+                    "这套 .so 有四十来兆，随包分发等于让所有人替一个人付体积，所以按需下载：" +
+                        "选一个后端、点下载，装到上面那个目录里。下过一次就不再下。",
+                )
             }
-            LaunchHint(
-                "转译库的体积与许可证要单独决定，所以这一版不随包分发：" +
-                    "你自己有那份 .so 时用「放入」选进来就行。文件名必须就是它要的那一个。",
-            )
         }
-
         LaunchCard("登录身份") {
             // 身份在启动页选，不放账号页：启动页回答的是「今天用谁、玩哪个版本」，
             // 换身份之后唯一要做的事就是重做自检 —— 两件事在同一屏，少跳一次就少一次用错号。
