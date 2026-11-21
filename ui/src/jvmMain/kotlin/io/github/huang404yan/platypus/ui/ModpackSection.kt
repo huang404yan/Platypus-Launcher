@@ -46,6 +46,7 @@ import io.github.huang404yan.platypus.core.mods.ModProject
 import io.github.huang404yan.platypus.core.mods.ModrinthMeta
 import io.github.huang404yan.platypus.core.modpack.ModpackBrowser
 import io.github.huang404yan.platypus.core.modpack.ModpackDownloadProgress
+import io.github.huang404yan.platypus.core.modpack.ModpackKind
 import io.github.huang404yan.platypus.core.search.SearchTerm
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -407,7 +408,9 @@ internal fun ModpackSection(
                     )
                     Text(
                         if (p.fileCount == 0) {
-                            "包内没有额外文件，只有 overrides"
+                            // MCBBS 包的模组实体全在 overrides/ 里，清单里没有可下载的文件。
+                            // 这里不能只说「只有 overrides」——用户看不出里面到底有没有模组。
+                            "清单里没有要从网上下载的文件，内容都在配置层里"
                         } else {
                             p.fileCount.toString() + " 个文件要下载，共 " +
                                 (if (p.totalDownloadBytes < 0L) "体积未知" else formatSize(p.totalDownloadBytes))
@@ -415,6 +418,23 @@ internal fun ModpackSection(
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
+                    if (p.content.isEmpty) {
+                        Text(
+                            "配置层里一个文件都没有",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.error,
+                        )
+                    } else {
+                        Text(
+                            "配置层 " + p.content.totalFiles + " 个文件：" + p.content.describe(),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = if (p.content.modJars == 0 && p.manifest.kind == ModpackKind.MCBBS_V2) {
+                                MaterialTheme.colorScheme.error
+                            } else {
+                                MaterialTheme.colorScheme.onSurfaceVariant
+                            },
+                        )
+                    }
                     if (p.manifest.overrideDirs.isNotEmpty()) {
                         Text(
                             "覆盖层：" + p.manifest.overrideDirs.joinToString(" → "),
@@ -506,8 +526,10 @@ internal fun ModpackSection(
                     )
                     Text(
                         "包内文件 " + finished.outcome.downloadedFiles + " 个（" +
-                            formatSize(finished.outcome.downloadedBytes) + "），overrides " +
-                            finished.outcome.overrideFiles + " 个，用时 " +
+                            formatSize(finished.outcome.downloadedBytes) + "），overrides 写进去 " +
+                            finished.outcome.overrideFiles + " 个（包里共 " +
+                            finished.outcome.content.totalFiles + " 个，其中模组 jar " +
+                            finished.outcome.content.modJars + " 个），用时 " +
                             formatDurationMs(finished.outcome.elapsedMs),
                         style = MaterialTheme.typography.bodySmall,
                     )

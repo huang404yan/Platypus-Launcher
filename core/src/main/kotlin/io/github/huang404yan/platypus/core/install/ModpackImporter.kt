@@ -6,6 +6,8 @@ import io.github.huang404yan.platypus.core.instance.Instance
 import io.github.huang404yan.platypus.core.instance.InstanceLayouts
 import io.github.huang404yan.platypus.core.instance.InstanceRepository
 import io.github.huang404yan.platypus.core.instance.LoaderKind
+import io.github.huang404yan.platypus.core.modpack.ModpackContent
+import io.github.huang404yan.platypus.core.modpack.ModpackContents
 import io.github.huang404yan.platypus.core.modpack.ModpackFile
 import io.github.huang404yan.platypus.core.modpack.ModpackKind
 import io.github.huang404yan.platypus.core.modpack.ModpackLayout
@@ -73,6 +75,13 @@ data class ModpackPreview(
     val suggestedName: String,
     /** 包内文件里需要下载的总字节数；有体积未知的文件时为 -1。 */
     val totalDownloadBytes: Long,
+    /**
+     * 配置层（overrides 等）里实际铺了多少文件、其中多少是模组 jar。
+     *
+     * MCBBS 包的 [ModpackManifest.files] 恒为空，光看 fileCount 分不出「包没带模组」和
+     * 「启动器把模组丢了」—— 用户报过这个（导入后 mods 是空的）。这个字段就是那面镜子。
+     */
+    val content: ModpackContent = ModpackContent(0, 0, emptyList()),
 ) {
     val fileCount: Int get() = manifest.files.size
 }
@@ -89,6 +98,8 @@ data class ModpackImportOutcome(
     val downloadedFiles: Int,
     val downloadedBytes: Long,
     val overrideFiles: Int,
+    /** 包内配置层里明明有多少东西（与 [overrideFiles] 不同：那个是这次真写下去的）。 */
+    val content: ModpackContent = ModpackContent(0, 0, emptyList()),
     val elapsedMs: Long,
     /** 汇总后的提示（包自身的警告 + 导入过程中发现的问题）。 */
     val warnings: List<String>,
@@ -333,6 +344,7 @@ object ModpackImporter {
             downloadedFiles = downloadedFiles,
             downloadedBytes = downloadedBytes,
             overrideFiles = overrideFiles,
+            content = preview.content,
             elapsedMs = System.currentTimeMillis() - startedAt,
             warnings = warnings.distinct(),
             fileIssues = fileIssues,
@@ -429,6 +441,28 @@ object ModpackImporter {
         return written
     }
 
+    /**
+     * MCBBS 包的模组实体全在 `overrides/mods/` 里，清单不写一个字。
+     *
+     * 于是「导出时没勾模组」和「启动器把模组弄丢了」在界面上长得一模一样。
+     * 用户报过「导入后 mod 没进去」—— 打开他那份包一看，`overrides/mods/` 里零个 jar，
+     * 是导出那一步就没带。这里在预览阶段就把话说清楚，比等用户进游戏发现没模组好得多。
+     */
+    private fun warnIfNoMods(manifest: ModpackManifest, content: ModpackContent): ModpackManifest {
+        val extra = when {
+            content.isEmpty -> listOf(
+                "包里的 " + manifest.overrideDirs.joinToString("/") + "/ 是空的：这个包没有带任何文件，" +
+                    "导入后只有游戏本体和加载器。想要模组请在导出时勾上「模组」再导一次",
+            )
+            content.modJars == 0 -> listOf(
+                "包里的 mods/ 是空的（0 个 jar）：导入后不会有任何模组。" +
+                    "如果这份包是导出的，导出时请确认勾选了「模组」",
+            )
+            else -> emptyList()
+        }
+        if (extra.isEmpty()) return manifest
+        return manifest.copy(warnings = manifest.warnings + extra)
+    }
     /** 开 zip、认格式、读标记文件、解析成清单。不写盘。 */
     private fun readPreview(archive: File): ModpackPreview {
         if (!archive.isFile) {
@@ -493,12 +527,19 @@ object ModpackImporter {
 
         val sized = manifest.files.filter { it.size > 0 }.sumOf { it.size }
         val allSized = manifest.files.all { it.size > 0 }
+        val content = ModpackContents.scan(entryNames, layout.basePrefix, manifest.overrideDirs)
+        val reported = if (manifest.kind == ModpackKind.MCBBS_V2) {
+            warnIfNoMods(manifest, content)
+        } else {
+            manifest
+        }
         return ModpackPreview(
             archive = archive,
             layout = layout,
-            manifest = manifest,
+            manifest = reported,
             suggestedName = suggestName(manifest.name, archive.nameWithoutExtension),
             totalDownloadBytes = if (manifest.files.isEmpty() || allSized) sized else -1L,
+            content = content,
         )
     }
 
