@@ -18,6 +18,7 @@ class InstanceRepositoryTest {
         directory: String,
         memoryMb: Int = 2048,
         loader: LoaderKind = LoaderKind.VANILLA,
+        lastPlayedAt: Long = 0L,
     ) = Instance(
         id = id,
         name = name,
@@ -25,6 +26,7 @@ class InstanceRepositoryTest {
         directory = directory,
         memoryMb = memoryMb,
         loader = loader,
+        lastPlayedAt = lastPlayedAt,
     )
 
     @Test
@@ -163,6 +165,51 @@ class InstanceRepositoryTest {
         val merged = mergeInstances(registered, emptyList(), emptyList())
         assertEquals(1, merged.size)
         assertEquals("1.20.1", merged.first().id)
+    }
+
+    @Test
+    fun sortsByLastPlayedWithinRegisteredGroup() {
+        // 登记的几条里，最近玩过的排在前面；从没启动过（0）的一律排在有记录之后，
+        // 不能因为 0 比时间戳小就当成「很久以前」翻到最后 —— 那就成了按名字排。
+        val registered = listOf(
+            instance(id = "old", name = "Old", directory = File("C:/mc/versions/old").path, lastPlayedAt = 1_000L),
+            instance(id = "never", name = "Never", directory = File("C:/mc/versions/never").path),
+            instance(id = "recent", name = "Recent", directory = File("C:/mc/versions/recent").path, lastPlayedAt = 9_000L),
+        )
+        val merged = mergeInstances(registered, emptyList())
+        assertEquals(listOf("recent", "old", "never"), merged.map { it.id })
+    }
+
+    @Test
+    fun scannedInstancesStayBehindRegisteredEvenIfRecentlyPlayed() {
+        // 「登记的在前」是旧行为，不能被 lastPlayedAt 顶掉：别的启动器装的版本
+        // 就算刚玩过，也不该插到用户自己建的实例中间。
+        val registered = listOf(
+            instance(id = "mine", name = "Mine", directory = File("C:/mc/versions/mine").path),
+        )
+        val scanned = listOf(
+            instance(
+                id = "theirs",
+                name = "Theirs",
+                directory = File("C:/mc/versions/theirs").path,
+                lastPlayedAt = 9_000_000L,
+            ),
+        )
+        val merged = mergeInstances(registered, scanned)
+        assertEquals(listOf("mine", "theirs"), merged.map { it.id })
+    }
+
+    @Test
+    fun savesAndReloadsLastPlayed() = runBlocking {
+        // 字段要能落盘再读回：漏了序列化的话重启之后排序会整体退回按名字。
+        val root = tempDir()
+        try {
+            val repo = JsonInstanceRepository(JsonInstanceRepository.defaultIndexFile(root))
+            repo.save(instance(directory = File(root, "versions/1.20.1").path, lastPlayedAt = 12_345L))
+            assertEquals(12_345L, repo.find("1.20.1")?.lastPlayedAt)
+        } finally {
+            root.deleteRecursively()
+        }
     }
 
     @Test

@@ -560,6 +560,18 @@ fun LaunchPage(
                             stageText = "已启动"
                             stageFraction = 1f
                             phase = LaunchPhase.Running(event.pid)
+                            // 「上次玩什么时候」只在这一刻记：进程真的起来了才算玩过。
+                            // 放在退出时记会有两个问题 —— 崩在启动阶段的那次也算一次，
+                            // 而崩溃时正好不该再动磁盘。写盘失败不拦启动，也不提示：
+                            // 它只影响列表排序，不影响这一局。
+                            val playedAt = System.currentTimeMillis()
+                            scope.launch {
+                                runCatching {
+                                    withContext(Dispatchers.IO) {
+                                        backend.instances.save(instance.copy(lastPlayedAt = playedAt))
+                                    }
+                                }
+                            }
                         }
                         is LaunchEvent.LogLine -> {
                             buffer.add(event.text)
@@ -1578,6 +1590,17 @@ private fun InstanceTile(
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
+                // 「上次玩」只在真玩过的时候占一行：新装的实例还没启动过，
+                // 每张卡都挂一句「还没启动过」只是噪声，用户需要知道的是哪些是最近玩的。
+                if (instance.lastPlayedAt > 0L) {
+                    Text(
+                        "上次玩 " + lastPlayedText(instance.lastPlayedAt),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
             }
             // 「版本设置」= 这个版本的详情：内存、JVM 参数、Mod / 资源包 / 光影都在那个面板里，
             // 所以启动页这边不再单开「版本选择」副页面入口（主区的「管理版本…」已经管这件事）。

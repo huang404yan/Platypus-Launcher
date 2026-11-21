@@ -820,6 +820,17 @@ private fun InstanceCard(
                             overflow = TextOverflow.Ellipsis,
                         )
                     }
+                    // 「上次玩」只在真玩过的时候占一行：这一格是固定高度的，
+                    // 从没启动过的实例也挂一句「还没启动过」只是白白挤掉别的信息。
+                    if (instance.lastPlayedAt > 0L) {
+                        Text(
+                            "上次玩 " + lastPlayedText(instance.lastPlayedAt),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
                 }
                 LoaderBadge(instance.loader)
             }

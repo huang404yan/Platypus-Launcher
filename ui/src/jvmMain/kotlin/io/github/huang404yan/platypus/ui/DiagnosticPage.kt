@@ -32,7 +32,10 @@ import io.github.huang404yan.platypus.core.Brand
 import io.github.huang404yan.platypus.core.auth.StoredAccount
 import io.github.huang404yan.platypus.core.launch.CrashReport
 import io.github.huang404yan.platypus.core.launch.CrashReports
+import io.github.huang404yan.platypus.core.launch.DiagnosticBundle
+import io.github.huang404yan.platypus.core.launch.DiagnosticFacts
 import io.github.huang404yan.platypus.core.runtime.JavaRuntime
+import io.github.huang404yan.platypus.core.settings.LauncherSettings
 import java.awt.Toolkit
 import java.awt.datatransfer.StringSelection
 import java.io.File
@@ -59,6 +62,7 @@ fun DiagnosticPage(backend: LauncherBackend? = null, initialGameRoot: String? = 
     var crash by remember { mutableStateOf<CrashReport?>(null) }
     var settingsPath by remember { mutableStateOf("") }
     var notice by remember { mutableStateOf("") }
+    var bundling by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
 
     suspend fun collect() {
@@ -87,6 +91,53 @@ fun DiagnosticPage(backend: LauncherBackend? = null, initialGameRoot: String? = 
                 emptyList()
             }
             detecting = false
+        }
+    }
+
+
+    /**
+     * 把排查要看的文件打成一个 zip。
+     *
+     * 与「复制诊断信息」是两条路：那段文字给「问一句就能答」的场合，zip 给「得看日志和崩溃报告」
+     * 的场合。后者才是绝大多数进不去游戏的情况，而让用户自己在三个目录里翻文件，
+     * 通常翻到第二个就放弃了。
+     */
+    fun exportBundle() {
+        if (bundling) return
+        val root = File(gameRoot.trim())
+        val target = chooseSaveFile(
+            title = "把诊断包存到哪",
+            suggestedName = DiagnosticBundle.suggestedName(),
+            extension = "zip",
+            startDir = root.takeIf { it.isDirectory },
+        ) ?: return
+        bundling = true
+        scope.launch {
+            val outcome = withContext(Dispatchers.IO) {
+                runCatching {
+                    val stored = runCatching { backend?.settings?.load() }.getOrNull()
+                    val listed = runCatching { backend?.instances?.list() }.getOrNull().orEmpty()
+                    // 多个实例时挑最近玩过的那个：来报问题的几乎都是刚崩的那一个，
+                    // 而诊断页这一层不知道用户刚才玩的是哪个。
+                    val picked = listed.maxByOrNull { it.lastPlayedAt } ?: listed.firstOrNull()
+                    DiagnosticBundle.write(
+                        target,
+                        DiagnosticFacts(
+                            gameRoot = root,
+                            settings = stored ?: LauncherSettings(),
+                            instance = picked,
+                            javaRuntimes = runtimes,
+                            accountLines = accounts.map { it.name + "（" + it.kind + "）" },
+                            diagnosis = diagnosticLines(gameRoot, runtimes, accounts, instances, crash, settingsPath),
+                        ),
+                    )
+                }
+            }
+            bundling = false
+            outcome.fold(
+                onSuccess = { result -> notice = "已导出 " + result.entries + " 个文件到 " + result.file.absolutePath },
+                onFailure = { notice = "导出失败：" + (it.message ?: it.javaClass.simpleName) },
+            )
         }
     }
 
@@ -122,6 +173,10 @@ fun DiagnosticPage(backend: LauncherBackend? = null, initialGameRoot: String? = 
                 onClick = { scope.launch { collect(); detectJava() } },
                 enabled = !detecting,
             ) { Text(if (detecting) "探测中…" else "重新收集") }
+            OutlinedButton(
+                onClick = { exportBundle() },
+                enabled = !bundling,
+            ) { Text(if (bundling) "打包中…" else "导出诊断包") }
         }
         NoticeFade(notice) { shown ->
             Text(

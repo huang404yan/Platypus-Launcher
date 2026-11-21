@@ -45,6 +45,16 @@ data class Instance(
      * 不能因为加了全局默认就集体跳一次 —— 那会让一部分人的存档在没人察觉时换地方。
      */
     val isolatedFollowsDefault: Boolean = false,
+    /**
+     * 上次从启动器起这个实例的时间（毫秒时间戳，0 = 从没启动过）。
+     *
+     * 只记「点过启动、进程真的起来了」那一次，不在退出时更新：退出可能在崩溃里，
+     * 那种时候还要不要在磁盘上动手，是另一件事。
+     *
+     * 默认 0 是为了不改老数据的意思 —— 老实例一律算「没记录过」，排序时排在
+     * 有记录的后面，而不是被当成「刚玩过」掉到前面去。
+     */
+    val lastPlayedAt: Long = 0L,
 ) {
     companion object {
         const val DEFAULT_MEMORY_MB = 2048
@@ -108,10 +118,22 @@ fun mergeInstances(
         merged[instanceKey(it)] = it.copy(registered = true)
     }
     scanned.forEach { merged.putIfAbsent(instanceKey(it), it.copy(registered = false)) }
-    return merged.values.sortedWith(
-        compareByDescending<Instance> { it.registered }.thenBy { it.name.lowercase() },
-    )
+    return merged.values.sortedWith(instanceOrder)
 }
+
+/**
+ * 实例列表的排序：登记的在前，其次最近玩过的在前，最后按名字。
+ *
+ * 「登记的在前」保留旧行为：扫描到的外部实例排在后面，用户自己建的那几条不会
+ * 被别的启动器装的版本挤下去。第三级用名字而不是 id，是为了让两个从没启动过的
+ * 实例之间也有稳定顺序 —— 少了这一级，同一次扫描两次刷新可能顺序不同。
+ *
+ * 时间戳取 0（从没启动过）的排在所有有记录之后：0 不能被当成「很久以前刚玩过」。
+ */
+private val instanceOrder: Comparator<Instance> =
+    compareByDescending<Instance> { it.registered }
+        .thenByDescending { it.lastPlayedAt }
+        .thenBy { it.name.lowercase() }
 
 /** 判定「同一条实例」的键：目录（归一化后的绝对路径），取不到才退回 id。 */
 fun instanceKey(instance: Instance): String =
