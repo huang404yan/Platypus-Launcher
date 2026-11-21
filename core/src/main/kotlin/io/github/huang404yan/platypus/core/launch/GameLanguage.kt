@@ -69,7 +69,8 @@ object GameLanguage {
      * 设置里那一格要真正写进文件的值。
      *
      * 空串 = 跟随系统（见 [systemDefault]）。用户手改过 settings.json 写成 `zh-CN`
-     * 这种形状时也兜回来：把大杠换成小杠、大小写压平，认不出来还是走系统默认。
+     * 这种形状时也兜回来：把大杠换成小杠、大小写压平；认不出的值原样写下去，
+     * 由游戏自己退回它认识的语言。
      */
     fun resolve(setting: String, locale: Locale = Locale.getDefault()): String {
         val cleaned = setting.trim().lowercase().replace('-', '_')
@@ -134,6 +135,39 @@ object GameOptions {
             return false
         }
         return true
+    }
+
+    /**
+     * 进游戏前把语言摆正，并告诉调用方到底是哪一种结果。
+     *
+     * 只看 [writeLang] 的返回值分不出「值本来就对」和「写失败了」—— 两种都返回 false。
+     * 一端会把「本来就对」播成失败，另一端干脆什么都不说，都不如实。这里先读再写，
+     * 三种结局各自分明，调用方照着自己那份文案说人话就行。
+     *
+     * @param setting 设置里存的原样值（空串 = 跟随系统，见 [GameLanguage.resolve]）
+     */
+    fun ensureLang(
+        gameDir: File,
+        setting: String,
+        locale: Locale = Locale.getDefault(),
+    ): LangWrite {
+        val wanted = GameLanguage.resolve(setting, locale)
+        if (readLang(gameDir) == wanted) return LangWrite.Already(wanted)
+        return if (writeLang(gameDir, wanted)) LangWrite.Written(wanted) else LangWrite.Failed(wanted)
+    }
+
+    /** [ensureLang] 的三种结局，都带着最终要用的那个语言 id。 */
+    sealed interface LangWrite {
+        val lang: String
+
+        /** 文件里本来就是它，没动盘。 */
+        data class Already(override val lang: String) : LangWrite
+
+        /** 这次真写进去了。 */
+        data class Written(override val lang: String) : LangWrite
+
+        /** 读写失败（目录不可写、文件被占用等）。调用方一般只播报，不拦启动。 */
+        data class Failed(override val lang: String) : LangWrite
     }
 
     /** 从若干行里挑语言值；键名不区分大小写，冒号后可能带空格。 */

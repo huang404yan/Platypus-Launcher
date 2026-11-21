@@ -107,8 +107,8 @@ fun LinkPage(
             LinkTabChip("服务器", tab == LINK_TAB_SERVER) { tab = LINK_TAB_SERVER }
         }
 
-        if (notice.isNotBlank()) {
-            Text(notice, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.primary)
+        NoticeFade(notice) { shown ->
+            Text(shown, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.primary)
         }
 
         if (tab == LINK_TAB_LOCAL) {

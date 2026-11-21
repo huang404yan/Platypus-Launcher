@@ -2,6 +2,7 @@ package io.github.huang404yan.platypus.core.install
 
 import io.github.huang404yan.platypus.core.download.DownloadItem
 import io.github.huang404yan.platypus.core.download.HttpDownloader
+import io.github.huang404yan.platypus.core.instance.InstallMark
 import io.github.huang404yan.platypus.core.instance.Instance
 import io.github.huang404yan.platypus.core.instance.InstanceRepository
 import io.github.huang404yan.platypus.core.instance.LoaderKind
@@ -71,6 +72,8 @@ object NeoForgeInstaller {
     ): NeoForgeInstallResult = withContext(Dispatchers.IO) {
         val started = Instant.now()
         var step = NeoForgeStep.VERSIONS
+        // 哪个目录被打了「正在装」标记（没打就是 null），收尾时按它撤。
+        var markDir: File? = null
 
         try {
             val chosen = if (!neoforgeVersion.isNullOrBlank()) {
@@ -118,6 +121,11 @@ object NeoForgeInstaller {
                     clientJarFile = repairedJar,
                 )
             }
+
+            // installer 子进程直接往这个目录写 json，写到一半扫描器就会把目录当实例列出来。
+            // 从起 installer 之前挂标记，整个函数收尾时撤掉。
+            markDir = versionDir
+            InstallMark.mark(versionDir)
 
             step = NeoForgeStep.INSTALLER
             val installersDir = NeoForgeMeta.installersDir(gameRoot)
@@ -257,6 +265,8 @@ object NeoForgeInstaller {
         } catch (e: Exception) {
             if (e is NeoForgeInstallException) throw e
             throw NeoForgeInstallException(step, e.message ?: e::class.simpleName ?: "未知错误", e)
+        } finally {
+            markDir?.let { InstallMark.clear(it) }
         }
     }
 
@@ -267,6 +277,8 @@ object NeoForgeInstaller {
         return (versionsRoot.listFiles() ?: emptyArray())
             .filter { it.isDirectory }
             .mapNotNull { dir ->
+                // 装到一半的目录不算「已安装」，否则界面上会提前出现一条可选项。
+                if (InstallMark.isMarked(dir)) return@mapNotNull null
                 val json = File(dir, dir.name + ".json")
                 if (!json.isFile) return@mapNotNull null
                 val text = runCatching { json.readText(Charsets.UTF_8) }.getOrNull() ?: return@mapNotNull null

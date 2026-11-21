@@ -22,8 +22,9 @@ data class LaunchRequest(
     /**
      * 这次进游戏用哪个语言，写进 options.txt 的 `lang:` 那一行。
      *
-     * 空串 = 不动游戏里已有的设置（保持玩家上次在游戏内选的那个）。
-     * 非空时取 [GameLanguage.resolve] 的结果，例如 `zh_cn`。
+     * 空串 = 设置里的「跟随系统」：由 [GameLanguage.resolve] 映射成本机系统语言再写。
+     * 换句话说进游戏前一定会把这一行摆成「这次要用的语言」，不管设置里那一格是不是空的
+     * —— 早先空串被当成「不插手」，结果选了「跟随系统」反而什么都不写，看起来像没生效。
      */
     val gameLanguage: String = "",
 )

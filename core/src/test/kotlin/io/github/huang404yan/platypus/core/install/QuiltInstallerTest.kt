@@ -1,5 +1,6 @@
 package io.github.huang404yan.platypus.core.install
 
+import io.github.huang404yan.platypus.core.instance.InstallMark
 import io.github.huang404yan.platypus.core.instance.Instance
 import io.github.huang404yan.platypus.core.instance.InstanceRepository
 import io.github.huang404yan.platypus.core.instance.JsonInstanceRepository
@@ -82,6 +83,18 @@ class QuiltInstallerTest {
         } finally { root.deleteRecursively() }
     }
 
+    @Test
+    fun `装到一半的目录不算已安装`() = runBlocking {
+        val root = tempDir()
+        try {
+            val dir = versionDir(root, "1.20.1-quilt-0.31.0", "1.20.1", "org.quiltmc.loader.impl.launch.knot.KnotClient")
+            assertEquals(1, QuiltInstaller.installedLoaders(root, "1.20.1").size)
+            InstallMark.mark(dir)
+            assertTrue(QuiltInstaller.installedLoaders(root, "1.20.1").isEmpty())
+            InstallMark.clear(dir)
+            assertEquals(1, QuiltInstaller.installedLoaders(root, "1.20.1").size)
+        } finally { root.deleteRecursively() }
+    }
     @Test
     fun `没有 versions 目录时返回空表而不是抛异常`() {
         val root = tempDir()

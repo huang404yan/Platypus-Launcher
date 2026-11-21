@@ -1,11 +1,15 @@
 package io.github.huang404yan.platypus.ui
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -70,6 +74,14 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
+
+/**
+ * 装完之后进度条停在 100% 的时长。
+ *
+ * 走满就消失会让人来不及确认「真的满了」，一直停着又像还没结束；
+ * 5 秒是用户点名要的时长（docs/62 第 3 条）。
+ */
+private const val COMPLETION_HOLD_MS = 5000L
 
 /** 下拉里的一项：版本号 + 右侧标签（stable/beta、推荐/最新）。 */
 private data class LoaderOption(val version: String, val tag: String, val selected: Boolean)
@@ -405,6 +417,13 @@ fun DownloadsPage(
     val speedBytesPerSecond = install.speedBytesPerSecond
     val elapsedMs = install.elapsedMs
     val message = install.message
+    // 失败时 phase 里存着原始原因，state.message 也拼了同一句话；而「条件没满足」的提示
+    // 只写进 message、不动 phase。下面两处提示靠这一行分辨：同一个话题只说一次。
+    val failureText = (phase as? InstallPhase.Failed)?.let { "卡在「" + it.step.label + "」：" + it.message }
+    // 点「一键安装 / 重试这一步」时把页面送回顶部：状态摘要卡在那里，不滚回去就等于没反馈。
+    // 必须声明在 startInstall() 之前 —— 局部函数看不到它后面才声明的局部变量。
+    val scroll = rememberScrollState()
+    val scrollScope = rememberCoroutineScope()
 
     suspend fun refreshManifest() {
         loadingManifest = true
@@ -419,7 +438,21 @@ fun DownloadsPage(
         loadingManifest = false
     }
 
+    /**
+     * 点「一键安装」或「重试这一步」都走这里。
+     *
+     * 两个按钮都在这页偏下的位置，而状态摘要卡在最上面。点完不把视线送回去，用户看到的
+     * 就是脚边那一行纹丝不动，于是判断「没反应」—— 所以每次点击都先滚回顶部：要么立刻
+     * 看到蓝色进度卡（真开始了），要么看到红色提示（校验没过，缺什么一目了然）。
+     */
     fun startInstall() {
+        scrollScope.launch { scroll.animateScrollTo(0) }
+        // 后端先取出来：下面每条分支都要用它，也省得编译器在 when 之后还以为它可能为 null。
+        val ready = backend
+        if (ready == null) {
+            OneClickRunner.hint("后端未装配：一键安装需要桌面端注入 Java 与实例存储实现。")
+            return
+        }
         val dirText = gameDirText.trim()
         if (dirText.isEmpty()) {
             OneClickRunner.hint("先填一个目标目录，比如 D:/mc-test。")
@@ -428,10 +461,6 @@ fun DownloadsPage(
         val id = versionText.trim()
         if (id.isEmpty()) {
             OneClickRunner.hint("先选或手填一个版本号，比如 1.20.1。")
-            return
-        }
-        if (backend == null) {
-            OneClickRunner.hint("后端未装配：一键安装需要桌面端注入 Java 与实例存储实现。")
             return
         }
         if (installFabric && loaderVersion.isBlank()) {
@@ -465,8 +494,8 @@ fun DownloadsPage(
             memoryMb = defaultMemoryMb,
             loader = choice,
             manifest = manifest,
-            javaRuntimes = backend.javaRuntimes,
-            instances = backend.instances,
+            javaRuntimes = ready.javaRuntimes,
+            instances = ready.instances,
         )
     }
 
@@ -637,8 +666,9 @@ fun DownloadsPage(
 
     // 整页要能滚：一键装的步骤列表、进度、失败重试、整合包导入都在版本列表下面，
     // 1280x800 这种默认窗口高度下不加滚动就有半屏内容是永远看不到的。
+    // 这个 scroll 要能被 startInstall() 拿去滚回顶部 —— 所以它不能是匿名实参。
     Column(
-        Modifier.fillMaxSize().verticalScroll(rememberScrollState()),
+        Modifier.fillMaxSize().verticalScroll(scroll),
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         Text("下载", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
@@ -658,6 +688,8 @@ fun DownloadsPage(
             progress = progress,
             speedBytesPerSecond = speedBytesPerSecond,
             elapsedMs = elapsedMs,
+            message = message,
+            onStart = onInstalled,
         )
 
         Row(
@@ -712,7 +744,12 @@ fun DownloadsPage(
 
         // 点「一键安装」但条件没满足时（目录没填、没选版本、没选 loader）的提示。
         // 原来它在版本列表下面，隔着几十行 —— 用户点了按钮以为坏了，所以要挪到按钮正下方。
-        if (message.isNotBlank() && phase !is InstallPhase.Failed) {
+        // 失败态同样要显示：以前这里排除了 Failed，于是「装失败之后再点重试、这次校验又没过」
+        // 时一个字都不出现，用户只看到那块旧的红字，以为按钮是死的。
+        // 与下面失败区重复的那一句（message == failureText）交给那边用 error 色显示。
+        // 装完的那一句（describeOutcome）已经进了顶部那张卡的正文，这里再写一遍就是
+        // 「同一件事说两次」，正是 docs/62 第 3 条要去掉的那条灰字。
+        if (message.isNotBlank() && message != failureText && phase !is InstallPhase.Finished) {
             DownloadHint(message)
         }
 
@@ -864,8 +901,18 @@ fun DownloadsPage(
         }
 
         // 失败原因留在这里（顶部摘要卡已经说了「卡在哪个步骤」，这里给完整原文与重试入口）。
-        if (message.isNotBlank() && phase is InstallPhase.Failed) {
-            DownloadHint(message, error = true)
+        // 用 failureText 而不是 message：message 可能已经被 hint 换成「条件没满足」那种话，
+        // 那句已经在按钮下面显示过了，这里再冒一条红色原文会让人以为安装真的失败了一次。
+        // 失败提示淡入：它在按钮正下方凭空长出来一行红字，硬切会像是布局跳了一下。
+        // 退出动画那几帧 failureText 已经是 null，字还得留着，所以自己记一份上一次的原文。
+        var lastFailure by remember { mutableStateOf("") }
+        LaunchedEffect(failureText) { if (failureText != null) lastFailure = failureText }
+        AnimatedVisibility(
+            visible = failureText != null,
+            enter = fadeIn(tween(motionMillis(Motion.BASE))),
+            exit = fadeOut(tween(motionMillis(Motion.FAST))),
+        ) {
+            DownloadHint(lastFailure, error = true)
         }
 
         // 失败后给一个明确的下一动作：直接重来，已下好并通过 sha1 的文件会跳过。
@@ -892,36 +939,9 @@ fun DownloadsPage(
             StepList(currentStep = currentStep, states = stepStates)
         }
 
-        val finished = phase as? InstallPhase.Finished
-        if (finished != null) {
-            Card(
-                Modifier.fillMaxWidth(),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer),
-            ) {
-                Column(
-                    Modifier.fillMaxWidth().padding(12.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    Text(
-                        "实例已就绪：" + finished.outcome.instance.name,
-                        style = MaterialTheme.typography.titleSmall,
-                        fontWeight = FontWeight.SemiBold,
-                    )
-                    Text(
-                        "游戏目录 " + File(finished.outcome.instance.directory).parentFile?.parentFile?.path.orEmpty(),
-                        style = MaterialTheme.typography.bodySmall,
-                    )
-                    Text(
-                        "Java：" + finished.outcome.java.path,
-                        style = MaterialTheme.typography.bodySmall,
-                    )
-                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        Button(onClick = { onInstalled(finished.outcome.instance) }) { Text("去启动") }
-                    }
-                }
-            }
-        }
-
+        // 装完的那一屏只有顶部那张卡 —— 它的收尾里已经带了「去启动」。
+        // 这里原来还有一张「实例已就绪」卡，与顶部那张讲同一件事，
+        // 而且它排在整页最下面，窗口小的时候根本看不见（docs/62 第 3、4 条）。
         Spacer(Modifier.weight(1f))
     }
 }
@@ -941,8 +961,22 @@ private fun InstallStatusBanner(
     progress: StepProgress?,
     speedBytesPerSecond: Long,
     elapsedMs: Long,
+    message: String = "",
+    onStart: (Instance) -> Unit = {},
 ) {
-    val (text, isError, fraction) = when (phase) {
+    if (phase is InstallPhase.Idle) return
+    val finished = phase as? InstallPhase.Finished
+    // 装完的那一屏分两段：先是进度条走满 100%（连同目录、Java、去启动一起给出来），
+    // 停够 5 秒再把进度条收掉，卡片留成一行摘要。
+    // 一直停在画面上会让人以为还在装；直接消失又等于「完成」这件事没有证据。
+    var settled by remember(phase) { mutableStateOf(false) }
+    LaunchedEffect(phase) {
+        if (finished == null) return@LaunchedEffect
+        delay(COMPLETION_HOLD_MS)
+        settled = true
+    }
+
+    val (text, isError) = when (phase) {
         is InstallPhase.Running -> {
             val detail = if (progress != null && progress.detail.isNotBlank()) {
                 " · " + formatProgressDetail(progress)
@@ -954,18 +988,24 @@ private fun InstallStatusBanner(
             } else {
                 ""
             }
-            // 总量未知（例如跑 Forge 安装器：只知道已经多少行、不知道还要几行）时
-            // fraction 为 null，下面会画一条来回跑的不确定进度条，总比一片静止强。
-            Triple(
-                "正在" + currentStep.label + detail + speed + " · 已用 " + formatDuration(elapsedMs),
-                false,
-                if (progress != null && progress.total > 0L && progress.totalReliable) progress.fraction else null,
-            )
+            ("正在" + currentStep.label + detail + speed + " · 已用 " + formatDuration(elapsedMs)) to false
         }
-        is InstallPhase.Failed -> Triple("卡在「" + phase.step.label + "」：" + phase.message, true, null)
-        is InstallPhase.Finished -> Triple("安装完成：" + phase.outcome.instance.name + " 已就绪", false, null)
+        is InstallPhase.Failed -> ("卡在「" + phase.step.label + "」：" + phase.message) to true
+        is InstallPhase.Finished -> {
+            // 摘要那句话（describeOutcome）本来就写在状态里，装完直接拿它当正文，
+            // 不再在页面下方另起一行灰字讲同一件事。
+            (message.ifBlank { "安装完成：" + phase.outcome.instance.name + " 已就绪" }) to false
+        }
         InstallPhase.Idle -> return
     }
+    // 总量未知（例如跑 Forge 安装器：只知道已经多少行、不知道还要几行）时
+    // fraction 为 null，下面画一条来回跑的不确定进度条，总比一片静止强。
+    val fraction = if (phase is InstallPhase.Running) {
+        if (progress != null && progress.total > 0L && progress.totalReliable) progress.fraction else null
+    } else {
+        null
+    }
+    val doneBar = finished != null && !settled
     Card(
         Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(
@@ -977,9 +1017,17 @@ private fun InstallStatusBanner(
         ),
     ) {
         Column(
-            Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp),
+            Modifier
+                .fillMaxWidth()
+                .animateContentSize(tween(motionMillis(Motion.SLOW)))
+                .padding(horizontal = 12.dp, vertical = 10.dp),
             verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
+            val percent = when {
+                fraction != null -> (fraction * 100f).toInt().toString() + "%"
+                doneBar -> "100%"
+                else -> null
+            }
             Row(
                 Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
@@ -988,7 +1036,7 @@ private fun InstallStatusBanner(
                 Text(
                     when {
                         isError -> "安装卡住了"
-                        phase is InstallPhase.Finished -> "装好了"
+                        finished != null -> "装好了"
                         else -> "正在下载安装"
                     },
                     Modifier.weight(1f),
@@ -1000,19 +1048,25 @@ private fun InstallStatusBanner(
                         MaterialTheme.colorScheme.onPrimaryContainer
                     },
                 )
-                if (fraction != null) {
+                if (percent != null) {
                     Text(
-                        (fraction * 100f).toInt().toString() + "%",
+                        percent,
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.onPrimaryContainer,
                     )
                 }
+                // 收成一行之后仍然要有一个入口 —— 装完这一屏的意义就是「去启动」。
+                if (finished != null && settled) {
+                    Button(onClick = { onStart(finished.outcome.instance) }) { Text("去启动") }
+                }
             }
-            if (fraction != null) {
-                ProgressBar(fraction)
-            } else if (!isError) {
-                IndeterminateBar()
+            when {
+                // 装完先走满 100%，停 5 秒再收掉：停一下是让「满了」这件事被看见。
+                doneBar -> ProgressBar(1f)
+                fraction != null -> ProgressBar(fraction)
+                !isError && finished == null -> IndeterminateBar()
+                else -> Unit
             }
             Text(
                 text,
@@ -1024,6 +1078,21 @@ private fun InstallStatusBanner(
                     MaterialTheme.colorScheme.onPrimaryContainer
                 },
             )
+            // 装完的那 5 秒里把「装到哪、用哪个 Java」一并给出来；
+            // 收起后这些还在实例详情里，不必一直占着这一屏。
+            if (finished != null && !settled) {
+                Text(
+                    "游戏目录 " + File(finished.outcome.instance.directory).parentFile?.parentFile?.path.orEmpty(),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onPrimaryContainer,
+                )
+                Text(
+                    "Java：" + finished.outcome.java.path,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onPrimaryContainer,
+                )
+                Button(onClick = { onStart(finished.outcome.instance) }) { Text("去启动") }
+            }
         }
     }
 }

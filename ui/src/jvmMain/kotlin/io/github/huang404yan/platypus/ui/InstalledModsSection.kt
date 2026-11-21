@@ -1,6 +1,5 @@
 package io.github.huang404yan.platypus.ui
 
-import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
@@ -682,7 +681,8 @@ private fun InstalledModRow(
     val hovered by interaction.collectIsHoveredAsState()
     val hoverAlpha by animateFloatAsState(
         targetValue = if (hovered) 1f else 0f,
-        animationSpec = tween(durationMillis = if (hovered) 120 else 180),
+        // 进得快、出得慢：移进来要立刻觉得「能点」，移走则不必抢眼。
+        animationSpec = motionTween(if (hovered) Motion.FAST else Motion.BASE),
         label = "modRowHover",
     )
     Card(
@@ -724,9 +724,10 @@ private fun InstalledModRow(
             // 取消时缩回去。比一个勾选框轻，一百多个条目排下来也不会满屏小方块。
             val barHeight by animateDpAsState(
                 targetValue = if (entry.enabled) 32.dp else 0.dp,
-                animationSpec = tween(
-                    durationMillis = if (entry.enabled) 300 else 120,
-                    easing = CubicBezierEasing(0.17f, 0.67f, 0.35f, 1f),
+                // 长出来比缩回去慢一档：长出来是「确认开启」，可以稍等；缩回去是撤销，越快越好。
+                animationSpec = motionTween(
+                    if (entry.enabled) Motion.SLOW else Motion.FAST,
+                    Motion.decelerate,
                 ),
                 label = "modEnabledBar",
             )

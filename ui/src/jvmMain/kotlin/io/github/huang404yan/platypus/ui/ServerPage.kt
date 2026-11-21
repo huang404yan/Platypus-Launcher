@@ -807,9 +807,9 @@ private fun ServerReadyCard(result: ServerInstallResult) {
                     },
                 ) { Text("看开服脚本") }
             }
-            if (notice.isNotBlank()) {
+            NoticeFade(notice) { shown ->
                 Text(
-                    notice,
+                    shown,
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )

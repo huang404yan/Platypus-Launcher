@@ -115,6 +115,46 @@ class GameLanguageTest {
     }
 
     @Test
+    fun ensureLangWritesSystemLanguageWhenSettingIsBlank() {
+        // 「跟随系统」存的是空串。早先两端都拿 isNotBlank() 挡了一道，于是选了跟随系统
+        // 反而什么都不写 —— 用户看到的就是「跟随没生效」。这条测试钉住这个行为。
+        val dir = tempDir()
+        val result = GameOptions.ensureLang(dir, "", Locale.forLanguageTag("zh-CN"))
+        assertTrue(result is GameOptions.LangWrite.Written, "空串也要真的写一次")
+        assertEquals("zh_cn", result.lang)
+        assertEquals("zh_cn", GameOptions.readLang(dir))
+    }
+
+    @Test
+    fun ensureLangReportsAlreadyWhenValueMatches() {
+        val dir = tempDir()
+        File(dir, "options.txt").writeText("lang:ja_jp\n")
+        val result = GameOptions.ensureLang(dir, "ja_jp")
+        assertTrue(result is GameOptions.LangWrite.Already, "值本来就对时不该被当成写失败")
+        assertEquals("ja_jp", result.lang)
+    }
+
+    @Test
+    fun ensureLangReportsWrittenWhenValueChanges() {
+        val dir = tempDir()
+        File(dir, "options.txt").writeText("lang:en_us\n")
+        val result = GameOptions.ensureLang(dir, "zh-CN")
+        assertTrue(result is GameOptions.LangWrite.Written)
+        assertEquals("zh_cn", result.lang, "手写成 zh-CN 也要归一成游戏认的写法")
+        assertEquals("zh_cn", GameOptions.readLang(dir))
+    }
+
+    @Test
+    fun ensureLangReportsFailedWhenTargetIsAFile() {
+        // 把 gameDir 指到一个普通文件上：建目录必然失败，返回值必须是 Failed 而不是 Already。
+        val notADir = File(tempDir(), "not-a-dir")
+        notADir.writeText("x")
+        val result = GameOptions.ensureLang(notADir, "zh_cn")
+        assertTrue(result is GameOptions.LangWrite.Failed)
+        assertEquals("zh_cn", result.lang)
+    }
+
+    @Test
     fun langKeyIgnoresCase() {
         assertEquals("zh_cn", GameOptions.langIn(listOf("Lang : zh_cn")))
         assertNull(GameOptions.langIn(listOf("language:zh_cn")))

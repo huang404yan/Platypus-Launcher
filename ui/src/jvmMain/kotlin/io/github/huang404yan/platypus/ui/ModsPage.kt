@@ -539,7 +539,7 @@ private fun BrowseTab(
         // 直接回一句「没搜到」会让人以为启动器坏了。
         ChineseSearchHint(query = query, kind = SearchTerm.Kind.MOD, onPick = onQueryChange)
 
-        if (notice.isNotBlank()) ModHint(notice)
+        NoticeFade(notice) { shown -> ModHint(shown) }
         if (searchError.isNotBlank()) ModHint("Modrinth：" + searchError, error = true)
         if (installingSlug.isNotBlank()) {
             ModHint("正在装 " + installingSlug + "…" + progressDetail(progress))

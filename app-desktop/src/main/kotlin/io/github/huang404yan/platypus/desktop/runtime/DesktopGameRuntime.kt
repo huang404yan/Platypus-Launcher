@@ -63,12 +63,22 @@ class DesktopGameRuntime(
         }
 
         // 语言写在进游戏之前：options.txt 是游戏自己读的，等它起来再改这一局不算数。
-        // 空串表示「不插手」，让玩家在游戏内选的保持原样。
-        if (request.gameLanguage.isNotBlank()) {
-            val wanted = GameLanguage.resolve(request.gameLanguage)
-            if (GameOptions.writeLang(plan.layout.gameDir, wanted)) {
-                onEvent(LaunchEvent.LogLine("游戏语言写成 " + wanted))
-            }
+        // 设置里「跟随系统」存的是空串，resolve 会把它映射成本机系统语言 —— 所以这里
+        // 不能再拿 isNotBlank 挡一道：那样「跟随系统」就成了什么都不做，用户以为没生效。
+        val languageDir = plan.layout.gameDir
+        when (val written = GameOptions.ensureLang(languageDir, request.gameLanguage)) {
+            is GameOptions.LangWrite.Already ->
+                onEvent(LaunchEvent.LogLine("游戏语言已经是 " + written.lang + "，没动 options.txt"))
+            is GameOptions.LangWrite.Written ->
+                onEvent(LaunchEvent.LogLine("游戏语言写成 " + written.lang))
+            // 写失败不拦启动：语言没切成顶多是界面还是旧语言，比不让人进游戏强。
+            is GameOptions.LangWrite.Failed ->
+                onEvent(
+                    LaunchEvent.LogLine(
+                        "没能把游戏语言写成 " + written.lang + "（" +
+                            GameOptions.fileOf(languageDir).path + " 可能没有写权限）",
+                    ),
+                )
         }
 
         val command = plan.command

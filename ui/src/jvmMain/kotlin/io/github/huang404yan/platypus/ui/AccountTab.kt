@@ -616,9 +616,9 @@ internal fun AccountTab(
         }
     }
 
-    if (notice.isNotBlank()) {
+    NoticeFade(notice) { shown ->
         Text(
-            notice,
+            shown,
             style = MaterialTheme.typography.bodySmall,
             color = if (noticeIsError) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
         )

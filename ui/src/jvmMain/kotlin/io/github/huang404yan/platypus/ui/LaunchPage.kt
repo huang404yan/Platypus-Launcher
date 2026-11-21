@@ -141,6 +141,15 @@ fun LaunchPage(
      * 用户 2026-11-16 报的那条 bug 就是这个。
      */
     refreshTick: Int = 0,
+    /**
+     * 界面模式。
+     *
+     * 简洁模式把「游戏目录与 Java」整块收起来（见 [UiPolicy.showsGameDirAndJava]）：
+     * 那是装好之后基本不再动的两件东西，真要改去「版本设置」里还有一份完整的。
+     * 这一页仍要收这个参数，因为提示文案得跟着变 —— 否则简洁模式下会说「点下面某一块」，
+     * 而那一块根本不在。
+     */
+    uiMode: UiMode = UiMode.FULL,
 ) {
     if (backend == null) {
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -197,8 +206,9 @@ fun LaunchPage(
     // 切格子是「我要看这一类身份」，选行是「就用这个号」，两件事。
     // 初始格在读完设置后按当前身份定（见 LaunchedEffect(Unit)）。
     var identityTab by remember { mutableStateOf(IDENTITY_MS) }
-    // 主区的「游戏目录与 Java」默认收起。
+    // 主区的「游戏目录与 Java」默认收起。简洁模式整块不出现（见 UiPolicy.showsGameDirAndJava）。
     var showAdvanced by remember { mutableStateOf(false) }
+    val showsDirAndJava = UiPolicy.showsGameDirAndJava(uiMode)
     var phase by remember { mutableStateOf<LaunchPhase>(LaunchPhase.Idle) }
     var stageText by remember { mutableStateOf("") }
     // 启动阶段的假进度（准备版本文件 0.05 → 解压原生库 0.15 → 起进程 0.2）。
@@ -718,11 +728,23 @@ fun LaunchPage(
                 selectedJava != null -> ""
                 // 刚进页面时 Java 还在探测、自动挑选还没发生：这时说「缺 Java」是误报，先等等
                 javaPhase is JavaPhase.Detecting || javaPhase is JavaPhase.Idle -> ""
-                requiredMajor == null -> "这个版本没读到要哪个 Java。展开下面「游戏目录与 Java」手选一个。"
-                (javaPhase as? JavaPhase.Done)?.runtimes?.isEmpty() == true ->
+                // 简洁模式没有下面那一块，改口指去「版本设置」—— 那里同样能补 Java，
+                // 只是要先进去，所以单独写一套文案而不是让用户去找一个不存在的按钮。
+                requiredMajor == null -> if (showsDirAndJava) {
+                    "这个版本没读到要哪个 Java。展开下面「游戏目录与 Java」手选一个。"
+                } else {
+                    "这个版本没读到要哪个 Java。去「版本设置 → 启动与 Java」手选一个。"
+                }
+                (javaPhase as? JavaPhase.Done)?.runtimes?.isEmpty() == true -> if (showsDirAndJava) {
                     "本机一个 Java 都没有。点下面「游戏目录与 Java（点开改）」，里面能一键补 Java。"
-                else -> "需要一个 Java " + requiredMajor + " 才能启动。点下面「游戏目录与 Java（点开改）」，" +
-                    "里面能一键补 Java " + requiredMajor + "。"
+                } else {
+                    "本机一个 Java 都没有。去「版本设置 → 启动与 Java」，里面能一键补 Java。"
+                }
+                else -> ("需要一个 Java " + requiredMajor + " 才能启动。" + if (showsDirAndJava) {
+                    "点下面「游戏目录与 Java（点开改）」，里面能一键补 Java " + requiredMajor + "。"
+                } else {
+                    "去「版本设置 → 启动与 Java」，里面能一键补 Java " + requiredMajor + "。"
+                })
             },
             onLaunch = { launchGame(bypassClientGate = testLaunch) },
             showTestLaunch = Edition.current() == Edition.PREVIEW,
@@ -756,7 +778,11 @@ fun LaunchPage(
             if (merged.isEmpty()) {
                 SectionHint(
                     "这个目录里没扫到版本。点右上角「管理版本…」去下载、或者换个目录 —— " +
-                        "目录在下面的「游戏目录与 Java」里改。",
+                        if (showsDirAndJava) {
+                            "目录在下面的「游戏目录与 Java」里改。"
+                        } else {
+                            "目录在「设置 → 启动 → 游戏目录」里改。"
+                        },
                 )
             } else {
                 FlowRow(
@@ -784,10 +810,12 @@ fun LaunchPage(
             // 游戏目录与 Java 收成一个可折叠的块：HTML 预览里启动页主区就是「版本卡片 + 直连 + 日志」，
             // 这两项属于「一次配好就不再动」的设置，铺在卡片下面会把卡片挤下去。
             // 折叠不是删除 —— 换目录、补 Java 仍然在这一页，只是要点一下才展开。
-            TextButton(onClick = { showAdvanced = !showAdvanced }, enabled = !busy) {
-                Text(if (showAdvanced) "收起游戏目录与 Java" else "游戏目录与 Java（点开改）")
+            if (showsDirAndJava) {
+                TextButton(onClick = { showAdvanced = !showAdvanced }, enabled = !busy) {
+                    Text(if (showAdvanced) "收起游戏目录与 Java" else "游戏目录与 Java（点开改）")
+                }
             }
-            if (showAdvanced) {
+            if (showsDirAndJava && showAdvanced) {
                 Column(
                     Modifier.fillMaxWidth(),
                     verticalArrangement = Arrangement.spacedBy(12.dp),
@@ -974,9 +1002,9 @@ fun LaunchPage(
                     enabled = selected != null,
                 ) { Text("打开崩溃报告目录") }
             }
-            if (notice.isNotBlank()) {
+            NoticeFade(notice) { shown ->
                 Text(
-                    notice,
+                    shown,
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )

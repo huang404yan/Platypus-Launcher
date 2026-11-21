@@ -3,6 +3,7 @@ package io.github.huang404yan.platypus.core.install
 import io.github.huang404yan.platypus.core.download.DownloadReport
 import io.github.huang404yan.platypus.core.download.HttpDownloader
 import io.github.huang404yan.platypus.core.download.RemoteChecksums
+import io.github.huang404yan.platypus.core.instance.InstallMark
 import io.github.huang404yan.platypus.core.instance.Instance
 import io.github.huang404yan.platypus.core.instance.InstanceRepository
 import io.github.huang404yan.platypus.core.instance.LoaderKind
@@ -62,6 +63,9 @@ object QuiltInstaller {
     ): QuiltInstallResult = withContext(Dispatchers.IO) {
         val started = Instant.now()
         var step = QuiltStep.LOADER_LIST
+        // 加载器目录写出 json 之后扫描器就会列它，但库这时还没下完，看起来像装好了。
+        // 从写 json 到函数收尾挂「正在装」标记，成功、失败、取消都在 finally 撤掉。
+        var markDir: File? = null
 
         try {
             val chosen = if (!loaderVersion.isNullOrBlank()) {
@@ -87,6 +91,10 @@ object QuiltInstaller {
             step = QuiltStep.WRITE_JSON
             val versionId = QuiltMeta.versionId(vanillaVersion, chosen)
             onProgress(QuiltProgress(step, "写入版本 json：" + versionId))
+            // 先挂「正在装」标记再写 json：库还没下完时这个目录不该出现在实例列表里。
+            val loaderDir = FabricFiles.versionDir(gameRoot, versionId)
+            markDir = loaderDir
+            InstallMark.mark(loaderDir)
             val jsonFile = FabricFiles.writeProfile(gameRoot, versionId, profile.raw)
 
             step = QuiltStep.LIBRARIES
@@ -149,6 +157,8 @@ object QuiltInstaller {
         } catch (e: Exception) {
             if (e is QuiltInstallException) throw e
             throw QuiltInstallException(step, e.message ?: e::class.simpleName ?: "未知错误", e)
+        } finally {
+            markDir?.let { InstallMark.clear(it) }
         }
     }
 
@@ -159,6 +169,8 @@ object QuiltInstaller {
         return (versionsRoot.listFiles() ?: emptyArray())
             .filter { it.isDirectory }
             .mapNotNull { dir ->
+                // 装到一半的目录不算「已安装」，否则界面上会提前出现一条可选项。
+                if (InstallMark.isMarked(dir)) return@mapNotNull null
                 val json = File(dir, dir.name + ".json")
                 if (!json.isFile) return@mapNotNull null
                 val text = runCatching { json.readText(Charsets.UTF_8) }.getOrNull() ?: return@mapNotNull null

@@ -1,7 +1,10 @@
 package io.github.huang404yan.platypus.core.install
 
 import io.github.huang404yan.platypus.core.download.DownloadReport
+import io.github.huang404yan.platypus.core.instance.InstallMark
 import io.github.huang404yan.platypus.core.instance.Instance
+import io.github.huang404yan.platypus.core.instance.InstanceDuplicator
+import io.github.huang404yan.platypus.core.instance.InstanceLayouts
 import io.github.huang404yan.platypus.core.instance.InstanceRepository
 import io.github.huang404yan.platypus.core.instance.LoaderKind
 import io.github.huang404yan.platypus.core.loader.FabricMeta
@@ -128,287 +131,350 @@ object OneClickInstaller {
         instanceName: String? = null,
         /** 要装的加载器；null 表示只装原版（老行为）。 */
         loader: LoaderChoice? = null,
+        /**
+         * 目标版本目录已经存在时，是否复制一份新的再登记。
+         *
+         * 整合包导入必须传 true：同一个 (游戏版本, 加载器) 再来一次时，旧行为会把新包
+         * 装进同一个目录，两个包的 mods/、saves/ 挤在一起，表现为「后导入的覆盖前面的」
+         * 或「导入完只剩一条实例」。复制只带版本壳（json + client jar），不带任何游戏数据，
+         * 所以新实例一开始是干净的。见 [InstanceDuplicator]。
+         *
+         * 默认 false 保持老调用方（新建实例、一条龙下载）的行为不变。
+         */
+        duplicateIfExists: Boolean = false,
         onProgress: (StepProgress) -> Unit = {},
     ): InstallOutcome = withContext(Dispatchers.IO) {
-        val startedAt = System.currentTimeMillis()
+        // 装的过程中版本目录会陆续冒出半成品 json（原版一次、加载器一次），
+        // 扫描器只看 json 在不在，于是装到一半的目录会先一步出现在实例列表里。
+        // 整个安装期间给原版目录挂「正在装」标记（加载器目录由各自 installer 自己挂），
+        // 装完、失败、取消都在 finally 里撤掉。
+        var vanillaDir: File? = null
+        // 复制出来的新目录也要在 finally 里撤标记，否则登记失败会把新实例挡在列表外 6 小时。
+        var copiedDir: File? = null
+        try {
+            val startedAt = System.currentTimeMillis()
+            // 导入整合包时得先记住「哪些版本目录本来就在」：装完之后目标还落在这个老目录上，
+            // 就说明同游戏版本、同加载器已经装过一次（四个加载器算出来的 id 是定死的），
+            // 那就复制一份新的再登记，见下面 ⑤ 与参数 duplicateIfExists。
+            val preexistingVersionIds: Set<String> = if (duplicateIfExists) {
+                File(gameDir, InstanceLayouts.VERSIONS_DIR_NAME).listFiles { f -> f.isDirectory }
+                    ?.map { it.name }
+                    ?.toSet()
+                    .orEmpty()
+            } else {
+                emptySet()
+            }
 
-        // ① 解析版本元数据（会把 <game>/versions/<id>/<id>.json 写盘）
-        onProgress(StepProgress(InstallStep.PLANNING, "解析 " + versionId + " 的版本元数据"))
-        val plan = try {
-            VanillaInstaller.plan(gameDir, versionId, manifest)
-        } catch (e: Exception) {
-            throw InstallStepException(
-                InstallStep.PLANNING,
-                "拉取版本元数据失败：" + describe(e),
-                e,
+            // ① 解析版本元数据（会把 <game>/versions/<id>/<id>.json 写盘）
+            onProgress(StepProgress(InstallStep.PLANNING, "解析 " + versionId + " 的版本元数据"))
+            val plan = try {
+                VanillaInstaller.plan(gameDir, versionId, manifest, markInstalling = true)
+            } catch (e: Exception) {
+                throw InstallStepException(
+                    InstallStep.PLANNING,
+                    "拉取版本元数据失败：" + describe(e),
+                    e,
+                )
+            }
+
+            // plan 已经把版本 json 写进这个目录，标记也一起打上了（markInstalling = true）。
+            vanillaDir = DownloadPlanner.versionDir(gameDir, plan.versionId)
+            // ② 下载客户端 / 库 / 资源
+            onProgress(
+                StepProgress(
+                    InstallStep.DOWNLOADING,
+                    "共 " + plan.totalFiles + " 个文件",
+                    done = 0L,
+                    total = plan.totalBytes,
+                ),
             )
-        }
-
-        // ② 下载客户端 / 库 / 资源
-        onProgress(
-            StepProgress(
-                InstallStep.DOWNLOADING,
-                "共 " + plan.totalFiles + " 个文件",
-                done = 0L,
-                total = plan.totalBytes,
-            ),
-        )
-        val report = try {
-            VanillaInstaller.download(plan.items) { snapshot ->
-                // 续传过的文件单独说一句，用户才知道不是从头再下一遍。
-                val resumed = if (snapshot.resumedFiles > 0) {
-                    "，其中 " + snapshot.resumedFiles + " 个接着上次下（省了 " +
-                        (snapshot.resumedBytes / 1024L / 1024L) + " MB）"
-                } else {
-                    ""
+            val report = try {
+                VanillaInstaller.download(plan.items) { snapshot ->
+                    // 续传过的文件单独说一句，用户才知道不是从头再下一遍。
+                    val resumed = if (snapshot.resumedFiles > 0) {
+                        "，其中 " + snapshot.resumedFiles + " 个接着上次下（省了 " +
+                            (snapshot.resumedBytes / 1024L / 1024L) + " MB）"
+                    } else {
+                        ""
+                    }
+                    onProgress(
+                        StepProgress(
+                            InstallStep.DOWNLOADING,
+                            "已完成 " + snapshot.completedFiles + " / " + snapshot.totalFiles + " 个文件" + resumed,
+                            done = snapshot.completedBytes,
+                            total = snapshot.totalBytes,
+                            // 有体积未知的文件时分母不全，界面改用文件数而不是百分比
+                            totalReliable = snapshot.fractionReliable,
+                        ),
+                    )
                 }
+            } catch (e: Exception) {
+                throw InstallStepException(InstallStep.DOWNLOADING, "下载中断：" + describe(e), e)
+            }
+            if (!report.ok) {
+                val first = report.failures.first()
+                throw InstallStepException(
+                    InstallStep.DOWNLOADING,
+                    report.failures.size.toString() + " 个文件下载失败，第一个是 " +
+                        File(first.item.target).name + "：" + first.reason,
+                )
+            }
+
+            // ③ Java：先看本机有没有精确主版本，没有就按版本 json 的 javaVersion.component 现下
+            val requiredMajor = plan.javaMajorVersion
+            onProgress(StepProgress(InstallStep.JAVA_CHECK, "游戏需要 Java " + requiredMajor))
+            val local = try {
+                javaRuntimes.detect()
+            } catch (e: Exception) {
+                throw InstallStepException(InstallStep.JAVA_CHECK, "探测本机 Java 失败：" + describe(e), e)
+            }
+            val existing = local.findExactMajor(requiredMajor)
+            val javaInstalled = existing == null
+            val java = if (existing != null) {
+                existing
+            } else {
                 onProgress(
                     StepProgress(
-                        InstallStep.DOWNLOADING,
-                        "已完成 " + snapshot.completedFiles + " / " + snapshot.totalFiles + " 个文件" + resumed,
-                        done = snapshot.completedBytes,
-                        total = snapshot.totalBytes,
-                        // 有体积未知的文件时分母不全，界面改用文件数而不是百分比
-                        totalReliable = snapshot.fractionReliable,
+                        InstallStep.JAVA_INSTALL,
+                        "本机没有 Java " + requiredMajor + "，开始下载" +
+                            (plan.javaComponent?.let { "（" + it + "）" } ?: ""),
+                        total = 100L,
                     ),
                 )
+                try {
+                    javaRuntimes.ensureRuntime(requiredMajor, plan.javaComponent) { fraction ->
+                        onProgress(
+                            StepProgress(
+                                InstallStep.JAVA_INSTALL,
+                                "正在下载 Java " + requiredMajor,
+                                done = (fraction * 100f).toLong(),
+                                total = 100L,
+                            ),
+                        )
+                    }
+                } catch (e: Exception) {
+                    throw InstallStepException(
+                        InstallStep.JAVA_INSTALL,
+                        "补 Java " + requiredMajor + " 失败：" + describe(e),
+                        e,
+                    )
+                }
             }
-        } catch (e: Exception) {
-            throw InstallStepException(InstallStep.DOWNLOADING, "下载中断：" + describe(e), e)
-        }
-        if (!report.ok) {
-            val first = report.failures.first()
-            throw InstallStepException(
-                InstallStep.DOWNLOADING,
-                report.failures.size.toString() + " 个文件下载失败，第一个是 " +
-                    File(first.item.target).name + "：" + first.reason,
-            )
-        }
 
-        // ③ Java：先看本机有没有精确主版本，没有就按版本 json 的 javaVersion.component 现下
-        val requiredMajor = plan.javaMajorVersion
-        onProgress(StepProgress(InstallStep.JAVA_CHECK, "游戏需要 Java " + requiredMajor))
-        val local = try {
-            javaRuntimes.detect()
-        } catch (e: Exception) {
-            throw InstallStepException(InstallStep.JAVA_CHECK, "探测本机 Java 失败：" + describe(e), e)
-        }
-        val existing = local.findExactMajor(requiredMajor)
-        val javaInstalled = existing == null
-        val java = if (existing != null) {
-            existing
-        } else {
-            onProgress(
-                StepProgress(
-                    InstallStep.JAVA_INSTALL,
-                    "本机没有 Java " + requiredMajor + "，开始下载" +
-                        (plan.javaComponent?.let { "（" + it + "）" } ?: ""),
-                    total = 100L,
-                ),
-            )
-            try {
-                javaRuntimes.ensureRuntime(requiredMajor, plan.javaComponent) { fraction ->
-                    onProgress(
-                        StepProgress(
-                            InstallStep.JAVA_INSTALL,
-                            "正在下载 Java " + requiredMajor,
-                            done = (fraction * 100f).toLong(),
-                            total = 100L,
-                        ),
+            // ④ 加载器：原版文件已经就位，Fabric 只是在它上面叠一层 inheritsFrom
+            var effectiveVersionId = plan.versionId
+            var fabric: FabricInstallResult? = null
+            if (loader is LoaderChoice.Fabric) {
+                val wanted = loader.loaderVersion?.trim().orEmpty()
+                onProgress(
+                    StepProgress(
+                        InstallStep.LOADER_INSTALL,
+                        if (wanted.isEmpty()) "查询 Fabric 最新稳定版" else "安装 Fabric " + wanted,
+                    ),
+                )
+                try {
+                    fabric = FabricInstaller.install(
+                        gameRoot = gameDir,
+                        vanillaVersion = plan.versionId,
+                        loaderVersion = wanted.takeIf { it.isNotEmpty() },
+                    ) { p ->
+                        onProgress(
+                            StepProgress(
+                                InstallStep.LOADER_INSTALL,
+                                p.step.label + if (p.detail.isBlank()) "" else "：" + p.detail,
+                                done = p.done,
+                                total = p.total,
+                            ),
+                        )
+                    }
+                } catch (e: FabricInstallException) {
+                    throw InstallStepException(
+                        InstallStep.LOADER_INSTALL,
+                        "Fabric " + e.step.label + "失败：" + describe(e),
+                        e,
+                    )
+                } catch (e: Exception) {
+                    throw InstallStepException(
+                        InstallStep.LOADER_INSTALL,
+                        "装 Fabric 失败：" + describe(e),
+                        e,
                     )
                 }
-            } catch (e: Exception) {
-                throw InstallStepException(
-                    InstallStep.JAVA_INSTALL,
-                    "补 Java " + requiredMajor + " 失败：" + describe(e),
-                    e,
-                )
+                effectiveVersionId = fabric.versionId
             }
-        }
+            var forge: ForgeInstallResult? = null
+            if (loader is LoaderChoice.Forge) {
+                val wanted = loader.forgeVersion?.trim().orEmpty()
+                onProgress(
+                    StepProgress(
+                        InstallStep.LOADER_INSTALL,
+                        if (wanted.isEmpty()) "查询 Forge 推荐版本" else "安装 Forge " + wanted,
+                    ),
+                )
+                try {
+                    // 用刚确定下来的那个 java 跑安装器：老版本 Forge（1.16 及以前）只认 Java 8，
+                    // 直接拿本机默认 java 常常跑不起来，而这里拿的正是这个游戏版本要求的精确主版本。
+                    forge = ForgeInstaller.install(
+                        gameRoot = gameDir,
+                        vanillaVersion = plan.versionId,
+                        javaPath = java.path,
+                        forgeVersion = wanted.takeIf { it.isNotEmpty() },
+                    ) { p ->
+                        onProgress(
+                            StepProgress(
+                                InstallStep.LOADER_INSTALL,
+                                p.step.label + if (p.detail.isBlank()) "" else "：" + p.detail,
+                                done = p.done,
+                                total = p.total,
+                                // 安装器跑起来那段只有行数没有总量：别让界面画一个永远 0% 的实进度条
+                                totalReliable = p.total > 0L,
+                            ),
+                        )
+                    }
+                } catch (e: ForgeInstallException) {
+                    throw InstallStepException(
+                        InstallStep.LOADER_INSTALL,
+                        "Forge " + e.step.label + "失败：" + describe(e),
+                        e,
+                    )
+                } catch (e: Exception) {
+                    throw InstallStepException(
+                        InstallStep.LOADER_INSTALL,
+                        "装 Forge 失败：" + describe(e),
+                        e,
+                    )
+                }
+                effectiveVersionId = forge.versionId
+            }
+            var neoforge: NeoForgeInstallResult? = null
+            if (loader is LoaderChoice.NeoForge) {
+                val wanted = loader.neoforgeVersion?.trim().orEmpty()
+                onProgress(
+                    StepProgress(
+                        InstallStep.LOADER_INSTALL,
+                        if (wanted.isEmpty()) "查询 " + plan.gameVersion + " 对应的 NeoForge 版本" else "安装 NeoForge " + wanted,
+                    ),
+                )
+                try {
+                    // 与 Forge 同理，用这个游戏版本要求的精确主版本来跑安装器。
+                    // NeoForge 的 installer 会在跑之前复核 jar 内 inheritsFrom，装错版本会被拦下。
+                    neoforge = NeoForgeInstaller.install(
+                        gameRoot = gameDir,
+                        vanillaVersion = plan.versionId,
+                        javaPath = java.path,
+                        neoforgeVersion = wanted.takeIf { it.isNotEmpty() },
+                    ) { p ->
+                        onProgress(
+                            StepProgress(
+                                InstallStep.LOADER_INSTALL,
+                                p.step.label + if (p.detail.isBlank()) "" else "：" + p.detail,
+                                done = p.done,
+                                total = p.total,
+                                totalReliable = p.total > 0L,
+                            ),
+                        )
+                    }
+                } catch (e: NeoForgeInstallException) {
+                    throw InstallStepException(
+                        InstallStep.LOADER_INSTALL,
+                        "NeoForge " + e.step.label + "失败：" + describe(e),
+                        e,
+                    )
+                } catch (e: Exception) {
+                    throw InstallStepException(
+                        InstallStep.LOADER_INSTALL,
+                        "装 NeoForge 失败：" + describe(e),
+                        e,
+                    )
+                }
+                effectiveVersionId = neoforge.versionId
+            }
 
-        // ④ 加载器：原版文件已经就位，Fabric 只是在它上面叠一层 inheritsFrom
-        var effectiveVersionId = plan.versionId
-        var fabric: FabricInstallResult? = null
-        if (loader is LoaderChoice.Fabric) {
-            val wanted = loader.loaderVersion?.trim().orEmpty()
-            onProgress(
-                StepProgress(
-                    InstallStep.LOADER_INSTALL,
-                    if (wanted.isEmpty()) "查询 Fabric 最新稳定版" else "安装 Fabric " + wanted,
-                ),
-            )
-            try {
-                fabric = FabricInstaller.install(
-                    gameRoot = gameDir,
-                    vanillaVersion = plan.versionId,
-                    loaderVersion = wanted.takeIf { it.isNotEmpty() },
-                ) { p ->
-                    onProgress(
-                        StepProgress(
-                            InstallStep.LOADER_INSTALL,
-                            p.step.label + if (p.detail.isBlank()) "" else "：" + p.detail,
-                            done = p.done,
-                            total = p.total,
-                        ),
+            var quilt: QuiltInstallResult? = null
+            if (loader is LoaderChoice.Quilt) {
+                val wanted = loader.loaderVersion?.trim().orEmpty()
+                onProgress(
+                    StepProgress(
+                        InstallStep.LOADER_INSTALL,
+                        if (wanted.isEmpty()) "查询 Quilt 最新稳定版" else "安装 Quilt " + wanted,
+                    ),
+                )
+                try {
+                    // Quilt 与 Fabric 同理，不跑安装器进程：拉 profile json 写完就是叠好了。
+                    quilt = QuiltInstaller.install(
+                        gameRoot = gameDir,
+                        vanillaVersion = plan.versionId,
+                        loaderVersion = wanted.takeIf { it.isNotEmpty() },
+                    ) { p ->
+                        onProgress(
+                            StepProgress(
+                                InstallStep.LOADER_INSTALL,
+                                p.step.label + if (p.detail.isBlank()) "" else "：" + p.detail,
+                                done = p.done,
+                                total = p.total,
+                                totalReliable = p.total > 0L,
+                            ),
+                        )
+                    }
+                } catch (e: QuiltInstallException) {
+                    throw InstallStepException(
+                        InstallStep.LOADER_INSTALL,
+                        "Quilt " + e.step.label + "失败：" + describe(e),
+                        e,
+                    )
+                } catch (e: Exception) {
+                    throw InstallStepException(
+                        InstallStep.LOADER_INSTALL,
+                        "装 Quilt 失败：" + describe(e),
+                        e,
                     )
                 }
-            } catch (e: FabricInstallException) {
-                throw InstallStepException(
-                    InstallStep.LOADER_INSTALL,
-                    "Fabric " + e.step.label + "失败：" + describe(e),
-                    e,
-                )
-            } catch (e: Exception) {
-                throw InstallStepException(
-                    InstallStep.LOADER_INSTALL,
-                    "装 Fabric 失败：" + describe(e),
-                    e,
-                )
+                effectiveVersionId = quilt.versionId
             }
-            effectiveVersionId = fabric.versionId
-        }
-        var forge: ForgeInstallResult? = null
-        if (loader is LoaderChoice.Forge) {
-            val wanted = loader.forgeVersion?.trim().orEmpty()
-            onProgress(
-                StepProgress(
-                    InstallStep.LOADER_INSTALL,
-                    if (wanted.isEmpty()) "查询 Forge 推荐版本" else "安装 Forge " + wanted,
-                ),
-            )
-            try {
-                // 用刚确定下来的那个 java 跑安装器：老版本 Forge（1.16 及以前）只认 Java 8，
-                // 直接拿本机默认 java 常常跑不起来，而这里拿的正是这个游戏版本要求的精确主版本。
-                forge = ForgeInstaller.install(
-                    gameRoot = gameDir,
-                    vanillaVersion = plan.versionId,
-                    javaPath = java.path,
-                    forgeVersion = wanted.takeIf { it.isNotEmpty() },
-                ) { p ->
-                    onProgress(
-                        StepProgress(
-                            InstallStep.LOADER_INSTALL,
-                            p.step.label + if (p.detail.isBlank()) "" else "：" + p.detail,
-                            done = p.done,
-                            total = p.total,
-                            // 安装器跑起来那段只有行数没有总量：别让界面画一个永远 0% 的实进度条
-                            totalReliable = p.total > 0L,
-                        ),
-                    )
-                }
-            } catch (e: ForgeInstallException) {
-                throw InstallStepException(
-                    InstallStep.LOADER_INSTALL,
-                    "Forge " + e.step.label + "失败：" + describe(e),
-                    e,
-                )
-            } catch (e: Exception) {
-                throw InstallStepException(
-                    InstallStep.LOADER_INSTALL,
-                    "装 Forge 失败：" + describe(e),
-                    e,
-                )
-            }
-            effectiveVersionId = forge.versionId
-        }
-        var neoforge: NeoForgeInstallResult? = null
-        if (loader is LoaderChoice.NeoForge) {
-            val wanted = loader.neoforgeVersion?.trim().orEmpty()
-            onProgress(
-                StepProgress(
-                    InstallStep.LOADER_INSTALL,
-                    if (wanted.isEmpty()) "查询 " + plan.gameVersion + " 对应的 NeoForge 版本" else "安装 NeoForge " + wanted,
-                ),
-            )
-            try {
-                // 与 Forge 同理，用这个游戏版本要求的精确主版本来跑安装器。
-                // NeoForge 的 installer 会在跑之前复核 jar 内 inheritsFrom，装错版本会被拦下。
-                neoforge = NeoForgeInstaller.install(
-                    gameRoot = gameDir,
-                    vanillaVersion = plan.versionId,
-                    javaPath = java.path,
-                    neoforgeVersion = wanted.takeIf { it.isNotEmpty() },
-                ) { p ->
-                    onProgress(
-                        StepProgress(
-                            InstallStep.LOADER_INSTALL,
-                            p.step.label + if (p.detail.isBlank()) "" else "：" + p.detail,
-                            done = p.done,
-                            total = p.total,
-                            totalReliable = p.total > 0L,
-                        ),
-                    )
-                }
-            } catch (e: NeoForgeInstallException) {
-                throw InstallStepException(
-                    InstallStep.LOADER_INSTALL,
-                    "NeoForge " + e.step.label + "失败：" + describe(e),
-                    e,
-                )
-            } catch (e: Exception) {
-                throw InstallStepException(
-                    InstallStep.LOADER_INSTALL,
-                    "装 NeoForge 失败：" + describe(e),
-                    e,
-                )
-            }
-            effectiveVersionId = neoforge.versionId
-        }
 
-        var quilt: QuiltInstallResult? = null
-        if (loader is LoaderChoice.Quilt) {
-            val wanted = loader.loaderVersion?.trim().orEmpty()
-            onProgress(
-                StepProgress(
-                    InstallStep.LOADER_INSTALL,
-                    if (wanted.isEmpty()) "查询 Quilt 最新稳定版" else "安装 Quilt " + wanted,
-                ),
-            )
-            try {
-                // Quilt 与 Fabric 同理，不跑安装器进程：拉 profile json 写完就是叠好了。
-                quilt = QuiltInstaller.install(
-                    gameRoot = gameDir,
-                    vanillaVersion = plan.versionId,
-                    loaderVersion = wanted.takeIf { it.isNotEmpty() },
-                ) { p ->
-                    onProgress(
-                        StepProgress(
-                            InstallStep.LOADER_INSTALL,
-                            p.step.label + if (p.detail.isBlank()) "" else "：" + p.detail,
-                            done = p.done,
-                            total = p.total,
-                            totalReliable = p.total > 0L,
-                        ),
-                    )
+            // ⑤ 已经装过同游戏版本、同加载器 → 复制一份新目录，别把新导入的包塞进老实例里。
+            // 触发条件是「装完之后落地目录本来就在」：四个加载器算出来的版本 id 是定死的
+            // （1.20.1-fabric-0.16.14 之类），所以重复安装必然撞同一个目录。
+            var copyIndex: Int? = null
+            if (duplicateIfExists &&
+                effectiveVersionId in preexistingVersionIds &&
+                InstanceDuplicator.canDuplicate(gameDir, effectiveVersionId)
+            ) {
+                val newId = InstanceDuplicator.nextFreeId(gameDir, effectiveVersionId)
+                onProgress(StepProgress(InstallStep.REGISTERING, "这个版本已经装过，另存为新实例：" + newId))
+                val copyDir = try {
+                    InstanceDuplicator.duplicate(gameDir, effectiveVersionId, newId)
+                } catch (e: Exception) {
+                    throw InstallStepException(InstallStep.REGISTERING, "复制版本目录失败：" + describe(e), e)
                 }
-            } catch (e: QuiltInstallException) {
-                throw InstallStepException(
-                    InstallStep.LOADER_INSTALL,
-                    "Quilt " + e.step.label + "失败：" + describe(e),
-                    e,
-                )
-            } catch (e: Exception) {
-                throw InstallStepException(
-                    InstallStep.LOADER_INSTALL,
-                    "装 Quilt 失败：" + describe(e),
-                    e,
-                )
+                copiedDir = copyDir
+                // 复制出来的目录已经带着 <id>.json，扫描器会立刻把它当成一个现成实例。
+                // 登记完成前先挂「正在装」标记挡住它，写完登记再撤。
+                InstallMark.mark(copyDir)
+                val oldId = effectiveVersionId
+                effectiveVersionId = newId
+                copyIndex = InstanceDuplicator.copyIndex(newId)
+                // 四个加载器结果里都存着旧目录的绝对路径，界面和 E2E 会打印它们，
+                // 复制之后这些路径已经过期了，一起指到新目录，免得日志与现场对不上。
+                val newJson = File(copyDir, newId + ".json")
+                fabric = fabric?.copy(versionId = newId, jsonFile = newJson)
+                forge = forge?.copy(versionId = newId, jsonFile = newJson)
+                neoforge = neoforge?.copy(versionId = newId, jsonFile = newJson)
+                quilt = quilt?.copy(versionId = newId, jsonFile = newJson)
+                onProgress(StepProgress(InstallStep.REGISTERING, "已从 " + oldId + " 复制出 " + newId))
             }
-            effectiveVersionId = quilt.versionId
-        }
 
-        // ⑤ 登记实例
-        onProgress(StepProgress(InstallStep.REGISTERING, "写入实例登记"))
-        val loaderVersion = fabric?.loaderVersion ?: forge?.forgeVersion ?: neoforge?.neoforgeVersion ?: quilt?.loaderVersion
-        val loaderKind = when {
-            fabric != null -> LoaderKind.FABRIC
-            forge != null -> LoaderKind.FORGE
-            neoforge != null -> LoaderKind.NEOFORGE
-            quilt != null -> LoaderKind.QUILT
-            else -> LoaderKind.VANILLA
-        }
-        val displayName = instanceName?.trim()?.takeIf { it.isNotEmpty() }
-            ?: when {
+            // ⑥ 登记实例
+            onProgress(StepProgress(InstallStep.REGISTERING, "写入实例登记"))
+            val loaderVersion = fabric?.loaderVersion ?: forge?.forgeVersion ?: neoforge?.neoforgeVersion ?: quilt?.loaderVersion
+            val loaderKind = when {
+                fabric != null -> LoaderKind.FABRIC
+                forge != null -> LoaderKind.FORGE
+                neoforge != null -> LoaderKind.NEOFORGE
+                quilt != null -> LoaderKind.QUILT
+                else -> LoaderKind.VANILLA
+            }
+            val baseName = when {
                 fabric != null -> FabricMeta.displayName(plan.gameVersion, fabric.loaderVersion)
                 forge != null -> ForgeMeta.displayName(plan.gameVersion, forge.forgeVersion)
                 // NeoForge 的版本号自身就带着 MC 版本语义，不再重复原版号
@@ -416,38 +482,47 @@ object OneClickInstaller {
                 quilt != null -> QuiltMeta.displayName(plan.gameVersion, quilt.loaderVersion)
                 else -> plan.versionId
             }
-        val instance = Instance(
-            id = effectiveVersionId,
-            name = displayName,
-            gameVersion = plan.gameVersion,
-            loader = loaderKind,
-            loaderVersion = loaderVersion,
-            directory = DownloadPlanner.versionDir(gameDir, effectiveVersionId).absolutePath,
-            javaPath = java.path,
-            memoryMb = Instance.clampMemoryMb(memoryMb),
-            registered = true,
-            // 新装的实例跟着设置里的「新建实例默认隔离」走，见 Instance.isolatedFollowsDefault。
-            isolatedFollowsDefault = true,
-        )
-        try {
-            instances.save(instance)
-        } catch (e: Exception) {
-            throw InstallStepException(InstallStep.REGISTERING, "写实例登记失败：" + describe(e), e)
-        }
+            // 复制出来的第二份实例要跟第一份在列表里区分得开：名字后加 (2)、(3)…
+            // 用户自己起了名字也加后缀 —— 两个实例叫同一个名字在列表里同样分不清。
+            val copySuffixText = copyIndex?.let { " (" + it + ")" }.orEmpty()
+            val customName = instanceName?.trim()?.takeIf { it.isNotEmpty() }
+            val displayName = (customName ?: baseName) + copySuffixText
+            val instance = Instance(
+                id = effectiveVersionId,
+                name = displayName,
+                gameVersion = plan.gameVersion,
+                loader = loaderKind,
+                loaderVersion = loaderVersion,
+                directory = DownloadPlanner.versionDir(gameDir, effectiveVersionId).absolutePath,
+                javaPath = java.path,
+                memoryMb = Instance.clampMemoryMb(memoryMb),
+                registered = true,
+                // 新装的实例跟着设置里的「新建实例默认隔离」走，见 Instance.isolatedFollowsDefault。
+                isolatedFollowsDefault = true,
+            )
+            try {
+                instances.save(instance)
+            } catch (e: Exception) {
+                throw InstallStepException(InstallStep.REGISTERING, "写实例登记失败：" + describe(e), e)
+            }
 
-        onProgress(StepProgress(InstallStep.DONE, "可以启动了", done = 1L, total = 1L))
-        InstallOutcome(
-            instance = instance,
-            versionId = effectiveVersionId,
-            java = java,
-            javaInstalled = javaInstalled,
-            downloadReport = report,
-            elapsedMs = System.currentTimeMillis() - startedAt,
-            fabric = fabric,
-            forge = forge,
-            neoforge = neoforge,
-            quilt = quilt,
-        )
+            onProgress(StepProgress(InstallStep.DONE, "可以启动了", done = 1L, total = 1L))
+            InstallOutcome(
+                instance = instance,
+                versionId = effectiveVersionId,
+                java = java,
+                javaInstalled = javaInstalled,
+                downloadReport = report,
+                elapsedMs = System.currentTimeMillis() - startedAt,
+                fabric = fabric,
+                forge = forge,
+                neoforge = neoforge,
+                quilt = quilt,
+            )
+        } finally {
+            vanillaDir?.let { InstallMark.clear(it) }
+            copiedDir?.let { InstallMark.clear(it) }
+        }
     }
 
     private fun describe(error: Throwable): String =

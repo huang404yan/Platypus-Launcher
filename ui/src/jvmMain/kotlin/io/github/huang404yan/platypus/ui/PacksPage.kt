@@ -2,6 +2,7 @@ package io.github.huang404yan.platypus.ui
 
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -511,7 +512,7 @@ private fun BrowsePacksTab(
             onPick = onQueryChange,
         )
 
-        if (notice.isNotBlank()) PackHint(notice)
+        NoticeFade(notice) { shown -> PackHint(shown) }
         if (searchError.isNotBlank()) PackHint("Modrinth：" + searchError, error = true)
         if (installingSlug.isNotBlank()) {
             PackHint("正在装 " + installingSlug + "…" + packProgressDetail(progress))
@@ -592,13 +593,21 @@ private fun InstalledPacksColumn(
                 current.totalCount == 0 -> PackHint("空的。从上面搜一个装进来，或者把 .zip 手动放进 " + current.dir.name + "/。")
                 else -> {
                     val all = current.packs + current.disabled
+                    // 列表项带增删动画：停用会把这一条从「已启用」挪到「已停用」分组，
+                    // 启用反过来，删除则整条消失 —— 没有这一步，它是在原地瞬间换位置的，
+                    // 用户分不清「是我点错了」还是「它自己动了」。
+                    // 关掉动效时（LocalReduceMotion）不挂这个 modifier，而不是给它 0ms：
+                    // animateItem 没有接收 spec 的入口，0ms 会让它在中间帧上闪一下。
+                    val animateRows = !LocalReduceMotion.current
                     LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         items(all, key = { it.path }) { entry ->
-                            InstalledPackRow(
-                                entry = entry,
-                                onToggleEnabled = { onToggleEnabled(entry, it) },
-                                onDelete = { onDelete(entry) },
-                            )
+                            Box(if (animateRows) Modifier.animateItem() else Modifier) {
+                                InstalledPackRow(
+                                    entry = entry,
+                                    onToggleEnabled = { onToggleEnabled(entry, it) },
+                                    onDelete = { onDelete(entry) },
+                                )
+                            }
                         }
                     }
                     current.warnings.forEach { PackHint(it) }

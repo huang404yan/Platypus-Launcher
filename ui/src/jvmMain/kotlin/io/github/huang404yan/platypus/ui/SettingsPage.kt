@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
@@ -121,6 +122,24 @@ fun SettingsPage(
     theme: LauncherTheme = LauncherTheme.AUTO,
     /** 用户点了另一套配色：上层立刻换，同时这一页把它写进设置。 */
     onThemeChange: (LauncherTheme) -> Unit = {},
+    /**
+     * 当前界面模式。
+     *
+     * 与 [theme] 同一套约定：由 [App] 持有，这一页只负责「把用户选的存下来」
+     * 和「告诉上层立刻重画」—— 左列怎么分组、各页露哪些块都由上层那份状态决定。
+     */
+    uiMode: UiMode = UiMode.FULL,
+    /** 用户点了另一档模式：上层立刻换，同时这一页把它写进设置。 */
+    onUiModeChange: (UiMode) -> Unit = {},
+    /**
+     * 「少动一点」：true 时界面上的动画全部瞬间到位（见 [LocalReduceMotion]）。
+     *
+     * 与 [theme]、[uiMode] 同一套约定，由 [App] 持有并立刻重画；
+     * 这一页只负责存下来和通知上层。
+     */
+    reduceMotion: Boolean = false,
+    /** 用户改了这个开关：上层立刻换，同时写进设置。 */
+    onReduceMotionChange: (Boolean) -> Unit = {},
 ) {
     if (backend == null) {
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -180,6 +199,15 @@ fun SettingsPage(
     /** 空壳包的镜像根；完整版恒为空串，界面上也不显示这一格。 */
     var serverBase by remember { mutableStateOf("") }
     /**
+     * 这一页手上那份界面模式。
+     *
+     * 与 [theme] 不同，它同时由上层（[App]）传进来：那一份是「正在生效的」，
+     * 这一份是「设置文件里记着的」。正常情况下两者一致，点一下就是先改上层再写盘。
+     */
+    var uiModeText by remember { mutableStateOf(UiMode.FULL.id) }
+    /** 这一页手上那份动效开关。与 [uiModeText] 同理：上层那份正在生效，这份是要写进文件的。 */
+    var motionText by remember { mutableStateOf(false) }
+    /**
      * 这一页读过的那份设置，**原样留着**，保存时在它上面 copy。
      *
      * 原来六处落盘全是 `LauncherSettings(...)` 新建，新建会把这一页不认识的字段一并
@@ -212,6 +240,8 @@ fun SettingsPage(
         autoBackupKeep = settings.autoBackupKeep.toString()
         curseForgeKey = settings.curseForgeApiKey
         serverBase = settings.serverBase
+        uiModeText = UiMode.of(settings.uiMode).id
+        motionText = settings.reduceMotion
         base = settings
         loaded = true
         loadedFrom = (repository as? JsonSettingsRepository)?.path.orEmpty()
@@ -259,6 +289,10 @@ fun SettingsPage(
                         activeAccountUuid = activeAccountUuid,
                         microsoftClientId = microsoftClientId,
                         theme = theme.id,
+                        // base 里已经是最新值（换模式成功会回写 base），这里显式带上
+                        // 是为了「刚写完模式、没等回调就点保存」这一瞬间也不会把它冲回去。
+                        uiMode = uiModeText,
+                        reduceMotion = motionText,
                         downloadSource = downloadSource,
                         autoBackupEnabled = autoBackupEnabled,
                         autoBackupHours = clampedHours,
@@ -429,6 +463,8 @@ fun SettingsPage(
                         activeAccountUuid = activeAccountUuid,
                         microsoftClientId = microsoftClientId,
                         theme = picked.id,
+                        uiMode = uiModeText,
+                        reduceMotion = motionText,
                         downloadSource = downloadSource,
                         autoBackupEnabled = autoBackupEnabled,
                         autoBackupHours = backupPolicyNow().intervalHours,
@@ -446,6 +482,98 @@ fun SettingsPage(
             }.onFailure {
                 noticeIsError = true
                 notice = "配色没能存下来：" + (it.message ?: it.javaClass.simpleName)
+            }
+        }
+    }
+
+    /**
+     * 立刻把界面模式写进设置并让上层重画。
+     *
+     * 与换配色同一套：这是即时反馈的事，不该等一个「保存」按钮。
+     * 其余字段从内存当前值带上，用户改了目录还没保存也不能被这一下冲掉。
+     */
+    fun persistUiMode(picked: UiMode, previous: UiMode) {
+        uiModeText = picked.id
+        onUiModeChange(picked)
+        val parsedMemory = memoryText.trim().toIntOrNull() ?: Instance.DEFAULT_MEMORY_MB
+        scope.launch {
+            runCatching {
+                repository.save(
+                    base.copy(
+                        offlineUsername = normalizeOfflineUsername(username),
+                        defaultGameRoot = gameRoot.trim(),
+                        defaultMemoryMb = Instance.clampMemoryMb(parsedMemory),
+                        activeAccountUuid = activeAccountUuid,
+                        microsoftClientId = microsoftClientId,
+                        theme = theme.id,
+                        uiMode = picked.id,
+                        reduceMotion = motionText,
+                        downloadSource = downloadSource,
+                        autoBackupEnabled = autoBackupEnabled,
+                        autoBackupHours = backupPolicyNow().intervalHours,
+                        autoBackupKeep = backupPolicyNow().keep,
+                        curseForgeApiKey = curseForgeKey,
+                        serverBase = serverBase,
+                        defaultIsolation = defaultIsolation,
+                        gameLanguage = gameLanguage,
+                    ),
+                )
+            }.onSuccess { stored ->
+                base = stored
+                savedAt = stored.updatedAt
+                noticeIsError = false
+            }.onFailure {
+                // 写盘失败要把界面退回去：否则用户看到的是「简洁」，重启又变回完整，
+                // 而中间没有任何提示 —— 这种不一致比不给切换更难受。
+                uiModeText = previous.id
+                onUiModeChange(previous)
+                noticeIsError = true
+                notice = "界面模式没能存下来：" + (it.message ?: it.javaClass.simpleName)
+            }
+        }
+    }
+
+    /**
+     * 立刻把「少动一点」写进设置并让上层重画。
+     *
+     * 与换配色、换模式同一套：这是即时反馈的事，不该等一个「保存」按钮。
+     * 写盘失败同样退回原来的值 —— 开关停在「已关」但重启又变成动画，比不给这个开关更糊涂。
+     */
+    fun persistMotion(picked: Boolean, previous: Boolean) {
+        motionText = picked
+        onReduceMotionChange(picked)
+        val parsedMemory = memoryText.trim().toIntOrNull() ?: Instance.DEFAULT_MEMORY_MB
+        scope.launch {
+            runCatching {
+                repository.save(
+                    base.copy(
+                        offlineUsername = normalizeOfflineUsername(username),
+                        defaultGameRoot = gameRoot.trim(),
+                        defaultMemoryMb = Instance.clampMemoryMb(parsedMemory),
+                        activeAccountUuid = activeAccountUuid,
+                        microsoftClientId = microsoftClientId,
+                        theme = theme.id,
+                        uiMode = uiModeText,
+                        reduceMotion = picked,
+                        downloadSource = downloadSource,
+                        autoBackupEnabled = autoBackupEnabled,
+                        autoBackupHours = backupPolicyNow().intervalHours,
+                        autoBackupKeep = backupPolicyNow().keep,
+                        curseForgeApiKey = curseForgeKey,
+                        serverBase = serverBase,
+                        defaultIsolation = defaultIsolation,
+                        gameLanguage = gameLanguage,
+                    ),
+                )
+            }.onSuccess { stored ->
+                base = stored
+                savedAt = stored.updatedAt
+                noticeIsError = false
+            }.onFailure {
+                motionText = previous
+                onReduceMotionChange(previous)
+                noticeIsError = true
+                notice = "动效开关没能存下来：" + (it.message ?: it.javaClass.simpleName)
             }
         }
     }
@@ -651,6 +779,11 @@ fun SettingsPage(
                     onThemeChange(picked)
                     persistTheme(picked)
                 },
+                uiMode = UiMode.of(uiModeText),
+                // 换模式不跟「保存」按钮走：与换配色一样是即时反馈的事。
+                onPickUiMode = { picked -> persistUiMode(picked, UiMode.of(base.uiMode)) },
+                reduceMotion = motionText,
+                onPickReduceMotion = { picked -> persistMotion(picked, base.reduceMotion) },
             )
             SETTINGS_TAB_OTHER -> OtherTab(
                 loadedFrom = loadedFrom,
@@ -690,9 +823,9 @@ fun SettingsPage(
             }
         }
 
-        if (notice.isNotBlank()) {
+        NoticeFade(notice) { shown ->
             Text(
-                notice,
+                shown,
                 style = MaterialTheme.typography.bodySmall,
                 color = if (noticeIsError) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
             )
@@ -842,14 +975,18 @@ private fun LaunchTab(
 
         SettingCard(
             "游戏语言",
-            "进游戏时写进 " + GameOptions.LANG_KEY + ": 那一行（options.txt 在实例自己的目录里）。" +
-                "游戏本来就支持这些语言，只是没人愿意每次重装完再点一遍。",
+            "每次进游戏前都写一次 " + GameOptions.LANG_KEY + ": 那一行 —— 文件是实例目录里的 " +
+                "options.txt，不隔离的实例就在游戏根目录。游戏本来就支持这些语言，" +
+                "只是没人愿意每次重装完再点一遍。",
         ) {
             Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(
+                    // 启动器自己只有中文界面，没有「跟随启动器语言」这回事 —— 这一格能跟随的
+                    // 只有操作系统的语言，所以文案得说清楚，否则用户会以为跟着界面走。
                     if (gameLanguage.isBlank()) {
-                        "现在跟随系统：本机会写成 " + GameLanguage.systemDefault() +
-                            "（" + GameLanguage.labelOf(GameLanguage.systemDefault()) + "）。"
+                        "现在跟随系统语言：这台电脑会写成 " + GameLanguage.systemDefault() +
+                            "（" + GameLanguage.labelOf(GameLanguage.systemDefault()) + "）。" +
+                            "改这条只在进游戏那一刻生效，游戏里自己再改一次以你改的为准。"
                     } else {
                         "现在固定用 " + gameLanguage + "（" + GameLanguage.labelOf(gameLanguage) + "）。"
                     },
@@ -861,7 +998,7 @@ private fun LaunchTab(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    val options = listOf(GameLanguage.Choice("", "跟随系统")) + GameLanguage.CHOICES
+                    val options = listOf(GameLanguage.Choice("", "跟随系统语言")) + GameLanguage.CHOICES
                     options.forEach { choice ->
                         val picked = choice.id == gameLanguage
                         if (picked) {
@@ -1168,7 +1305,14 @@ private fun SavesTab(
  * 点完还要再点一次保存，中间那一眼看到的新颜色就像没生效。
  */
 @Composable
-private fun InterfaceTab(theme: LauncherTheme, onPick: (LauncherTheme) -> Unit) {
+private fun InterfaceTab(
+    theme: LauncherTheme,
+    onPick: (LauncherTheme) -> Unit,
+    uiMode: UiMode,
+    onPickUiMode: (UiMode) -> Unit,
+    reduceMotion: Boolean,
+    onPickReduceMotion: (Boolean) -> Unit,
+) {
     val effective = theme.resolve(Brand.isPreview)
     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         SettingCard(
@@ -1198,14 +1342,123 @@ private fun InterfaceTab(theme: LauncherTheme, onPick: (LauncherTheme) -> Unit) 
                 )
             }
         }
+        SettingCard(
+            "界面模式",
+            "两档看的是一份东西，只是收起来多少不一样。简洁模式把不常用的二级项收进「更多」，"
+                + "启动页与版本设置页里也少几块；切回完整模式原样都在，盘上的实例、存档、模组一个字节不动。"
+                + "改完立刻生效并记下来，这一页同样没有「保存」按钮。",
+        ) {
+            Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                UiMode.entries.forEach { option ->
+                    UiModeRow(
+                        option = option,
+                        selected = option == uiMode,
+                        onClick = { onPickUiMode(option) },
+                    )
+                }
+            }
+        }
+        SettingCard(
+            "动效",
+            "换页、换二级项、副页面入栈都带一点过渡，用的是同一套时长（见界面上「动效」这一档）。"
+                + "远程桌面、录屏或机器比较慢时勾上这个，全部改成瞬间到位 —— "
+                + "动画只是提示「换了」，关掉不影响任何功能。改完立刻生效并记下来。",
+        ) {
+            Row(
+                Modifier.fillMaxWidth().clickable { onPickReduceMotion(!reduceMotion) },
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Checkbox(checked = reduceMotion, onCheckedChange = { onPickReduceMotion(it) })
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text("少动一点", style = MaterialTheme.typography.bodyMedium)
+                    Text(
+                        "换页、展开、提示这些改成直接出现，颜色与布局不变。",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+        }
         SettingCard("还没做的", "没做的不摆控件。") {
             Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 InfoLine("字号", "Material 3 默认五档，未提供整体缩放")
-                InfoLine("动画", "没做「减少动画」的无障碍开关")
                 InfoLine("导航", "左侧一级栏 + 选中项的二级项；二级项的选中状态随页面切换保留到本次运行结束")
             }
         }
     }
+}
+
+/**
+ * 一行界面模式选项。
+ *
+ * 与 [ThemeRow] 同一个造型（整行可点、选中打勾），但左边不放色块 ——
+ * 两档的差别不是颜色，给了色块反而像在说「简洁模式是另一套皮肤」。
+ * 改成两块「次要项显示 / 收起」的小示意：上面一行实心、下面一行只有轮廓，
+ * 一眼能看出「收起」指的是列表长度而不是功能多少。
+ */
+@Composable
+private fun UiModeRow(option: UiMode, selected: Boolean, onClick: () -> Unit) {
+    Card(
+        modifier = Modifier.fillMaxWidth().clickable { onClick() },
+        colors = CardDefaults.cardColors(
+            containerColor = if (selected) {
+                MaterialTheme.colorScheme.primaryContainer
+            } else {
+                MaterialTheme.colorScheme.surface
+            },
+        ),
+    ) {
+        Row(
+            Modifier.fillMaxWidth().padding(10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Column(Modifier.width(52.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                val shown = if (option == UiMode.FULL) 4 else 2
+                repeat(4) { index ->
+                    val on = index < shown
+                    Box(
+                        Modifier
+                            .fillMaxWidth()
+                            .height(6.dp)
+                            .background(
+                                if (on) {
+                                    MaterialTheme.colorScheme.primary.copy(alpha = 0.85f)
+                                } else {
+                                    MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.25f)
+                                },
+                                RoundedCornerShape(2.dp),
+                            ),
+                    )
+                }
+            }
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(
+                    option.label,
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+                )
+                Text(
+                    uiModeNoteOf(option),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            if (selected) {
+                Text(
+                    "✓",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+            }
+        }
+    }
+}
+
+/** 每档模式底下那行小字。设置页与首次选择卡共用一份，免得两处写得不一样。 */
+internal fun uiModeNoteOf(option: UiMode): String = when (option) {
+    UiMode.FULL -> "二级项全平铺；启动页能改目录、Java、内存；版本设置里有「高级」与「导出」"
+    UiMode.SIMPLE -> "不常用的二级项收进「更多」；启动页只留身份、版本、启动；导出收成总览一行"
 }
 
 /**

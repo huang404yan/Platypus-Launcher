@@ -7,6 +7,7 @@ import io.github.huang404yan.platypus.core.download.DownloadReport
 import io.github.huang404yan.platypus.core.download.DownloadPreference
 import io.github.huang404yan.platypus.core.download.DownloadSources
 import io.github.huang404yan.platypus.core.download.HttpDownloader
+import io.github.huang404yan.platypus.core.instance.InstallMark
 import io.github.huang404yan.platypus.core.runtime.GameJavaRules
 import io.github.huang404yan.platypus.core.version.DownloadPlanner
 import io.github.huang404yan.platypus.core.version.VersionManifest
@@ -69,8 +70,18 @@ object VanillaInstaller {
      *
      * 副作用只有一件事：把解析通过的版本 json 写进 versions 目录下同名 json——
      * 这是启动器识别实例的依据，不能只留在内存里。
+     *
+     * [markInstalling] 为真时顺带在这个版本目录上打一个「正在装」标记，
+     * 让扫描器在装完之前不把它列成实例；标记由调用方在装完/失败/取消时撤掉，
+     * 见 [io.github.huang404yan.platypus.core.instance.InstallMark]。一键装会打开它，
+     * 单独调 plan 的调用方保持原样（不打标记）。
      */
-    fun plan(gameDir: File, versionId: String, manifest: VersionManifest? = null): InstallPlan {
+    fun plan(
+        gameDir: File,
+        versionId: String,
+        manifest: VersionManifest? = null,
+        markInstalling: Boolean = false,
+    ): InstallPlan {
         val requested = versionId.trim()
         require(requested.isNotEmpty()) { "版本号不能为空" }
 
@@ -78,35 +89,45 @@ object VanillaInstaller {
         val version = parseVersionJson(jsonText)
         val resolvedId = version.id.ifBlank { requested }
 
-        val jsonFile = File(DownloadPlanner.versionDir(gameDir, resolvedId), resolvedId + ".json")
+        val versionDir = DownloadPlanner.versionDir(gameDir, resolvedId)
+        val jsonFile = File(versionDir, resolvedId + ".json")
         jsonFile.parentFile?.mkdirs()
-        jsonFile.writeText(jsonText)
+        // 先打标记再写 json：顺序反过来的话，扫描器有机会在两步之间读到刚写好的 json。
+        // 从这里到 plan 返回，目录还没交给调用方，出了岔子只能自己撤标记；
+        // 正常返回时标记留给调用方（一键装）在装完/失败/取消时撤。
+        if (markInstalling) InstallMark.mark(versionDir)
+        try {
+            jsonFile.writeText(jsonText)
 
-        val items = mutableListOf<DownloadItem>()
-        DownloadPlanner.clientJar(version, gameDir)?.let(items::add)
-        DownloadPlanner.assetIndex(version, gameDir)?.let(items::add)
-        items += DownloadPlanner.libraries(version, gameDir)
+            val items = mutableListOf<DownloadItem>()
+            DownloadPlanner.clientJar(version, gameDir)?.let(items::add)
+            DownloadPlanner.assetIndex(version, gameDir)?.let(items::add)
+            items += DownloadPlanner.libraries(version, gameDir)
 
-        val index = version.assetIndex
-        if (index != null && index.url.isNotBlank()) {
-            val indexText = fetchText(listOf(index.url) + mirrorsFor(index.url))
-            items += DownloadPlanner.assets(parseAssetIndex(indexText), gameDir)
+            val index = version.assetIndex
+            if (index != null && index.url.isNotBlank()) {
+                val indexText = fetchText(listOf(index.url) + mirrorsFor(index.url))
+                items += DownloadPlanner.assets(parseAssetIndex(indexText), gameDir)
+            }
+
+            val unique = items.distinctBy { it.target }
+            val totalBytes = unique.sumOf { if (it.size > 0) it.size else 0L }
+            // javaVersion 在新版本 json 里都有；老版本可能整个缺失，用游戏版本号兜底推一次。
+            val declaredJava = version.javaVersion
+            return InstallPlan(
+                versionId = resolvedId,
+                versionJsonPath = jsonFile.path,
+                totalBytes = totalBytes,
+                items = unique,
+                gameVersion = resolvedId,
+                javaMajorVersion = declaredJava?.majorVersion?.takeIf { it > 0 }
+                    ?: GameJavaRules.requiredMajor(resolvedId),
+                javaComponent = declaredJava?.component?.takeIf { it.isNotBlank() },
+            )
+        } catch (e: Exception) {
+            if (markInstalling) InstallMark.clear(versionDir)
+            throw e
         }
-
-        val unique = items.distinctBy { it.target }
-        val totalBytes = unique.sumOf { if (it.size > 0) it.size else 0L }
-        // javaVersion 在新版本 json 里都有；老版本可能整个缺失，用游戏版本号兜底推一次。
-        val declaredJava = version.javaVersion
-        return InstallPlan(
-            versionId = resolvedId,
-            versionJsonPath = jsonFile.path,
-            totalBytes = totalBytes,
-            items = unique,
-            gameVersion = resolvedId,
-            javaMajorVersion = declaredJava?.majorVersion?.takeIf { it > 0 }
-                ?: GameJavaRules.requiredMajor(resolvedId),
-            javaComponent = declaredJava?.component?.takeIf { it.isNotBlank() },
-        )
     }
 
     /** 并发下载清单里的所有文件；失败项由调用方决定是否重试。 */

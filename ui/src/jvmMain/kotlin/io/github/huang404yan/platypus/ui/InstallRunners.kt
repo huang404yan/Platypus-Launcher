@@ -90,7 +90,7 @@ internal object OneClickRunner {
     private var job: Job? = null
     private val meter = SpeedMeter()
 
-    /** 同一时间只跑一个安装任务；正在跑时再点按钮直接忽略。 */
+    /** 同一时间只跑一个安装任务；正在跑时再点按钮不重复启动，但要留一句话说明。 */
     fun start(
         gameDir: File,
         versionId: String,
@@ -100,7 +100,11 @@ internal object OneClickRunner {
         javaRuntimes: JavaRuntimeService,
         instances: InstanceRepository,
     ) {
-        if (_state.value.phase is InstallPhase.Running) return
+        if (_state.value.phase is InstallPhase.Running) {
+            // 以前这里是静默 return：按钮点下去毫无变化，用户只会以为程序死了。
+            hint("上一次安装还在跑，先等它结束，或者点「取消」。")
+            return
+        }
         job?.cancel()
         meter.reset()
         val startedAt = System.currentTimeMillis()

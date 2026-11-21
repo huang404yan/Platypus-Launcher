@@ -36,6 +36,8 @@ internal fun FirstRunGate(
     backend: LauncherBackend?,
     /** 点「去登录」时切到「设置 → 账号」。 */
     onGoAccount: () -> Unit,
+    /** 这扇门走完了（不管是被放行还是被关掉）：后面的「选择怎么看」靠它才知道该问了。 */
+    onFinished: () -> Unit = {},
 ) {
     val repository = backend?.settings
     val accounts = backend?.accounts
@@ -96,6 +98,7 @@ internal fun FirstRunGate(
                 }
             }
             state = current.copy(needed = false)
+            onFinished()
         }
     }
 

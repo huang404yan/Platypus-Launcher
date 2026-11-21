@@ -484,9 +484,9 @@ internal fun ServerConsoleCard(
                     }
                 }
             }
-            if (state.notice.isNotBlank()) {
+            NoticeFade(state.notice) { shown ->
                 Text(
-                    state.notice,
+                    shown,
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.error,
                 )

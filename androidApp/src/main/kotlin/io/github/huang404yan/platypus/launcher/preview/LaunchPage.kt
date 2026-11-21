@@ -351,17 +351,16 @@ internal fun LaunchPage() {
         startNotice = ""
         scope.launch {
             // 语言要在 JVM 起之前写进 options.txt —— 游戏一启动就读它，慢一步这一局不算数。
-            // 写失败不拦启动：语言没切成顶多是界面还是旧的，比不让人进游戏强。
+            // 设置里「跟随系统」存的是空串，resolve 会把它映射成这台手机的语言 —— 这里不能再
+            // 用 isBlank 挡一道：那样「跟随系统」就成了什么都不干，用户以为没生效。
+            // 写失败不拦启动：语言没切成顶多是界面还是旧语言，比不让人进游戏强。
             val langNote = withContext(Dispatchers.IO) {
-                if (gameLanguage.isBlank()) {
-                    ""
-                } else {
-                    val wanted = GameLanguage.resolve(gameLanguage)
-                    if (GameOptions.writeLang(current.env.gameDir, wanted)) {
-                        "游戏语言写成 " + wanted + "。"
-                    } else {
-                        "没能把游戏语言写成 " + wanted + "（options.txt 可能没有写权限）。"
-                    }
+                val file = GameOptions.fileOf(current.env.gameDir)
+                when (val written = GameOptions.ensureLang(current.env.gameDir, gameLanguage)) {
+                    is GameOptions.LangWrite.Already -> "游戏语言已经是 " + written.lang + "。"
+                    is GameOptions.LangWrite.Written -> "游戏语言写成 " + written.lang + "。"
+                    is GameOptions.LangWrite.Failed ->
+                        "没能把游戏语言写成 " + written.lang + "（" + file.path + " 可能没有写权限）。"
                 }
             }
             val outcome = withContext(Dispatchers.IO) {

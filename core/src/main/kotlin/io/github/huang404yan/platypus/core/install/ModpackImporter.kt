@@ -144,8 +144,11 @@ object ModpackImporter {
      * @param gameDir 游戏根目录（含 versions/、libraries/、assets/），与一键装用的是同一个
      * @param memoryMb 新实例的内存；加载器包默认给得比原版高一点更稳（由调用方决定）
      * @param allowOverwriteUserData 是否允许 overrides 覆盖已存在的存档/截图/日志。
-     *   默认 false：导入到一个全新的实例目录时本来就没有这些文件，只有当用户往**已有**实例里
-     *   重导同一个包时才会撞上，那种情况宁可跳过并记警告，也不能悄悄盖掉存档。
+     *   默认 false：导入到的是一个全新的实例目录，本来就没有这些文件；万一撞上（版本目录里
+     *   已经放着上一份存档），宁可跳过并记警告，也不能悄悄盖掉。
+     *
+     * 同一个（游戏版本, 加载器）再导入一次时不会覆盖已有实例：一键装那一步会复制出一个带
+     * 后缀的新版本目录（见 [OneClickInstaller] 的 duplicateIfExists），登记成另一条实例。
      */
     suspend fun import(
         archive: File,
@@ -191,6 +194,9 @@ object ModpackImporter {
                 memoryMb = memoryMb,
                 instanceName = manifest.name,
                 loader = choice,
+                // 同一个（游戏版本, 加载器）已经装过时，另存成一条新实例：
+                // 直接装进老目录会让两个包的 mods/ 与 saves/ 挤在一起（表现为覆盖或「导入完只剩一条」）。
+                duplicateIfExists = true,
             ) { step ->
                 if (step.step == InstallStep.IDLE || step.step == InstallStep.DONE) return@install
                 val detail = if (step.detail.isBlank()) step.step.label else step.step.label + "：" + step.detail

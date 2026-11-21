@@ -326,9 +326,9 @@ internal fun SavesPanel(
                 Text(busyText + "…", style = MaterialTheme.typography.bodySmall)
             }
         }
-        if (notice.isNotBlank()) {
+        NoticeFade(notice) { shown ->
             Text(
-                notice,
+                shown,
                 style = MaterialTheme.typography.bodyMedium,
                 color = if (noticeIsError) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.secondary,
             )

@@ -124,6 +124,13 @@ internal fun InstanceDetailPanel(
      * 用户点「保存」会写回一条指向空路径的登记。
      */
     onDeleted: () -> Unit = {},
+    /**
+     * 界面模式。简洁模式左列少「高级」与「导出整合包」两节（见 [UiPolicy.setupSections]）。
+     *
+     * 少了的那两节不是功能消失：高级里的隔离开关在「保存」面板同一份数据上、导出在总览底部
+     * 也有一行按钮，两档都能点到，只是不占一个常驻的导航项。
+     */
+    uiMode: UiMode = UiMode.FULL,
 ) {
     var details by remember(instance.directory) { mutableStateOf<InstanceDetails?>(null) }
     var loading by remember(instance.directory) { mutableStateOf(true) }
@@ -177,6 +184,12 @@ internal fun InstanceDetailPanel(
     var browsingSaves by remember(instance.directory) { mutableStateOf(false) }
     // 左栏当前分区。默认「总览」：用户从启动页点「版本设置」进来，先要看的是「这是个什么版本」。
     var section by remember(instance.directory) { mutableStateOf(SETUP_OVERALL) }
+    // 这一页左列能出现哪些节，由界面模式决定。
+    val sections = UiPolicy.setupSections(uiMode)
+    // 停在简洁模式看不见的那一节上会是一片空白：换模式时若当前节被收走，退回总览。
+    LaunchedEffect(uiMode) {
+        if (sections.none { it.first == section }) section = SETUP_OVERALL
+    }
 
     // 这个版本目录里真实存在的模组 / 资源包 / 光影。
     // 直接用 core 的扫描结果（不是裸文件名表）：这一页要能直接启用、停用、删掉它们，
@@ -649,7 +662,7 @@ internal fun InstanceDetailPanel(
         }
 
         Row(Modifier.weight(1f).fillMaxWidth()) {
-            SetupNav(current = section, enabled = !saving) { picked ->
+            SetupNav(current = section, enabled = !saving, sections = sections) { picked ->
                 section = picked
                 // 存档与导出原本就是整页子页（返回键回列表），这里保持那个形状：
                 // 它们要做的事太多，塞进右栏的一列里会挤成一小条。
@@ -791,9 +804,9 @@ internal fun InstanceDetailPanel(
                                     contentColor = MaterialTheme.colorScheme.onErrorContainer,
                                 ),
                             ) { Text(if (deletingInstance) "正在统计目录…" else "删除这个实例") }
-                            if (notice.isNotBlank()) {
+                            NoticeFade(notice) { shown ->
                                 Text(
-                                    notice,
+                                    shown,
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.error,
                                 )
@@ -813,6 +826,8 @@ internal fun InstanceDetailPanel(
                                 OutlinedButton(onClick = { openFolder(d.versionDir) }) { Text("打开实例目录") }
                                 OutlinedButton(onClick = { openFolder(d.gameDir) }) { Text("打开存档目录") }
                                 OutlinedButton(onClick = { browsingSaves = true }) { Text("存档与备份") }
+                                // 简洁模式左列没有「导出整合包」这一节，这个按钮就是那条路 ——
+                                // 两档都得留着，否则导出在简洁模式里等于消失。
                                 OutlinedButton(onClick = { exporting = true }) { Text("导出整合包") }
                             }
                         }
@@ -950,9 +965,9 @@ internal fun InstanceDetailPanel(
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Button(onClick = { save() }, enabled = !saving) { Text(if (saving) "保存中…" else "保存") }
-                        if (notice.isNotBlank()) {
+                        NoticeFade(notice) { shown ->
                             Text(
-                                notice,
+                                shown,
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
@@ -965,9 +980,14 @@ internal fun InstanceDetailPanel(
 }
 
 @Composable
-private fun SetupNav(current: String, enabled: Boolean, onPick: (String) -> Unit) {
+private fun SetupNav(
+    current: String,
+    enabled: Boolean,
+    sections: List<Pair<String, String>>,
+    onPick: (String) -> Unit,
+) {
     Column(Modifier.width(176.dp).fillMaxHeight(), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-        SETUP_SECTIONS.forEach { (id, label) ->
+        sections.forEach { (id, label) ->
             val selected = id == current
             Row(
                 Modifier

@@ -1,5 +1,15 @@
 package io.github.huang404yan.platypus.ui
 
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.Crossfade
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.clickable
@@ -21,6 +31,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
@@ -72,12 +83,23 @@ fun App(
     // 页面代码一行都不用知道 —— 全仓库的颜色都走 MaterialTheme.colorScheme。
     var theme by remember { mutableStateOf(LauncherTheme.AUTO) }
 
+    // 界面模式（完整 / 简洁）。与 theme 一样是最外层持有的：它决定左列分几组、
+    // 各页露哪些块，改它要整棵树重画。默认完整模式 —— 第一次打开什么都能看见。
+    var uiMode by remember { mutableStateOf(UiMode.FULL) }
+
+    // 「少动一点」。true 时所有动画压到 1ms（见 Motion.kt）。它不像 theme 那样要
+    // 通知宿主窗口，只在这一棵树里生效。
+    var reduceMotion by remember { mutableStateOf(false) }
+
     // 只在最外层读一次设置。放这里而不是每页各读一次：切页会重建页面，
     // 每页各读会让主题在切换瞬间闪一下，而且同一份文件被反复解析。
     LaunchedEffect(backend) {
         val repository = backend?.settings ?: return@LaunchedEffect
         val settings = runCatching { repository.load() }.getOrNull() ?: return@LaunchedEffect
         theme = runCatching { launcherThemeOf(settings.theme) }.getOrDefault(LauncherTheme.AUTO)
+        // 没存过（空串）就是完整模式，见 UiMode.of 里为什么退这一档。
+        uiMode = UiMode.of(settings.uiMode)
+        reduceMotion = settings.reduceMotion
         // 下载源偏好是进程级全局量（见 DownloadPreference 的说明）：这里灌一次，
         // 之后所有新建的下载器都按它排序。设置页改的时候会就地覆写。
         DownloadPreference.source = DownloadSource.of(settings.downloadSource)
@@ -93,6 +115,9 @@ fun App(
     LaunchedEffect(theme) { onThemeChanged(theme) }
 
     PlatypusTheme(theme) {
+        // 动效开关喂给整棵树：各处动画统一从 motionMillis / motionTween 取时长，
+        // 这里一关，它们全部变成瞬间到位，不用逐个页面加判断。
+        CompositionLocalProvider(LocalReduceMotion provides reduceMotion) {
         // 默认落在「启动」：开启动器的第一件事是「今天玩哪个版本、用谁的身份」。
         var page by remember { mutableStateOf(Page.LAUNCH) }
 
@@ -123,6 +148,10 @@ fun App(
         // instances.json，启动页手里那份 registered 还停在打开副页面之前 —— 不通知它，
         // 就会出现「明明登记成功了，主页的版本卡片里没有」。
         var overlayTick by remember { mutableStateOf(0) }
+
+        // 首次运行那扇门走完时加一。模式选择排在它后面：正式版那扇门没正版账号是关不掉的，
+        // 摆在它前面等于给「点两下绕过登录」开了条路。
+        var firstRunTick by remember { mutableStateOf(0) }
         fun closeOverlay() {
             overlay = null
             overlayTick++
@@ -149,10 +178,12 @@ fun App(
             )
             Row(Modifier.weight(1f).fillMaxWidth()) {
                 // 左列二级：只有「下载 / 设置 / 更多」有，启动与联机没有 —— 那两页的东西全在一屏里。
-                val subs = PAGE_SUB_TABS[page].orEmpty()
-                if (subs.isNotEmpty()) {
+                // 简洁模式把不常用的二级项挪到「更多」那一组下面。分组只在左列生效，
+                // 选中态与刷新按钮仍按 sub.id 走，与完整模式完全一样。
+                val groups = UiPolicy.subTabGroups(page, uiMode)
+                if (groups.any { it.tabs.isNotEmpty() }) {
                     SubColumn(
-                        subs = subs,
+                        groups = groups,
                         currentSub = subTabOf(page),
                         onSelectSub = { sub -> subSelection[page.name] = sub },
                         onRefreshSub = { sub -> if (sub == subTabOf(page)) refreshTick++ },
@@ -164,13 +195,40 @@ fun App(
                 Box(
                     Modifier.weight(1f).fillMaxHeight().padding(if (compact) 16.dp else 24.dp),
                 ) {
-                    val sub = subTabOf(page)
+                    // 换一级页时淡入 + 一点点横向位移，代替原来的硬切。
+                    //
+                    // 两个细节：
+                    //  1. 内容按 targetState（shown）渲染，不读外层 page —— 读外层的话，
+                    //     过渡期间两帧都在画「新页」，看起来就是闪了一下而不是换过去。
+                    //  2. 位移只有宽度的 1/24（1280 宽时约 53px ≈ 40dp 里再靠内），
+                    //     方向按一级项顺序。取太大就成了「滑屏」，用户会等它滑完。
+                    val pageMillis = motionMillis(Motion.BASE)
+                    AnimatedContent(
+                        targetState = page,
+                        transitionSpec = {
+                            val forward = targetState.ordinal >= initialState.ordinal
+                            val shift = if (forward) 1 else -1
+                            (
+                                fadeIn(animationSpec = tween(pageMillis)) +
+                                    slideInHorizontally(animationSpec = tween(pageMillis)) { full ->
+                                        shift * full / 24
+                                    }
+                                ).togetherWith(
+                                fadeOut(animationSpec = tween(pageMillis)) +
+                                    slideOutHorizontally(animationSpec = tween(pageMillis)) { full ->
+                                        -shift * full / 24
+                                    },
+                            )
+                        },
+                        label = "page",
+                    ) { shown ->
+                    val sub = subTabOf(shown)
                     // tick 只在「下载」页与「设置」页有意义（两处都有需要重读的清单）；
                     // 别的页面忽略它，免得切页时误触发。
-                    val tick = if (page == Page.DOWNLOAD || page == Page.SETTINGS) refreshTick else 0
+                    val tick = if (shown == Page.DOWNLOAD || shown == Page.SETTINGS) refreshTick else 0
                     // 启动页另有一路信号：副页面关掉（overlayTick）时重扫登记表。
                     // 只在那时加一，不跟左列「刷新」按钮混用 —— 那个是给下载页重拉网络列表的。
-                    when (page) {
+                    when (shown) {
                         Page.LAUNCH -> LaunchPage(
                             backend = backend,
                             initialGameRoot = initialGameRoot,
@@ -185,8 +243,9 @@ fun App(
                                 page = Page.SETTINGS
                             },
                             refreshTick = overlayTick,
+                            uiMode = uiMode,
                         )
-                        Page.DOWNLOAD -> when (sub) {
+                        Page.DOWNLOAD -> SubContent(sub) { shownSub -> when (shownSub) {
                             DOWNLOAD_TAB_MODS -> ModsPage(
                                 initialGameRoot = initialGameRoot,
                                 backend = backend,
@@ -222,23 +281,28 @@ fun App(
                             // 服务端不登记实例，所以没有「装完去启动」的回调
                             DOWNLOAD_TAB_SERVER -> ServerPage(initialGameRoot, backend)
                             else -> DownloadsPage(initialGameRoot, backend, tick) { page = Page.LAUNCH }
-                        }
+                        } }
                         Page.LINK -> LinkPage(initialGameRoot = initialGameRoot, backend = backend) { address ->
                             quickPlay = address
                             page = Page.LAUNCH
                         }
                         // 设置页的「启动」二级项要刷新信号（重读本机 Java 清单），其它二级项不用
-                        Page.SETTINGS -> SettingsPage(
+                        Page.SETTINGS -> SubContent(sub) { shownSub -> SettingsPage(
                             backend = backend,
-                            subTab = subTabOf(Page.SETTINGS),
+                            subTab = shownSub,
                             refreshTick = tick,
                             theme = theme,
+                            uiMode = uiMode,
+                            // 换模式与换配色同一套：点一下立刻重画，同时由设置页自己写盘。
+                            onUiModeChange = { uiMode = it },
+                            reduceMotion = reduceMotion,
+                            onReduceMotionChange = { reduceMotion = it },
                             // 只改这一层的皮。标题栏由 LaunchedEffect(theme) 回调出去，
                             // 那边会等内容帧提交之后再重画（见 Main.kt 的两个 withFrameNanos），
                             // 所以这里不能提前同步调用，否则标题栏又会抢在内容前面变。
                             onThemeChange = { theme = it },
-                        )
-                        Page.MORE -> when (sub) {
+                        ) }
+                        Page.MORE -> SubContent(sub) { shownSub -> when (shownSub) {
                             MORE_TAB_ABOUT -> AboutPage()
                             MORE_TAB_DIAG -> DiagnosticPage(backend = backend, initialGameRoot = initialGameRoot)
                             else -> HelpPage { target ->
@@ -257,7 +321,8 @@ fun App(
                                     }
                                 }
                             }
-                        }
+                        } }
+                    }
                     }
                 }
             }
@@ -270,7 +335,24 @@ fun App(
         // 不铺底的话底下那一页的字会从副页面后面透出来 —— preview.17 实测就是这样，
         // 「版本选择」四个字和顶栏的品牌名糊成了一团。
         val currentOverlay = overlay
-        if (currentOverlay != null) {
+        // 退出动画那几帧里 overlay 已经被置空，直接读它会让内容先消失、只剩一层空底色
+        // 往右滑出去。记住最近一次非空的那个，动画期间继续画它。用 LaunchedEffect 而不是
+        // 直接在组合里赋值：组合期写 state 会触发额外一轮重组。
+        var lastOverlay by remember { mutableStateOf<Overlay?>(null) }
+        LaunchedEffect(currentOverlay) {
+            if (currentOverlay != null) lastOverlay = currentOverlay
+        }
+        val shownOverlay = currentOverlay ?: lastOverlay
+        // 副页面是整屏换的，位移取宽度的 1/8（1280 宽约 160px），比一级页那 1/24 明显一档，
+        // 但又不到「滑屏」的地步。时长用 SLOW：它比换页「重」一点，慢一点才像被推进来的。
+        val overlayMillis = motionMillis(Motion.SLOW)
+        AnimatedVisibility(
+            visible = currentOverlay != null,
+            enter = fadeIn(tween(overlayMillis)) +
+                slideInHorizontally(tween(overlayMillis)) { full -> full / 8 },
+            exit = fadeOut(tween(overlayMillis)) +
+                slideOutHorizontally(tween(overlayMillis)) { full -> full / 8 },
+        ) {
             Surface(
                 Modifier.fillMaxSize(),
                 color = MaterialTheme.colorScheme.background,
@@ -283,7 +365,8 @@ fun App(
                     Modifier.fillMaxSize()
                         .padding(if (compactOverlay) 16.dp else 24.dp),
                 ) {
-                    when (currentOverlay) {
+                    when (shownOverlay) {
+                        null -> Unit
                         Overlay.InstanceSelect -> InstancePage(
                             backend = backend,
                             initialGameRoot = initialGameRoot,
@@ -321,6 +404,7 @@ fun App(
                                         println("[setup] 实例已删除")
                                         closeOverlay()
                                     },
+                                    uiMode = uiMode,
                                 )
                             }
                         }
@@ -333,9 +417,22 @@ fun App(
         // 底下的页面照常创建，用户在弹窗里犹豫时背景不是一片空白。
         // 「去登录」只切一级页不够 —— 不选二级项的话用户会落在「设置 → 启动」上，
         // 找不到填应用 ID 的那张卡（这个问题在帮助页那儿已经踩过一次）。
-        FirstRunGate(backend) {
-            subSelection[Page.SETTINGS.name] = SETTINGS_TAB_ACCOUNT
-            page = Page.SETTINGS
+        FirstRunGate(
+            backend = backend,
+            onGoAccount = {
+                subSelection[Page.SETTINGS.name] = SETTINGS_TAB_ACCOUNT
+                page = Page.SETTINGS
+            },
+            onFinished = { firstRunTick++ },
+        )
+
+        // 只在第一次进来时问一句「看得全一点还是少一点」。选过就不再问，
+        // 想换了去设置 → 界面。与上面那扇门一样是覆盖式弹窗，底下的页面照常建好。
+        UiModeChooserGate(
+            backend = backend,
+            tick = firstRunTick,
+            onPicked = { uiMode = it },
+        )
         }
     }
 }
@@ -470,14 +567,22 @@ private fun TopTab(
     onClick: () -> Unit,
 ) {
     val accent = MaterialTheme.colorScheme.primary
-    val tint = if (selected) accent else MaterialTheme.colorScheme.onSurfaceVariant
+    // 选中态的颜色跟着走一小段，而不是「啪」地换色：顶栏是鼠标最常经过的地方，
+    // 硬切会让人误以为点错了地方又点回来。
+    val tint by animateColorAsState(
+        targetValue = if (selected) accent else MaterialTheme.colorScheme.onSurfaceVariant,
+        animationSpec = motionTween(Motion.FAST),
+        label = "tabTint",
+    )
+    val tabBackground by animateColorAsState(
+        targetValue = if (selected) accent.copy(alpha = 0.12f) else Color.Transparent,
+        animationSpec = motionTween(Motion.FAST),
+        label = "tabBg",
+    )
     Box(
         modifier
             .padding(horizontal = 2.dp)
-            .background(
-                if (selected) accent.copy(alpha = 0.12f) else Color.Transparent,
-                RoundedCornerShape(10.dp),
-            )
+            .background(tabBackground, RoundedCornerShape(10.dp))
             .clickable(onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
@@ -688,6 +793,22 @@ private fun VersionDot(size: Dp) {
 }
 
 /**
+ * 同一页里换二级项时的过渡：只淡入淡出，不带位移。
+ *
+ * 为什么不做左右滑：左列是竖排的，二级项之间的关系是「上下换一栏」，横向位移会暗示
+ * 「翻到旁边去了」，跟左列的方向对不上。换一级页才带一点点横向位移（见上面 AnimatedContent）。
+ *
+ * 只有下载、设置、更多三页有二级项，所以只有它们用到这一层。
+ */
+@Composable
+private fun SubContent(current: String, content: @Composable (String) -> Unit) {
+    val millis = motionMillis(Motion.BASE)
+    Crossfade(targetState = current, animationSpec = tween(millis), label = "subTab") { shown ->
+        content(shown)
+    }
+}
+
+/**
  * 左列二级项（PCL 的 PageDownloadLeft / PageSetupLeft 那种）。
  *
  * 只有当前一级项配了二级表才画这一列：启动页和联机页没有，内容区就自己铺满
@@ -698,7 +819,7 @@ private fun VersionDot(size: Dp) {
  */
 @Composable
 private fun SubColumn(
-    subs: List<SubTab>,
+    groups: List<SubTabGroup>,
     currentSub: String,
     onSelectSub: (String) -> Unit,
     onRefreshSub: (String) -> Unit,
@@ -714,52 +835,68 @@ private fun SubColumn(
                 .fillMaxHeight()
                 .padding(horizontal = if (compact) 8.dp else 12.dp, vertical = 12.dp),
         ) {
-            subs.forEach { sub ->
-                val active = sub.id == currentSub
-                Row(
-                    Modifier
-                        .fillMaxWidth()
-                        .padding(vertical = 1.dp)
-                        .background(
-                            if (active) {
-                                MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
-                            } else {
-                                Color.Transparent
-                            },
-                            MaterialTheme.shapes.small,
-                        )
-                        .clickable { onSelectSub(sub.id) }
-                        .padding(start = 10.dp, end = 4.dp, top = 8.dp, bottom = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
+            groups.forEach { group ->
+                // 带标题的组前面先画一行小字。只在简洁模式下出现（完整模式只有一个无标题组），
+                // 作用是告诉用户「下面这几项还在，只是不常点」。
+                if (group.label != null) {
                     Text(
-                        sub.label,
-                        Modifier.weight(1f),
-                        style = MaterialTheme.typography.bodyMedium,
-                        fontWeight = if (active) FontWeight.SemiBold else FontWeight.Normal,
-                        color = if (active) {
-                            MaterialTheme.colorScheme.primary
-                        } else {
-                            MaterialTheme.colorScheme.onSurfaceVariant
-                        },
+                        group.label,
+                        Modifier.padding(start = 10.dp, top = 10.dp, bottom = 2.dp),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
-                    if (sub.refreshable) {
-                        // 用「↻」字符而不是 material-icons：ui 模块没有 icons 依赖，
-                        // 为一个按钮引一整个图标库不划算。
-                        IconButton(
-                            onClick = { onRefreshSub(sub.id) },
-                            modifier = Modifier.size(24.dp),
-                        ) {
-                            Text(
-                                "↻",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
+                }
+                group.tabs.forEach { sub ->
+                    val active = sub.id == currentSub
+                    // 选中底色淡进去而不是跳过去：二级项切换本身是 Crossfade，
+                    // 左边这一列如果硬切，两边节奏就对不上了。
+                    val rowBackground by animateColorAsState(
+                        targetValue = if (active) {
+                            MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
+                        } else {
+                            Color.Transparent
+                        },
+                        animationSpec = motionTween(Motion.FAST),
+                        label = "subBg",
+                    )
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 1.dp)
+                            .background(rowBackground, MaterialTheme.shapes.small)
+                            .clickable { onSelectSub(sub.id) }
+                            .padding(start = 10.dp, end = 4.dp, top = 8.dp, bottom = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            sub.label,
+                            Modifier.weight(1f),
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = if (active) FontWeight.SemiBold else FontWeight.Normal,
+                            color = if (active) {
+                                MaterialTheme.colorScheme.primary
+                            } else {
+                                MaterialTheme.colorScheme.onSurfaceVariant
+                            },
+                        )
+                        if (sub.refreshable) {
+                            // 用「↻」字符而不是 material-icons：ui 模块没有 icons 依赖，
+                            // 为一个按钮引一整个图标库不划算。
+                            IconButton(
+                                onClick = { onRefreshSub(sub.id) },
+                                modifier = Modifier.size(24.dp),
+                            ) {
+                                Text(
+                                    "↻",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
                         }
                     }
                 }
             }
-            Spacer(Modifier.weight(1f));
+            Spacer(Modifier.weight(1f))
             Text(
                 Brand.DISCLAIMER_SHORT,
                 style = MaterialTheme.typography.labelSmall,

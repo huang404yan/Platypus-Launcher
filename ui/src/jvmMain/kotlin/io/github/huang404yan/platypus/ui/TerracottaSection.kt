@@ -412,7 +412,7 @@ internal fun TerracottaSection(gameRoot: String?, onNotice: (String) -> Unit = {
                 ) { Text("加入房间") }
             }
 
-            if (notice.isNotBlank()) TerracottaHint(notice)
+            NoticeFade(notice) { shown -> TerracottaHint(shown) }
 
             Text(
                 "建房那一步要你先在游戏里按 Esc →「对局域网开放」→「开始」，陶瓦才拿得到那个世界。" +

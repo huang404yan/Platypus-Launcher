@@ -149,6 +149,25 @@ data class LauncherSettings(
      * 而 settings.json 是跟着游戏目录走的（见 [io.github.huang404yan.platypus.core.edition.FirstRun]）。
      */
     val firstRunAt: Long = 0L,
+    /**
+     * 界面模式：`full` 完整、`simple` 简洁；空串表示还没选过，按完整模式渲染。
+     *
+     * 存 id 字符串而不是布尔或下标，理由同 [theme]：以后加第三档（自定义）不用改读法，
+     * 认不出来的一律当完整模式（[io.github.huang404yan.platypus.ui.UiMode.of]）。
+     *
+     * 这一格**只影响渲染**：简洁模式下藏起来的二级项、区块仍然存在，切回完整模式原样回来，
+     * 盘上的实例、存档、模组一个字节都不动。所以它不进 [normalize] 的白名单校验 ——
+     * 认不出的值让读取方退默认，不要把用户手改的字符串洗成空。
+     */
+    val uiMode: String = "",
+    /**
+     * 关掉界面动效（2026-11-21 加）。
+     *
+     * 远程桌面、录屏、老机器上动画会拖慢操作，而「这台机器跑不跑得动动画」没法自动判断
+     *（帧率采样要在渲染时才有数，第一帧就已经在动了）。所以给一个直白的开关，
+     * 打开后所有过渡时长压到最短，功能不受影响。
+     */
+    val reduceMotion: Boolean = false,
     /** 最近一次写盘时间（毫秒）；0 表示还没写过。 */
     val updatedAt: Long = 0L,
 ) {
@@ -169,6 +188,7 @@ data class LauncherSettings(
             activeAccountUuid = raw.activeAccountUuid.trim(),
             microsoftClientId = raw.microsoftClientId.trim().trim('"').trim(),
             theme = raw.theme.trim().lowercase(),
+            uiMode = raw.uiMode.trim().lowercase(),
             downloadSource = raw.downloadSource.trim().lowercase(),
             serverBase = Endpoints.normalizeBase(raw.serverBase),
             curseForgeApiKey = raw.curseForgeApiKey.trim().trim('"').trim(),

@@ -56,6 +56,9 @@ object InstanceScanner {
             val dirs = versionsDir.listFiles { f -> f.isDirectory }?.sortedBy { it.name }.orEmpty()
             for (dir in dirs) {
                 val id = dir.name
+                // 正在装的目录不列出来：装到一半的 json 已经在盘上了，
+                // 但文件还没下完、加载器还没叠好，提前出现只会让人以为装重了。
+                if (InstallMark.isMarked(dir)) continue
                 val jsonFile = File(dir, "$id.json")
                 if (!jsonFile.isFile) {
                     warnings += "跳过 $id：缺少 $id.json"
@@ -141,22 +144,26 @@ object InstanceScanner {
      *  1.20.1-OptiFine_HD_U_I6
      */
     fun detectLoader(versionId: String): Pair<LoaderKind, String?> {
-        val lower = versionId.lowercase()
+        // 复制出来的实例目录名带 _2 这样的后缀（见 InstanceDuplicator），先去掉再匹配。
+        // 不去的话 fabric / quilt 那两条以 $ 结尾的正则会失配（它们只吃数字和点），
+        // 加载器版本会退化成 null；forge / neoforge 的字符集虽然吃后缀，但会把 _2 一起吞进版本号。
+        val base = InstanceDuplicator.stripCopySuffix(versionId)
+        val lower = base.lowercase()
         return when {
-            lower.contains("neoforge") -> LoaderKind.NEOFORGE to matchVersion(versionId, "neoforge[-_]([0-9][0-9A-Za-z.\\-]*)")
+            lower.contains("neoforge") -> LoaderKind.NEOFORGE to matchVersion(base, "neoforge[-_]([0-9][0-9A-Za-z.\\-]*)")
             // quilt-loader-0.23.1-1.20.1（Quilt 官方 profile 的 id）与
             // 1.20.1-quilt-0.24.0（本启动器自己起的名字）两种都认，原因同 Fabric。
             lower.contains("quilt") -> LoaderKind.QUILT to (
-                matchVersion(versionId, "quilt[-_]loader[-_]([0-9][0-9.]*)")
-                    ?: matchVersion(versionId, "quilt[-_]([0-9][0-9.]*)$")
+                matchVersion(base, "quilt[-_]loader[-_]([0-9][0-9.]*)")
+                    ?: matchVersion(base, "quilt[-_]([0-9][0-9.]*)$")
                 )
             // fabric-loader-0.16.14-1.20.1（Fabric 官方 profile 的 id）与
             // 1.20.1-fabric-0.16.14（本启动器自己起的名字）两种都认。
             lower.contains("fabric") -> LoaderKind.FABRIC to (
-                matchVersion(versionId, "fabric[-_]loader[-_]([0-9][0-9.]*)")
-                    ?: matchVersion(versionId, "fabric[-_]([0-9][0-9.]*)$")
+                matchVersion(base, "fabric[-_]loader[-_]([0-9][0-9.]*)")
+                    ?: matchVersion(base, "fabric[-_]([0-9][0-9.]*)$")
                 )
-            lower.contains("forge") -> LoaderKind.FORGE to matchVersion(versionId, "forge[-_]([0-9][0-9A-Za-z.\\-]*)")
+            lower.contains("forge") -> LoaderKind.FORGE to matchVersion(base, "forge[-_]([0-9][0-9A-Za-z.\\-]*)")
             lower.contains("optifine") -> LoaderKind.OPTIFINE to null
             else -> LoaderKind.VANILLA to null
         }
@@ -164,9 +171,11 @@ object InstanceScanner {
 
     /** 1.20.1-Forge_47.4.28 → 1.20.1；fabric-loader-0.15.11-1.20.1 → 1.20.1；取不到返回 null。 */
     fun gameVersionFromId(versionId: String): String? {
-        GameVersionRegex.find(versionId)?.let { return it.groupValues[1] }
+        // 同 detectLoader：先把复制后缀去掉，否则 1.20.1_2 这种会被结尾锚定的那条漏掉。
+        val base = InstanceDuplicator.stripCopySuffix(versionId)
+        GameVersionRegex.find(base)?.let { return it.groupValues[1] }
         // fabric-loader-0.15.11-1.20.1 / quilt-loader-0.23.1-1.20.1：游戏版本在结尾
-        return TrailingGameVersionRegex.find(versionId)?.groupValues?.get(1)
+        return TrailingGameVersionRegex.find(base)?.groupValues?.get(1)
     }
 
     private fun matchVersion(text: String, pattern: String): String? {

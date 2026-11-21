@@ -451,6 +451,36 @@ tasks.register<JavaExec>("isolationSmoke") {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// 重复导入验收：同一个（游戏版本, 加载器）连导入两个包，必须落成两条实例
+//
+//   gradle :app-desktop:duplicateImportSmoke [-PdupDir=dist/_dup-import-smoke]
+//          [-PdupLoader=0.15.11]
+//
+// 现场造两个 .mrpack（各带一个模组，游戏版本与 loader 版本完全相同），
+// 连续导入两次，断言第二个落在带 _2 后缀的新目录里、两边 mods/ 互不污染、
+// 副本 json 的 id 已改写成新目录名。不启动游戏，需要联网下载两个小 jar。
+// ─────────────────────────────────────────────────────────────────────────────
+tasks.register<JavaExec>("duplicateImportSmoke") {
+    group = "verification"
+    description = "无头验收：同版本同加载器连导两个整合包，验证不覆盖而是新建（开发期用，需联网）"
+    dependsOn(tasks.named("testClasses"))
+    mainClass.set("io.github.huang404yan.platypus.desktop.DuplicateImportSmokeKt")
+    classpath = sourceSets["test"].runtimeClasspath
+    workingDir = rootProject.projectDir
+    jvmArgs("-Dfile.encoding=UTF-8")
+
+    argumentProviders.add(
+        CommandLineArgumentProvider {
+            val dir = providers.gradleProperty("dupDir").orElse("dist/_dup-import-smoke").get()
+            listOf(
+                rootProject.file(dir).absolutePath,
+                providers.gradleProperty("dupLoader").orElse("0.15.11").get(),
+            )
+        },
+    )
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // 品牌与打包参数
 //
 // 版本号唯一真源是根 build.gradle.kts 的 allprojects.version；这里只按「版本号里

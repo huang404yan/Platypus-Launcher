@@ -602,6 +602,10 @@ private fun AboutPage() {
 
         HorizontalDivider()
 
+        UpdateSection()
+
+        HorizontalDivider()
+
         CreditsSection()
 
         HorizontalDivider()

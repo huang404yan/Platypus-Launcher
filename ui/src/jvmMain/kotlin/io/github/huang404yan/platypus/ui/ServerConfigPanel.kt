@@ -367,9 +367,9 @@ internal fun ServerConfigPanel(
             }
         }
 
-        if (notice.isNotBlank()) {
+        NoticeFade(notice) { shown ->
             Text(
-                notice,
+                shown,
                 style = MaterialTheme.typography.bodySmall,
                 color = if (noticeIsError) {
                     MaterialTheme.colorScheme.error

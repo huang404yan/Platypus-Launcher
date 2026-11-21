@@ -290,12 +290,14 @@ internal fun SettingsPage(theme: LauncherTheme = LauncherTheme.AUTO, onThemeChan
 
         SettingCard(
             "游戏语言",
-            "进游戏时写进 options.txt 的 lang: 那一行。只改这一行，别的键不动。",
+            "每次进游戏前都写一次 options.txt 的 lang: 那一行。只改这一行，别的键不动。",
         ) {
             Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text(
+                    // 启动器界面只有中文，能跟随的只有系统语言；这么写是为了别让人以为
+                    // 「跟随」跟的是启动器界面。
                     if (gameLanguage.isBlank()) {
-                        "现在跟随系统：这台手机映射成「" + GameLanguage.labelOf(GameLanguage.systemDefault()) +
+                        "现在跟随系统语言：这台手机映射成「" + GameLanguage.labelOf(GameLanguage.systemDefault()) +
                             "」（" + GameLanguage.systemDefault() + "）。"
                     } else {
                         "现在固定用「" + GameLanguage.labelOf(gameLanguage) + "」（" + gameLanguage + "）。"
@@ -303,8 +305,8 @@ internal fun SettingsPage(theme: LauncherTheme = LauncherTheme.AUTO, onThemeChan
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                // 「跟随系统」排第一项，后面是固定语言。手机上竖排一行一个，比挤在 FlowRow 里好点。
-                (listOf(GameLanguage.Choice("", "跟随系统")) + GameLanguage.CHOICES).forEach { option ->
+                // 「跟随系统语言」排第一项，后面是固定语言。手机上竖排一行一个，比挤在 FlowRow 里好点。
+                (listOf(GameLanguage.Choice("", "跟随系统语言")) + GameLanguage.CHOICES).forEach { option ->
                     val selected = option.id == gameLanguage
                     Card(
                         modifier = Modifier.fillMaxWidth().clickable { gameLanguage = option.id },

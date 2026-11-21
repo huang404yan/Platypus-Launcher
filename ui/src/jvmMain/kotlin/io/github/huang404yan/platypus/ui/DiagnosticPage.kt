@@ -123,9 +123,9 @@ fun DiagnosticPage(backend: LauncherBackend? = null, initialGameRoot: String? = 
                 enabled = !detecting,
             ) { Text(if (detecting) "探测中…" else "重新收集") }
         }
-        if (notice.isNotBlank()) {
+        NoticeFade(notice) { shown ->
             Text(
-                notice,
+                shown,
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )

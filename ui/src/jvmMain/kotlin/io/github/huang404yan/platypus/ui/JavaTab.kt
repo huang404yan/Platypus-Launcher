@@ -299,7 +299,7 @@ internal fun JavaTab(
             )
         }
 
-        if (notice.isNotBlank()) {
+        NoticeFade(notice) { shown ->
             Card(
                 Modifier.fillMaxWidth(),
                 colors = CardDefaults.cardColors(
@@ -310,7 +310,7 @@ internal fun JavaTab(
                     },
                 ),
             ) {
-                Text(notice, Modifier.padding(12.dp), style = MaterialTheme.typography.bodySmall)
+                Text(shown, Modifier.padding(12.dp), style = MaterialTheme.typography.bodySmall)
             }
         }
     }
