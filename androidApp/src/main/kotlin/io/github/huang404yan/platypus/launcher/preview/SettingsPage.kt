@@ -20,6 +20,7 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -36,6 +37,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import io.github.huang404yan.platypus.core.Brand
+import io.github.huang404yan.platypus.core.download.DownloadPreference
 import io.github.huang404yan.platypus.core.instance.Instance
 import io.github.huang404yan.platypus.core.instance.InstanceLayouts
 import io.github.huang404yan.platypus.core.instance.MemoryDefaults
@@ -62,6 +64,10 @@ import java.io.File
  * 新建实例默认隔离、游戏语言。
  * 实例自己的内存与隔离仍然存在 instances.json 里，这里只决定「第一次建实例按什么来」。
  */
+/** 档位按钮。与桌面端同一组数字，手机上这几档就够按了。 */
+private val CONNECTION_PRESETS =
+    listOf(8, DownloadPreference.DEFAULT_CONNECTIONS, 32, DownloadPreference.MAX_CONNECTIONS)
+
 @Composable
 internal fun SettingsPage(theme: LauncherTheme = LauncherTheme.AUTO, onThemeChange: (LauncherTheme) -> Unit = {}) {
     val scope = rememberCoroutineScope()
@@ -80,6 +86,8 @@ internal fun SettingsPage(theme: LauncherTheme = LauncherTheme.AUTO, onThemeChan
     var defaultIsolation by remember { mutableStateOf(true) }
     // 游戏语言：空串 = 跟随系统（进游戏时按手机语言映射一个），其余是这个值的原样。
     var gameLanguage by remember { mutableStateOf("") }
+    // 同时下几个文件；0 = 自动（交给 DownloadPreference.effectiveConnections 折算）。
+    var connections by remember { mutableStateOf(0) }
     var status by remember { mutableStateOf("") }
     // 「自动」在安卓上按设备的物理内存算，与桌面端同一个 MemoryDefaults。
     // 拿不到（ActivityManager 异常、或旧机型不给 totalMem）就是 0，autoMb 会退回 2048。
@@ -99,8 +107,10 @@ internal fun SettingsPage(theme: LauncherTheme = LauncherTheme.AUTO, onThemeChan
             .toString()
         defaultIsolation = settings.defaultIsolation
         gameLanguage = settings.gameLanguage
+        connections = DownloadPreference.normalizeConnections(settings.downloadConnections)
         // 进程级镜像：起 JVM 前手机这边也是先读设置再灌进去，这里顺手对齐一次。
         InstanceLayouts.defaultIsolated = settings.defaultIsolation
+        DownloadPreference.connections = connections
         loaded = true
     }
 
@@ -123,6 +133,7 @@ internal fun SettingsPage(theme: LauncherTheme = LauncherTheme.AUTO, onThemeChan
                         defaultMemoryAuto = memoryAuto,
                         defaultIsolation = defaultIsolation,
                         gameLanguage = gameLanguage,
+                        downloadConnections = connections,
                         theme = theme.id,
                     ),
                 )
@@ -130,7 +141,9 @@ internal fun SettingsPage(theme: LauncherTheme = LauncherTheme.AUTO, onThemeChan
             username = saved.offlineUsername
             defaultIsolation = saved.defaultIsolation
             gameLanguage = saved.gameLanguage
+            connections = DownloadPreference.normalizeConnections(saved.downloadConnections)
             InstanceLayouts.defaultIsolated = saved.defaultIsolation
+            DownloadPreference.connections = connections
             memoryAuto = saved.defaultMemoryAuto
             memoryMb = MemoryDefaults.resolve(saved.defaultMemoryMb, saved.defaultMemoryAuto, deviceTotalMemoryMb(context))
                 .toString()
@@ -336,6 +349,65 @@ internal fun SettingsPage(theme: LauncherTheme = LauncherTheme.AUTO, onThemeChan
                 }
             }
         }
+        SettingCard(
+            "同时下几个文件",
+            "一次装多少个文件并发下。手机上的网络本来就比电脑差，开太多反而会被镜像当成抓取，"
+                + "比默认还慢，所以上限只到 " + DownloadPreference.MAX_CONNECTIONS + "。",
+        ) {
+            val auto = connections <= 0
+            val effective = if (auto) DownloadPreference.DEFAULT_CONNECTIONS else connections
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text("自动（" + DownloadPreference.DEFAULT_CONNECTIONS + " 条）", style = MaterialTheme.typography.bodyMedium)
+                    Text(
+                        "跟着代码里那套默认走。单独调过之后想退回，把右边开关打开就行。",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Switch(
+                    checked = auto,
+                    onCheckedChange = { want -> connections = if (want) 0 else effective },
+                    enabled = loaded,
+                )
+            }
+            Slider(
+                value = effective.toFloat(),
+                onValueChange = { raw ->
+                    connections = raw.toInt()
+                        .coerceIn(DownloadPreference.MIN_CONNECTIONS, DownloadPreference.MAX_CONNECTIONS)
+                },
+                valueRange = DownloadPreference.MIN_CONNECTIONS.toFloat()..DownloadPreference.MAX_CONNECTIONS.toFloat(),
+                steps = DownloadPreference.MAX_CONNECTIONS - DownloadPreference.MIN_CONNECTIONS - 1,
+                enabled = loaded && !auto,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Text(
+                if (auto) "现在是自动：" + DownloadPreference.DEFAULT_CONNECTIONS + " 条。"
+                else "现在是 " + connections + " 条。",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.primary,
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                CONNECTION_PRESETS.forEach { preset ->
+                    if (preset == connections && !auto) {
+                        Button(onClick = { connections = preset }, enabled = false) { Text(preset.toString()) }
+                    } else {
+                        OutlinedButton(onClick = { connections = preset }, enabled = loaded) { Text(preset.toString()) }
+                    }
+                }
+            }
+            Text(
+                "这一项只管「同时下几个文件」。单个文件内部的分段不开放调整："
+                    + "实测国内镜像对多段并发很敏感，段数开大反而慢，那个数写在下载器里不让人改。",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Button(onClick = { scope.launch { save() } }, enabled = loaded) { Text("保存") }
             OutlinedButton(
@@ -346,6 +418,7 @@ internal fun SettingsPage(theme: LauncherTheme = LauncherTheme.AUTO, onThemeChan
                     memoryMb = autoMemoryMb.toString()
                     defaultIsolation = true
                     gameLanguage = ""
+                    connections = 0
                 },
                 enabled = loaded,
             ) { Text("填回默认值") }

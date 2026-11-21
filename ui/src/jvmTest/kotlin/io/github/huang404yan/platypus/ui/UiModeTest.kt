@@ -15,12 +15,20 @@ import kotlin.test.assertTrue
 class UiModeTest {
 
     @Test
-    fun `空串与认不出的值都退完整模式`() {
-        // 退完整模式不会让人找不到功能，退简洁模式会让人以为功能没了
-        assertEquals(UiMode.FULL, UiMode.of(""))
-        assertEquals(UiMode.FULL, UiMode.of("  "))
-        assertEquals(UiMode.FULL, UiMode.of("simple2"))
-        assertEquals(UiMode.FULL, UiMode.of("中"))
+    fun `默认档是简洁`() {
+        // 2026-11-21 用户定的口径：默认简洁，为的是老机器第一屏出来得快。
+        // 这一条钉住的是「默认值不许被随手改回去」——改它要连着改用户口径。
+        assertEquals(UiMode.SIMPLE, UiMode.DEFAULT)
+    }
+
+    @Test
+    fun `空串与认不出的值都退默认档`() {
+        // 空串是从没选过（或者用户把这一格删了），落到默认档；
+        // 认不出的值多半是以后版本写的，退回默认档也比照着乱猜强。
+        assertEquals(UiMode.DEFAULT, UiMode.of(""))
+        assertEquals(UiMode.DEFAULT, UiMode.of("  "))
+        assertEquals(UiMode.DEFAULT, UiMode.of("simple2"))
+        assertEquals(UiMode.DEFAULT, UiMode.of("中"))
     }
 
     @Test

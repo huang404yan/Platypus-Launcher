@@ -24,6 +24,7 @@ import androidx.compose.material3.Checkbox
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -74,6 +75,9 @@ const val SETTINGS_TAB_ACCOUNT = "account"
  * 2026-11-15 起它不再是一个二级项（JavaTab 直接跟在「启动」卡片后面），但常量留着：帮助页与旧深链还得能指到它，且它作为「启动」页里那一块的锚点。
  */
 const val SETTINGS_TAB_JAVA = "java"
+
+/** 下载连接数的几个常停档位：8 条是保守值，16 条是代码里的默认，64 条是上限。 */
+private val CONNECTION_PRESETS = listOf(8, DownloadPreference.DEFAULT_CONNECTIONS, 32, DownloadPreference.MAX_CONNECTIONS)
 
 /** 「下载」二级项的 id：下载源偏好。 */
 const val SETTINGS_TAB_DOWNLOAD = "download"
@@ -128,7 +132,7 @@ fun SettingsPage(
      * 与 [theme] 同一套约定：由 [App] 持有，这一页只负责「把用户选的存下来」
      * 和「告诉上层立刻重画」—— 左列怎么分组、各页露哪些块都由上层那份状态决定。
      */
-    uiMode: UiMode = UiMode.FULL,
+    uiMode: UiMode = UiMode.DEFAULT,
     /** 用户点了另一档模式：上层立刻换，同时这一页把它写进设置。 */
     onUiModeChange: (UiMode) -> Unit = {},
     /**
@@ -204,9 +208,11 @@ fun SettingsPage(
      * 与 [theme] 不同，它同时由上层（[App]）传进来：那一份是「正在生效的」，
      * 这一份是「设置文件里记着的」。正常情况下两者一致，点一下就是先改上层再写盘。
      */
-    var uiModeText by remember { mutableStateOf(UiMode.FULL.id) }
+    var uiModeText by remember { mutableStateOf(UiMode.DEFAULT.id) }
     /** 这一页手上那份动效开关。与 [uiModeText] 同理：上层那份正在生效，这份是要写进文件的。 */
     var motionText by remember { mutableStateOf(false) }
+    /** 同时下几个文件；0 = 自适应（交给 [DownloadPreference.effectiveConnections] 换算）。 */
+    var downloadConnections by remember { mutableStateOf(0) }
     /**
      * 这一页读过的那份设置，**原样留着**，保存时在它上面 copy。
      *
@@ -242,6 +248,7 @@ fun SettingsPage(
         serverBase = settings.serverBase
         uiModeText = UiMode.of(settings.uiMode).id
         motionText = settings.reduceMotion
+        downloadConnections = DownloadPreference.normalizeConnections(settings.downloadConnections)
         base = settings
         loaded = true
         loadedFrom = (repository as? JsonSettingsRepository)?.path.orEmpty()
@@ -534,6 +541,56 @@ fun SettingsPage(
     }
 
     /**
+     * 立刻把「同时下几个文件」写进设置。
+     *
+     * 与换下载源同一套：这是立刻要生效的东西（下一次下载就按新数开连接），
+     * 让它等「保存」按钮的话，用户拖完滑条还得记得再按一下才真的动。
+     * 写盘失败退回原值并把提示打到顶部 —— 与 [persistUiMode] 同理，
+     * 停在新值但重启又变回去比不给调更难受。
+     */
+    fun persistConnections(picked: Int, previous: Int) {
+        val cleaned = DownloadPreference.normalizeConnections(picked)
+        downloadConnections = cleaned
+        DownloadPreference.connections = cleaned
+        val parsedMemory = memoryText.trim().toIntOrNull() ?: Instance.DEFAULT_MEMORY_MB
+        scope.launch {
+            runCatching {
+                repository.save(
+                    base.copy(
+                        offlineUsername = normalizeOfflineUsername(username),
+                        defaultGameRoot = gameRoot.trim(),
+                        defaultMemoryMb = Instance.clampMemoryMb(parsedMemory),
+                        activeAccountUuid = activeAccountUuid,
+                        microsoftClientId = microsoftClientId,
+                        theme = theme.id,
+                        uiMode = uiModeText,
+                        reduceMotion = motionText,
+                        downloadSource = downloadSource,
+                        downloadConnections = cleaned,
+                        autoBackupEnabled = autoBackupEnabled,
+                        autoBackupHours = backupPolicyNow().intervalHours,
+                        autoBackupKeep = backupPolicyNow().keep,
+                        curseForgeApiKey = curseForgeKey,
+                        serverBase = serverBase,
+                        defaultIsolation = defaultIsolation,
+                        gameLanguage = gameLanguage,
+                    ),
+                )
+            }.onSuccess { stored ->
+                base = stored
+                savedAt = stored.updatedAt
+                noticeIsError = false
+                notice = ""
+            }.onFailure {
+                downloadConnections = previous
+                DownloadPreference.connections = previous
+                noticeIsError = true
+                notice = "下载连接数没能存下来：" + (it.message ?: it.javaClass.simpleName)
+            }
+        }
+    }
+
+    /**
      * 立刻把「少动一点」写进设置并让上层重画。
      *
      * 与换配色、换模式同一套：这是即时反馈的事，不该等一个「保存」按钮。
@@ -764,6 +821,8 @@ fun SettingsPage(
                 serviceReady = Endpoints.serviceReady(),
                 onServerBaseChange = { serverBase = it },
                 onSaveServerBase = { saveServerBase(it) },
+                connections = downloadConnections,
+                onPickConnections = { picked -> persistConnections(picked, base.downloadConnections) },
             )
             SETTINGS_TAB_SAVES -> SavesTab(
                 enabled = autoBackupEnabled,
@@ -1037,6 +1096,8 @@ private fun DownloadTab(
     serviceReady: Boolean,
     onServerBaseChange: (String) -> Unit,
     onSaveServerBase: (String) -> Unit,
+    connections: Int,
+    onPickConnections: (Int) -> Unit,
 ) {
     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         // 空壳包才显示这一格：完整版的地址在包里写死，用户没有可填的东西。
@@ -1091,6 +1152,62 @@ private fun DownloadTab(
                     onSelect = { onPick(option) },
                 )
             }
+        }
+        SettingCard(
+            "同时下几个文件",
+            "一次装多少个文件并发下。调大能压满带宽，但开过头会让镜像把这一批请求当抓取限流 —— " +
+                "反而比默认还慢，所以上限只到 " + DownloadPreference.MAX_CONNECTIONS + "。",
+        ) {
+            val auto = connections <= 0
+            val effective = if (auto) DownloadPreference.DEFAULT_CONNECTIONS else connections
+            Row(
+                Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text("自动（" + DownloadPreference.DEFAULT_CONNECTIONS + " 条）", style = MaterialTheme.typography.bodyMedium)
+                    Text(
+                        "跟着代码里那套默认走。单独调过之后想退回，把上面开关打开就行。",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Switch(checked = auto, onCheckedChange = { want -> onPickConnections(if (want) 0 else effective) })
+            }
+            Slider(
+                value = effective.toFloat(),
+                onValueChange = { raw -> onPickConnections(raw.toInt().coerceIn(DownloadPreference.MIN_CONNECTIONS, DownloadPreference.MAX_CONNECTIONS)) },
+                valueRange = DownloadPreference.MIN_CONNECTIONS.toFloat()..DownloadPreference.MAX_CONNECTIONS.toFloat(),
+                steps = DownloadPreference.MAX_CONNECTIONS - DownloadPreference.MIN_CONNECTIONS - 1,
+                enabled = !auto,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Text(
+                if (auto) "现在是自动：" + DownloadPreference.DEFAULT_CONNECTIONS + " 条。"
+                else "现在是 " + connections + " 条。",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.primary,
+            )
+            FlowRow(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalArrangement = Arrangement.spacedBy(2.dp),
+            ) {
+                CONNECTION_PRESETS.forEach { preset ->
+                    if (preset == connections && !auto) {
+                        Button(onClick = { onPickConnections(preset) }, enabled = false) { Text(preset.toString()) }
+                    } else {
+                        OutlinedButton(onClick = { onPickConnections(preset) }) { Text(preset.toString()) }
+                    }
+                }
+            }
+            Text(
+                "这一项只管「同时下几个文件」。单个文件内部的分段不开放调整：" +
+                    "实测国内镜像对多段并发很敏感，段数开大反而慢，那个数写在下载器里不让人改。",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
         SettingCard(
             "镜像到底是什么",

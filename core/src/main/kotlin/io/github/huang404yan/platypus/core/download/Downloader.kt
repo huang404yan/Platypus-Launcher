@@ -30,6 +30,22 @@ data class DownloadProgress(
      * 显示一个假的 100% 比不显示更糟。
      */
     val unknownSizeFiles: Int = 0,
+    /**
+     * 最近一次真正发出去的地址。
+     *
+     * 候选表是「主地址 + 镜像」按下载源偏好排出来的，主地址失败会自动退到下一个。
+     * 界面要显示的「现在走哪个源」就该读这个字段，而不是读设置里的偏好 ——
+     * 两者不一致的时候（镜像挂了、退到官方源）才是用户最需要知道的那件事。
+     */
+    val activeUrl: String = "",
+    /**
+     * 最后一次真正从网络读到字节的时刻（[System.currentTimeMillis]），0 表示还没开始读。
+     *
+     * 断网之后进度条还会再往前挪一小段，是因为内核缓冲区里剩的那几 KB 会被一次性吐出来。
+     * 有了这个时间戳，界面才能如实说「已经 N 秒没收到数据」，而不是让一个还在缓慢上涨的
+     * 进度条冒充「还在下载」。
+     */
+    val lastByteAtMillis: Long = 0L,
 ) {
     val fraction: Float
         get() = if (totalBytes <= 0) 0f else (completedBytes.toFloat() / totalBytes).coerceIn(0f, 1f)

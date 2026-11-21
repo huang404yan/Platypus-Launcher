@@ -18,13 +18,25 @@ enum class UiMode(val id: String, val label: String) {
 
     companion object {
         /**
+         * 没选过时用哪一档。**默认简洁。**
+         *
+         * 2026-11-21 用户定的口径：默认简洁，理由是性能 —— 简洁模式少画一半二级项、
+         * 少建几块折叠区，老机器上第一屏就出来得快。要全的自己去设置里点一下，
+         * 或者第一次进主界面时在那张卡上选一次。
+         *
+         * 换档只改渲染，盘上东西一个字节都不动，所以默认哪一档不会把谁的东西藏丢。
+         */
+        val DEFAULT: UiMode = SIMPLE
+
+        /**
          * 把设置里存的那个字符串读成模式。
          *
-         * 空串与认不出的值一律退完整模式：完整模式什么都有，退过去不会让人找不到功能；
-         * 退成简洁模式则会让人以为功能没了。
+         * 空串（从没选过）与认不出的值都退 [DEFAULT]：认不出的值多半是以后版本写的，
+         * 落到默认档至少是用户当初选过的那一档；把设置文件里写坏的一个词当成需求
+         * 去猜「他是不是想要完整模式」不值得。
          */
         fun of(raw: String): UiMode =
-            entries.firstOrNull { it.id == raw.trim().lowercase() } ?: FULL
+            entries.firstOrNull { it.id == raw.trim().lowercase() } ?: DEFAULT
     }
 }
 

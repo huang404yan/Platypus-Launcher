@@ -130,7 +130,7 @@ internal fun InstanceDetailPanel(
      * 少了的那两节不是功能消失：高级里的隔离开关在「保存」面板同一份数据上、导出在总览底部
      * 也有一行按钮，两档都能点到，只是不占一个常驻的导航项。
      */
-    uiMode: UiMode = UiMode.FULL,
+    uiMode: UiMode = UiMode.DEFAULT,
 ) {
     var details by remember(instance.directory) { mutableStateOf<InstanceDetails?>(null) }
     var loading by remember(instance.directory) { mutableStateOf(true) }

@@ -56,6 +56,19 @@ class FormatHelpersTest {
     }
 
     @Test
+    fun `当前下载源报出镜像还是官方源`() {
+        // 界面那行「正在下载 · 镜像 bmclapi2.bangbang93.com」就靠这个函数。
+        assertEquals("镜像 bmclapi2.bangbang93.com", downloadSourceLabel("https://bmclapi2.bangbang93.com/version/1.20.1/client"))
+        assertEquals("官方源 piston-data.mojang.com", downloadSourceLabel("https://piston-data.mojang.com/v1/objects/abcd/client.jar"))
+    }
+
+    @Test
+    fun `认不出的地址只说类别不报主机名`() {
+        assertEquals("官方源", downloadSourceLabel("并不像一个地址"))
+        assertEquals("官方源", downloadSourceLabel(""))
+    }
+
+    @Test
     fun `字节数不会出负数`() {
         assertTrue(formatBytes(-1).endsWith(" B"))
     }

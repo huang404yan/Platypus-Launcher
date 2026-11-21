@@ -15,8 +15,10 @@ import java.net.URL
 import java.nio.file.Files
 import java.security.MessageDigest
 import java.util.Collections
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicLong
+import java.util.concurrent.atomic.AtomicReference
 
 /**
  * 基于 HttpURLConnection 的下载器。
@@ -36,7 +38,9 @@ import java.util.concurrent.atomic.AtomicLong
  * - `mirrors` 在 `url` 失败后依次尝试，每个地址最多试 `retries + 1` 次。
  */
 class HttpDownloader(
-    private val parallelism: Int = DEFAULT_PARALLELISM,
+    // 默认值取进程级的下载偏好，而不是写死 DEFAULT_PARALLELISM：
+    // 用户在设置里调的「同时下几个文件」要在这里生效，而三十多处创建点不必各改一遍。
+    private val parallelism: Int = DownloadPreference.effectiveConnections(),
     private val retries: Int = DEFAULT_RETRIES,
     private val connectTimeoutMs: Int = DEFAULT_CONNECT_TIMEOUT_MS,
     private val readTimeoutMs: Int = DEFAULT_READ_TIMEOUT_MS,
@@ -61,6 +65,12 @@ class HttpDownloader(
         val failures = Collections.synchronizedList(mutableListOf<DownloadFailure>())
         val lock = Any()
         var lastEmitAt = 0L
+        // 界面要的两样东西：现在实际在跟哪个地址说话、最后一次收到字节是什么时候。
+        // 用原子量而不是普通 var：并发下载时每个文件都在改它们，而 emit 在锁外读。
+        val activeAddress = AtomicReference("")
+        val lastByteAt = AtomicLong(0L)
+        // 这一批里哪些地址已经不可信：见 AddressMemo 的说明。
+        val memo = AddressMemo()
 
         fun emit(force: Boolean) {
             synchronized(lock) {
@@ -76,6 +86,8 @@ class HttpDownloader(
                         resumedFiles = resumedFiles.get(),
                         resumedBytes = resumedBytes.get(),
                         unknownSizeFiles = unknownSizeFiles,
+                        activeUrl = activeAddress.get(),
+                        lastByteAtMillis = lastByteAt.get(),
                     ),
                 )
             }
@@ -102,7 +114,13 @@ class HttpDownloader(
                     val bigEnough = item.size >= SEGMENT_THRESHOLD_BYTES &&
                         (totalFiles == 1 || item.size.toDouble() / totalBytes.coerceAtLeast(1L) >= 0.5)
                     val allowSegment = bigEnough && segmentSlots.getAndUpdate { if (it > 0) it - 1 else it } > 0
-                    val outcome = fetch(item, allowSegment = allowSegment) { delta ->
+                    val outcome = fetch(
+                        item = item,
+                        allowSegment = allowSegment,
+                        memo = memo,
+                        onAddress = { url -> activeAddress.set(url) },
+                        onAlive = { lastByteAt.set(System.currentTimeMillis()) },
+                    ) { delta ->
                         completedBytes.addAndGet(delta)
                         emit(force = false)
                     }
@@ -153,6 +171,35 @@ class HttpDownloader(
     }
 
     /**
+     * 同一批次的候选地址记忆。
+     *
+     * 起因：一个地址挂了之后，候选表里每个文件仍然先去撞它一遍 —— 一次撞墙就是一次
+     * 15 秒的连接超时（[DEFAULT_CONNECT_TIMEOUT_MS]），几百个文件乘上去就是几十分钟的
+     * 「重试后反而更慢」。所以一个地址在同一批次里连着失败到 [DEAD_ADDRESS_FAILURES] 次，
+     * 后面的文件就跳过它；下一批次（用户点重试）重新从零开始，临时抽风的地址不会被永久拉黑。
+     *
+     * 用计数而不是「失败一次就拉黑」：单个文件 404、sha1 不符这类问题只说明那个文件有问题，
+     * 不说明地址不通，连错三次才当回事。
+     */
+    private class AddressMemo {
+        private val failures = ConcurrentHashMap<String, AtomicInteger>()
+
+        /** 这一批里还能用的地址；全都拉黑了就退回原表 —— 宁可再撞一次，也不能一个地址都不试。 */
+        fun alive(candidates: List<String>): List<String> {
+            val kept = candidates.filter { (failures[it]?.get() ?: 0) < DEAD_ADDRESS_FAILURES }
+            return if (kept.isEmpty()) candidates else kept
+        }
+
+        fun failed(url: String) {
+            failures.computeIfAbsent(url) { AtomicInteger(0) }.incrementAndGet()
+        }
+
+        fun succeeded(url: String) {
+            failures.remove(url)
+        }
+    }
+
+    /**
      * 下载单个条目。
      *
      * [onBytes] 之外的副作用只有磁盘上的 `<target>.part` 与最终的目标文件。
@@ -160,6 +207,9 @@ class HttpDownloader(
     private suspend fun fetch(
         item: DownloadItem,
         allowSegment: Boolean = false,
+        memo: AddressMemo? = null,
+        onAddress: (String) -> Unit = {},
+        onAlive: () -> Unit = {},
         onBytes: (Long) -> Unit,
     ): FetchOutcome {
         val target = File(item.target)
@@ -176,10 +226,17 @@ class HttpDownloader(
 
         // 候选顺序由进程级的下载源偏好决定：用户选了「优先国内镜像」时镜像排前面，
         // 否则维持「官方源在前、失败再换镜像」的老行为。
-        val candidates = DownloadSources.order(item.url, item.mirrors, DownloadPreference.source)
+        val ordered = DownloadSources.order(item.url, item.mirrors, DownloadPreference.source)
+        val candidates = memo?.alive(ordered) ?: ordered
         // 空壳包里地址全是空串，候选表必然为空 —— 这时给一句「去填镜像」比「没有可用的下载地址」有用。
         if (candidates.isEmpty()) {
             return FetchOutcome(if (!Endpoints.serviceReady()) Endpoints.SHELL_HINT else "没有可用的下载地址")
+        }
+
+        // 收到正数字节 = 连接还活着；负数是我们自己在回滚已经报过的进度，不算「有动静」。
+        fun received(delta: Long) {
+            if (delta > 0) onAlive()
+            onBytes(delta)
         }
 
         // 大文件先试分段：一条连接在丢包链路上跑不满带宽，拆成几段并发更接近实际带宽。
@@ -189,19 +246,32 @@ class HttpDownloader(
             val part = File(target.path + PART_SUFFIX)
             if (!part.isFile || part.length() <= 0L) {
                 for (candidate in candidates) {
-                    val segmented = trySegments(candidate, item, target, onBytes)
-                    if (segmented != null && segmented.ok) return segmented
+                    onAddress(candidate)
+                    val segmented = trySegments(candidate, item, target, ::received)
+                    if (segmented != null && segmented.ok) {
+                        memo?.succeeded(candidate)
+                        return segmented
+                    }
                 }
             }
         }
 
         var lastReason = "下载失败"
         for (candidate in candidates) {
+            // 每一个候选地址都报一次：主地址挂了退到镜像时，界面上的「现在走哪」要跟着变。
+            onAddress(candidate)
             repeat(retries + 1) { attempt ->
-                val outcome = attemptOnce(candidate, item, target, onBytes)
-                if (outcome.ok) return outcome
+                val outcome = attemptOnce(candidate, item, target, ::received)
+                if (outcome.ok) {
+                    memo?.succeeded(candidate)
+                    return outcome
+                }
                 lastReason = if (attempt < retries) "${outcome.reason}（重试中）" else outcome.reason ?: "下载失败"
             }
+            // 一个地址上的重试全部用完才记一次失败：记的是「这个地址对这份内容不行」，
+            // 不是「这一次尝试不行」。按尝试次数记的话，默认 retries = 1 时两个文件就能把
+            // 一个地址拉黑，而那时候可能只是这两个文件碰巧都缺。
+            memo?.failed(candidate)
         }
         return FetchOutcome(lastReason)
     }
@@ -560,6 +630,13 @@ class HttpDownloader(
 
         /** 一个批次里允许几个条目走分段。见 download() 里的说明。 */
         private const val SEGMENT_SLOTS_PER_BATCH = 1
+
+        /**
+         * 一个地址在同一批次里连着失败几次就跳过它。
+         *
+         * 定成 3：单次失败可能只是那个文件的问题（404、残缺），连着三次更像是地址本身不通。
+         */
+        private const val DEAD_ADDRESS_FAILURES = 3
 
         /** HttpURLConnection 没有这个常量，416 自己写。 */
         private const val HTTP_RANGE_NOT_SATISFIABLE = 416

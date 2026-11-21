@@ -1,5 +1,6 @@
 package io.github.huang404yan.platypus.core.settings
 
+import io.github.huang404yan.platypus.core.download.DownloadPreference
 import java.io.File
 import java.nio.file.Files
 import kotlinx.coroutines.runBlocking
@@ -133,6 +134,20 @@ class SettingsRepositoryTest {
             file.writeText("""{"offlineUsername":"Notch","defaultMemoryMb":4096}""", Charsets.UTF_8)
             val settings = JsonSettingsRepository(file).load()
             assertEquals("", settings.microsoftClientId)
+        } finally {
+            dir.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `下载连接数存进设置也不会越界`() = runBlocking {
+        val dir = tempDir()
+        try {
+            val repo = JsonSettingsRepository(JsonSettingsRepository.defaultFile(dir))
+            // 手改设置文件能写进任意数；读回来必须已经被夹到合法区间。
+            val saved = repo.save(LauncherSettings(downloadConnections = 99999))
+            assertEquals(DownloadPreference.MAX_CONNECTIONS, saved.downloadConnections)
+            assertEquals(DownloadPreference.MAX_CONNECTIONS, repo.load().downloadConnections)
         } finally {
             dir.deleteRecursively()
         }

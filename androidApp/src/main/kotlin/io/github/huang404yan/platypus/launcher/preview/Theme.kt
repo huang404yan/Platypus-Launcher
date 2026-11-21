@@ -9,6 +9,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import io.github.huang404yan.platypus.core.Brand
+import io.github.huang404yan.platypus.core.download.DownloadPreference
 import io.github.huang404yan.platypus.core.instance.InstanceLayouts
 import io.github.huang404yan.platypus.core.settings.JsonSettingsRepository
 import io.github.huang404yan.platypus.core.theme.LauncherTheme
@@ -95,13 +96,14 @@ internal fun PlatypusTheme(theme: LauncherTheme, content: @Composable () -> Unit
 }
 
 /**
- * 启动时把「新建实例默认隔离」灌进进程级那一个（见 InstanceLayouts.effectiveIsolated）。
+ * 启动时把几项「进程级全局量」灌进 core 里那一个。
  *
- * 与桌面 App.kt 里同一件事：三十多个地方要用它，判断收在 core 的一个函数里，
- * 这里只负责在开程序时灌一次。读不到就当默认开 —— 与 LauncherSettings.defaultIsolation
- * 的默认值一致。
+ * 目前两件：新建实例默认隔离（[InstanceLayouts.defaultIsolated]）、下载同时开几个连接
+ * （[DownloadPreference.connections]）。与桌面 App.kt 里同一件事：用它的地方散在三十多处，
+ * 判断收在 core 的一个函数里，这里只负责在开程序时灌一次。读不到就当默认值 ——
+ * 与 LauncherSettings 里那两个字段的默认值一致。
  */
-internal suspend fun applyIsolationDefault() {
+internal suspend fun applyProcessDefaults() {
     val root = runCatching { File(defaultGameRoot()) }.getOrNull() ?: return
     val store = JsonSettingsRepository(JsonSettingsRepository.defaultFile(root))
     val settings = runCatching { store.load() }.getOrNull() ?: return
@@ -113,6 +115,8 @@ internal suspend fun applyIsolationDefault() {
         settings
     }
     InstanceLayouts.defaultIsolated = effective.defaultIsolation
+    // 0 表示「自动」，核心那份会把它折算成代码里的默认并发数。
+    DownloadPreference.connections = DownloadPreference.normalizeConnections(effective.downloadConnections)
 }
 
 /**

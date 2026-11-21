@@ -114,8 +114,8 @@ class MainActivity : ComponentActivity() {
             var theme by remember { mutableStateOf(LauncherTheme.AUTO) }
             LaunchedEffect(Unit) {
                 theme = readThemePreference()
-                // 隔离默认值同样是进程级全局量，开程序时灌一次；设置页改完会就地覆写。
-                applyIsolationDefault()
+                // 隔离默认值与下载连接数同样是进程级全局量，开程序时灌一次；设置页改完会就地覆写。
+                applyProcessDefaults()
             }
             // PlatypusTheme 自己已经铺了一层 background 色的 Surface：这里再包一层
             // 默认取 surface 的 Surface 会把那层盖住（浅色那套 surface 是纯白，

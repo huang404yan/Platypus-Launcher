@@ -45,6 +45,15 @@ data class StepProgress(
      * 百分比会虚高、看着「早该下完却停在 99%」。这种时候界面该只显示文件数，不显示进度条。
      */
     val totalReliable: Boolean = true,
+    /**
+     * 下载阶段现在实际在跟哪个地址说话（主地址，或失败后退到的镜像）。
+     *
+     * 候选表由下载源偏好排出来，但「偏好」和「实际」经常不是一回事：镜像挂了就会退到官方源，
+     * 界面把实际地址显示出来，用户才看得见「速度掉下来是因为换源了」。
+     */
+    val activeUrl: String = "",
+    /** 最后一次真正收到字节的时刻；0 表示这一步还没开始收数据。 */
+    val lastByteAtMillis: Long = 0L,
 ) {
     val fraction: Float
         get() = if (total <= 0L) 0f else (done.toDouble() / total.toDouble()).toFloat().coerceIn(0f, 1f)
@@ -205,6 +214,8 @@ object OneClickInstaller {
                             total = snapshot.totalBytes,
                             // 有体积未知的文件时分母不全，界面改用文件数而不是百分比
                             totalReliable = snapshot.fractionReliable,
+                            activeUrl = snapshot.activeUrl,
+                            lastByteAtMillis = snapshot.lastByteAtMillis,
                         ),
                     )
                 }

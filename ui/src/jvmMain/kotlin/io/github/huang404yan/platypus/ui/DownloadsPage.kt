@@ -52,6 +52,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import io.github.huang404yan.platypus.core.download.DownloadPreference
+import io.github.huang404yan.platypus.core.download.DownloadSource
+import io.github.huang404yan.platypus.core.download.DownloadSources
 import io.github.huang404yan.platypus.core.instance.Instance
 import io.github.huang404yan.platypus.core.instance.MemoryDefaults
 import io.github.huang404yan.platypus.core.loader.FabricLoaderVersion
@@ -82,6 +85,14 @@ import java.io.File
  * 5 秒是用户点名要的时长（docs/62 第 3 条）。
  */
 private const val COMPLETION_HOLD_MS = 5000L
+
+/**
+ * 下载中「多久没收到数据」才值得在界面上点出来。
+ *
+ * 定成 10 秒：镜像时不时会卡三五秒再吐一批（尤其国内镜像对小文件），
+ * 门槛太低会让这一行字闪来闪去，反而像出了故障。
+ */
+private const val STALL_WARN_SECONDS = 10L
 
 /** 下拉里的一项：版本号 + 右侧标签（stable/beta、推荐/最新）。 */
 private data class LoaderOption(val version: String, val tag: String, val selected: Boolean)
@@ -371,6 +382,9 @@ fun DownloadsPage(
     var gameDirText by remember { mutableStateOf(initialGameRoot ?: defaultGameRoot()) }
     // 设置里指定的默认内存；一键装按它登记新实例，用户装完还能在启动页单独改
     var defaultMemoryMb by remember { mutableStateOf(Instance.DEFAULT_MEMORY_MB) }
+    // 设置里选的下载源。每次点「安装 / 重试这一步」都拿它重新灌一遍进程级偏好 ——
+    // 上一次失败可能已经把偏好带到官方源上了，不重置等于偷偷换了用户的设置。
+    var preferredSource by remember { mutableStateOf(DownloadSource.DEFAULT) }
     var versionText by remember { mutableStateOf("") }
     var filterText by remember { mutableStateOf("") }
 
@@ -447,6 +461,8 @@ fun DownloadsPage(
      */
     fun startInstall() {
         scrollScope.launch { scroll.animateScrollTo(0) }
+        // 每次都从用户设置的那个源开始试：上一次失败可能已经把偏好带到官方源上了。
+        DownloadPreference.source = preferredSource
         // 后端先取出来：下面每条分支都要用它，也省得编译器在 when 之后还以为它可能为 null。
         val ready = backend
         if (ready == null) {
@@ -646,6 +662,11 @@ fun DownloadsPage(
                     gameDirText = stored.defaultGameRoot
                 }
                 defaultMemoryMb = MemoryDefaults.resolve(stored.defaultMemoryMb, stored.defaultMemoryAuto, SystemMemory.totalMb)
+                // 设置里选的下载源记下来：点「重试这一步」时要把它重新灌回进程级偏好。
+                // 一次安装里镜像失败会自动退到官方源，那个退让会留在 DownloadPreference 上；
+                // 不重置的话，「重试」这一下的起点已经不是用户设置的那个源了。
+                preferredSource = DownloadSource.of(stored.downloadSource)
+                DownloadPreference.source = preferredSource
             }
         }
         if (manifest == null) refreshManifest()
@@ -976,6 +997,19 @@ private fun InstallStatusBanner(
         settled = true
     }
 
+    // 下载中每半秒走一次表，好让「已经 N 秒没收到数据」这句话能自己长大。
+    // 只在真的下载时跑循环：别的步骤没有「收到字节」这回事，挂个永不结束的 effect 纯属浪费。
+    val downloading = phase is InstallPhase.Running && progress?.step == InstallStep.DOWNLOADING
+    var nowMillis by remember { mutableStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(downloading) {
+        if (!downloading) return@LaunchedEffect
+        // downloading 变回 false 时 key 变了、这个 effect 会被取消，所以这里不用自己判退出。
+        while (true) {
+            nowMillis = System.currentTimeMillis()
+            delay(500L)
+        }
+    }
+
     val (text, isError) = when (phase) {
         is InstallPhase.Running -> {
             val detail = if (progress != null && progress.detail.isNotBlank()) {
@@ -988,7 +1022,29 @@ private fun InstallStatusBanner(
             } else {
                 ""
             }
-            ("正在" + currentStep.label + detail + speed + " · 已用 " + formatDuration(elapsedMs)) to false
+            // 现在实际在跟哪个地址说话：设置里的偏好是「优先镜像」，但镜像挂了会退到官方源。
+            // 不显示这个，用户看到的就只是「速度突然掉下来」，找不到原因。
+            val activeUrl = progress?.activeUrl.orEmpty()
+            val source = if (downloading && activeUrl.isNotBlank()) {
+                " · " + downloadSourceLabel(activeUrl)
+            } else {
+                ""
+            }
+            // 断网之后进度条还会往前挪一小段（内核缓冲区里剩的那几 KB 一次性吐出来）。
+            // 光看进度条会以为还在下，把「多久没收到字节」摆出来才说得清。
+            val lastAt = progress?.lastByteAtMillis ?: 0L
+            val idleSeconds = if (downloading && lastAt > 0L) {
+                ((nowMillis - lastAt) / 1000L).coerceAtLeast(0L)
+            } else {
+                0L
+            }
+            val stall = if (idleSeconds >= STALL_WARN_SECONDS) {
+                " · 已 " + idleSeconds + " 秒没收到数据"
+            } else {
+                ""
+            }
+            ("正在" + currentStep.label + detail + speed + source + stall +
+                " · 已用 " + formatDuration(elapsedMs)) to false
         }
         is InstallPhase.Failed -> ("卡在「" + phase.step.label + "」：" + phase.message) to true
         is InstallPhase.Finished -> {
@@ -1135,6 +1191,18 @@ private fun StepList(currentStep: InstallStep, states: Map<InstallStep, StepStat
             }
         }
     }
+}
+
+/**
+ * 「现在走哪个源」的一行字，例如「镜像 bmclapi2.bangbang93.com」。
+ *
+ * 只报类别与主机名：完整 URL 太长，会把状态摘要挤成两行；用户要分辨的也只是
+ * 「还在用国内镜像」还是「已经退到官方源了」。主机名认不出来时就只说类别。
+ */
+internal fun downloadSourceLabel(url: String): String {
+    val kind = if (DownloadSources.isMirror(url)) "镜像" else "官方源"
+    val host = runCatching { java.net.URI(url).host }.getOrNull().orEmpty()
+    return if (host.isBlank()) kind else kind + " " + host
 }
 
 private fun formatProgressDetail(step: StepProgress): String = when (step.step) {

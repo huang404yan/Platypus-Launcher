@@ -84,8 +84,9 @@ fun App(
     var theme by remember { mutableStateOf(LauncherTheme.AUTO) }
 
     // 界面模式（完整 / 简洁）。与 theme 一样是最外层持有的：它决定左列分几组、
-    // 各页露哪些块，改它要整棵树重画。默认完整模式 —— 第一次打开什么都能看见。
-    var uiMode by remember { mutableStateOf(UiMode.FULL) }
+    // 各页露哪些块，改它要整棵树重画。初值取 UiMode.DEFAULT（简洁）：
+    // 设置还没读回来之前就按简版画，读回来若是完整再一次性展开，不闪。
+    var uiMode by remember { mutableStateOf(UiMode.DEFAULT) }
 
     // 「少动一点」。true 时所有动画压到 1ms（见 Motion.kt）。它不像 theme 那样要
     // 通知宿主窗口，只在这一棵树里生效。
@@ -97,12 +98,14 @@ fun App(
         val repository = backend?.settings ?: return@LaunchedEffect
         val settings = runCatching { repository.load() }.getOrNull() ?: return@LaunchedEffect
         theme = runCatching { launcherThemeOf(settings.theme) }.getOrDefault(LauncherTheme.AUTO)
-        // 没存过（空串）就是完整模式，见 UiMode.of 里为什么退这一档。
+        // 没存过（空串）就是默认档（简洁），见 UiMode.of 与 UiMode.DEFAULT。
         uiMode = UiMode.of(settings.uiMode)
         reduceMotion = settings.reduceMotion
         // 下载源偏好是进程级全局量（见 DownloadPreference 的说明）：这里灌一次，
         // 之后所有新建的下载器都按它排序。设置页改的时候会就地覆写。
         DownloadPreference.source = DownloadSource.of(settings.downloadSource)
+        // 同时下几个文件同理：进程级全局量，开程序灌一次，设置页改完就地覆写。
+        DownloadPreference.connections = DownloadPreference.normalizeConnections(settings.downloadConnections)
         // 空壳包的镜像根同理：所有地址都从 Endpoints.serverBase 拼，开程序时灌一次，
         // 设置页改完就地覆写。完整版这个字段恒为空串，setServerBase 也只会存空。
         Endpoints.setServerBase(settings.serverBase)

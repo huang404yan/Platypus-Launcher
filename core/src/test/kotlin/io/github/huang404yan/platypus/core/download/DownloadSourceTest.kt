@@ -93,6 +93,47 @@ class DownloadSourceTest {
     }
 
     @Test
+    fun `连接数没调过时按代码里的默认走`() {
+        // DownloadPreference 是进程级全局量，其它用例可能改过它，进出各归零一次。
+        val original = DownloadPreference.connections
+        DownloadPreference.connections = 0
+        try {
+            assertEquals(DownloadPreference.DEFAULT_CONNECTIONS, DownloadPreference.effectiveConnections())
+        } finally {
+            DownloadPreference.connections = original
+        }
+    }
+
+    @Test
+    fun `调过就按调过的数开连接`() {
+        val original = DownloadPreference.connections
+        try {
+            DownloadPreference.connections = 8
+            assertEquals(8, DownloadPreference.effectiveConnections())
+            DownloadPreference.connections = DownloadPreference.MAX_CONNECTIONS
+            assertEquals(DownloadPreference.MAX_CONNECTIONS, DownloadPreference.effectiveConnections())
+        } finally {
+            DownloadPreference.connections = original
+        }
+    }
+
+    @Test
+    fun `越界的连接数被收敛回区间`() {
+        // 手改设置文件能写进 99999；不收敛的话一次会开十万条 socket。
+        assertEquals(DownloadPreference.MAX_CONNECTIONS, DownloadPreference.normalizeConnections(99999))
+        assertEquals(0, DownloadPreference.normalizeConnections(-1))
+        assertEquals(0, DownloadPreference.normalizeConnections(0))
+        assertEquals(DownloadPreference.MIN_CONNECTIONS, DownloadPreference.normalizeConnections(1))
+    }
+
+    @Test
+    fun `上限比默认值大，界面上的档位才有意义`() {
+        // 要是哪天有人把上限调到比默认还小，设置页那排档位就会显示成「比自动还少」。
+        assertTrue(DownloadPreference.MAX_CONNECTIONS > DownloadPreference.DEFAULT_CONNECTIONS)
+        assertTrue(DownloadPreference.DEFAULT_CONNECTIONS >= DownloadPreference.MIN_CONNECTIONS)
+    }
+
+    @Test
     fun `两个选项的说明里都有为什么要它`() {
         // 界面上只显示 label 与 note，note 空掉的话用户看到的就是两个没差别的单选项。
         DownloadSource.entries.forEach {

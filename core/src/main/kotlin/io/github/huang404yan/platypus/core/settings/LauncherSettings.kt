@@ -1,6 +1,7 @@
 package io.github.huang404yan.platypus.core.settings
 
 import io.github.huang404yan.platypus.core.Endpoints
+import io.github.huang404yan.platypus.core.download.DownloadPreference
 import io.github.huang404yan.platypus.core.instance.Instance
 import io.github.huang404yan.platypus.core.saves.AutoBackupPolicy
 import kotlinx.serialization.Serializable
@@ -168,6 +169,14 @@ data class LauncherSettings(
      * 打开后所有过渡时长压到最短，功能不受影响。
      */
     val reduceMotion: Boolean = false,
+    /**
+     * 同时下几个文件；0 表示自适应。
+     *
+     * 只影响「一次装多少个文件并发下」，不影响单个文件内部的分段（那个上限是
+     * [io.github.huang404yan.platypus.core.download.HttpDownloader] 里写死的：
+     * 实测国内镜像对多段并发 Range 不友好，开得越多越慢，所以不给用户调）。
+     */
+    val downloadConnections: Int = 0,
     /** 最近一次写盘时间（毫秒）；0 表示还没写过。 */
     val updatedAt: Long = 0L,
 ) {
@@ -190,6 +199,7 @@ data class LauncherSettings(
             theme = raw.theme.trim().lowercase(),
             uiMode = raw.uiMode.trim().lowercase(),
             downloadSource = raw.downloadSource.trim().lowercase(),
+            downloadConnections = DownloadPreference.normalizeConnections(raw.downloadConnections),
             serverBase = Endpoints.normalizeBase(raw.serverBase),
             curseForgeApiKey = raw.curseForgeApiKey.trim().trim('"').trim(),
             lastInstanceKey = raw.lastInstanceKey.trim(),

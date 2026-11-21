@@ -149,7 +149,7 @@ fun LaunchPage(
      * 这一页仍要收这个参数，因为提示文案得跟着变 —— 否则简洁模式下会说「点下面某一块」，
      * 而那一块根本不在。
      */
-    uiMode: UiMode = UiMode.FULL,
+    uiMode: UiMode = UiMode.DEFAULT,
 ) {
     if (backend == null) {
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {

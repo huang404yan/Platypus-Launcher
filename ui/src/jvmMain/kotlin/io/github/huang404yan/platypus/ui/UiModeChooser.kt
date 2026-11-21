@@ -88,14 +88,15 @@ internal fun UiModeChooserGate(
     }
 
     AlertDialog(
-        // 没有「关掉」这条路：点外面、按 Esc 都算选了完整模式（什么都有，不会让人找不到功能）。
-        onDismissRequest = { pick(UiMode.FULL) },
+        // 没有「关掉」这条路：点外面、按 Esc 都算选了默认档（见 UiMode.DEFAULT）。
+        onDismissRequest = { pick(UiMode.DEFAULT) },
         title = { Text("先选一下怎么看") },
         text = {
             Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(
                     "两档看的是同一份东西，只是收起来多少不一样。以后想换，" +
-                        "去「设置 → 界面」点一下就行，不用重装。",
+                        "去「设置 → 界面」点一下就行，不用重装。不选的话按" +
+                        UiMode.DEFAULT.label + "模式来。",
                     style = MaterialTheme.typography.bodyMedium,
                 )
                 UiMode.entries.forEach { mode ->
@@ -136,7 +137,7 @@ internal fun UiModeChooserGate(
         confirmButton = {
             // 主按钮故意留空：两条路都在正文里，按哪个都是选。给一个默认主按钮
             // 反而会让用户以为「不点卡片就不算选」。
-            TextButton(onClick = { pick(UiMode.FULL) }) { Text("以后再说") }
+            TextButton(onClick = { pick(UiMode.DEFAULT) }) { Text("以后再说") }
         },
     )
 }

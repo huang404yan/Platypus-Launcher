@@ -20,6 +20,9 @@ class HttpDownloaderTest {
     private lateinit var tmpDir: File
     private val hits = AtomicInteger(0)
 
+    /** 每个路径被请求了几次：用来验证「连着失败的地址会被跳过」。 */
+    private val hitsByPath = java.util.concurrent.ConcurrentHashMap<String, AtomicInteger>()
+
     /** 记录每次请求带的 Range 头，用来证明分段真的发出去了。 */
     private val rangeRequests = java.util.Collections.synchronizedList(mutableListOf<String>())
 
@@ -56,6 +59,7 @@ class HttpDownloaderTest {
     private fun handle(exchange: HttpExchange) {
         hits.incrementAndGet()
         val path = exchange.requestURI.path
+        hitsByPath.computeIfAbsent(path) { AtomicInteger(0) }.incrementAndGet()
         val body = when {
             bodies.containsKey(path) -> bodies.getValue(path)
             path.startsWith("/mirror/") && bodies.containsKey(path.removePrefix("/mirror")) ->
@@ -402,6 +406,69 @@ class HttpDownloaderTest {
         assertTrue(report.ok, "续传应成功：" + report.failures)
         assertTrue(File(target("d.bin")).readBytes().contentEquals(bytes))
         assertTrue(closedRanges().isEmpty(), "有半成品时应续传，不该再拆段：" + closedRanges())
+    }
+
+    @Test
+    fun `进度里带着当前实际地址与最后一次收到字节的时刻`() = runBlocking {
+        val bytes = bodies.getValue("/b.txt")
+        var lastProgress: DownloadProgress? = null
+
+        val report = downloader.download(
+            listOf(DownloadItem(url("/b.txt"), target("b.txt"), sha1 = sha1(bytes), size = bytes.size.toLong())),
+        ) { lastProgress = it }
+
+        assertTrue(report.ok, "应成功：" + report.failures)
+        // 界面靠这两个字段说「现在走哪个源」「已经 N 秒没收到数据」，空值等于这两件事都做不了。
+        assertEquals(url("/b.txt"), lastProgress?.activeUrl)
+        assertTrue((lastProgress?.lastByteAtMillis ?: 0L) > 0L, "收到过字节就该有时间戳")
+    }
+
+    @Test
+    fun `主地址挂了退到镜像时，地址跟着换`() = runBlocking {
+        val bytes = bodies.getValue("/a.txt")
+        var lastProgress: DownloadProgress? = null
+
+        val report = downloader.download(
+            listOf(
+                DownloadItem(
+                    url = url("/missing.txt"),
+                    target = target("a.txt"),
+                    sha1 = sha1(bytes),
+                    size = bytes.size.toLong(),
+                    mirrors = listOf(url("/mirror/a.txt")),
+                ),
+            ),
+        ) { lastProgress = it }
+
+        assertTrue(report.ok, "镜像应兜住：" + report.failures)
+        // 只报第一个候选不算数：用户看到的必须是「现在已经在用镜像了」。
+        assertEquals(url("/mirror/a.txt"), lastProgress?.activeUrl)
+    }
+
+    @Test
+    fun `同一批次里连着失败的地址会被跳过`() = runBlocking {
+        val bytes = bodies.getValue("/a.txt")
+        val sha1 = sha1(bytes)
+        // 一个地址只跑一路，保证四个文件依次进行：并发时大家会在「还没失败过」的时刻一起冲上去。
+        val serial = HttpDownloader(parallelism = 1, retries = 0)
+        val dead = url("/dead.txt")
+
+        val items = (1..4).map { index ->
+            DownloadItem(
+                url = dead,
+                target = target("m" + index + ".txt"),
+                sha1 = sha1,
+                size = bytes.size.toLong(),
+                mirrors = listOf(url("/mirror/a.txt")),
+            )
+        }
+        val report = serial.download(items)
+
+        assertTrue(report.ok, "镜像应把四个都下下来：" + report.failures)
+        // 连着失败三次之后，第四个文件不该再去撞那个地址 —— 每撞一次就是一次十几秒的超时。
+        // hitsByPath 记的是路径（不含主机端口），所以这里也用路径查。
+        assertEquals(3, hitsByPath["/dead.txt"]?.get() ?: 0)
+        assertEquals(4, hitsByPath["/mirror/a.txt"]?.get() ?: 0)
     }
 
     /** 去掉探针用的 `0-0` 与续传用的开区间，只留分段请求的闭区间。 */

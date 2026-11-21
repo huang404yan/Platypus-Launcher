@@ -53,6 +53,47 @@ enum class DownloadSource(val id: String, val label: String, val note: String) {
 object DownloadPreference {
     @Volatile
     var source: DownloadSource = DownloadSource.DEFAULT
+
+    /**
+     * 同时下几个文件。**0 表示自适应**，交给 [effectiveConnections] 换算。
+     *
+     * 2026-11-21 从设置页开放：以前这个数是 [HttpDownloader.DEFAULT_PARALLELISM] 里写死的 16，
+     * 用户嫌慢或者嫌把家里路由器打满都只能改代码。放出来的同时留了一个上限，
+     * 理由见 [MAX_CONNECTIONS]。
+     *
+     * 与 [source] 一样是进程级全局量：它描述的是「这台机器上所有下载的默认行为」，
+     * 不是某一次下载的参数。一路透传要穿十几层，漏传一处就是「设置了没用」。
+     */
+    @Volatile
+    var connections: Int = 0
+
+    /** 「自动」时实际用的条数，与 [HttpDownloader.DEFAULT_PARALLELISM] 同一个数。 */
+    const val DEFAULT_CONNECTIONS: Int = HttpDownloader.DEFAULT_PARALLELISM
+
+    /** 允许用户填的最小值。1 就是串行，慢但不占带宽。 */
+    const val MIN_CONNECTIONS: Int = 1
+
+    /**
+     * 允许用户填的最大值。
+     *
+     * 卡在 64 而不是随他填：并发连接不是「越大越快」——单文件下载的带宽上限在链路上，
+     * 文件级并发只是把等待时间摊开；开到几百条只会让镜像或 CDN 把这一批请求当抓取限流，
+     * 结果比 16 条还慢。PCL 之类启动器的上限也在这个量级。
+     */
+    const val MAX_CONNECTIONS: Int = 64
+
+    /** 用户填的那个数收敛到合法范围；0 与负数都当「自适应」。 */
+    fun normalizeConnections(raw: Int): Int = raw.coerceIn(0, MAX_CONNECTIONS)
+
+    /**
+     * 这次下载实际用几条连接。
+     *
+     * 「自适应」不走系统探测：探测要真下几个文件量吞吐，代价比下载本身还大，
+     * 而 16 条在绝大多数链路上已经够用（见 [HttpDownloader.DEFAULT_PARALLELISM] 的说明）。
+     * 所以 0 就退回那个默认值，用户嫌慢自己去设置里调大。
+     */
+    fun effectiveConnections(): Int =
+        if (connections <= 0) DEFAULT_CONNECTIONS else connections.coerceIn(MIN_CONNECTIONS, MAX_CONNECTIONS)
 }
 
 /**
