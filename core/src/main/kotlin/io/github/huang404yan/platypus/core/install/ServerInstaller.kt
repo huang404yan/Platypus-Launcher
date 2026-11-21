@@ -354,6 +354,9 @@ object ServerInstaller {
                 "跑 " + loader.kind.label + " installer（要几分钟，日志：" + logFile.name + "）",
             ),
         )
+        // 服务端 installer 一样是一分钟几百行地刷日志，逐行推给界面同样是刷屏。
+        // 与客户端那两个 installer 共用同一个节流器：行数照数，界面每秒收一条。
+        val ticker = InstallerRunTicker()
         val exitCode = InstallerProcess.run(
             command = listOf(
                 java,
@@ -368,7 +371,9 @@ object ServerInstaller {
             logFile = logFile,
             timeoutMillis = TimeUnit.MINUTES.toMillis(INSTALLER_TIMEOUT_MINUTES),
         ) { line ->
-            onProgress(ServerInstallProgress("运行安装器", "安装器：" + line))
+            ticker.onLine(line)?.let { snap ->
+                onProgress(ServerInstallProgress("运行安装器", "安装器：" + snap.summary))
+            }
         }
         if (exitCode != 0) {
             throw IOException(

@@ -193,24 +193,25 @@ object ForgeInstaller {
             // installer 不报总进度，只能数它打了多少行日志：总行数事先不知道，
             // 所以 total = 0（界面画不确定进度条），done = 已跑行数（用来显示「动了多少」）。
             // 用户抱怨过「安装加载器没进度条不知道情况」，有行数与秒数在动就够判断死没死。
-            val runStartedAt = System.currentTimeMillis()
-            var runLines = 0
+            // 但逐行推会刷屏（一次安装三万行 = 三万次界面更新），所以交给 InstallerRunTicker
+            // 按秒节流：行数一笔不漏，只把每秒一次的摘要与最后一行推上去。
+            val ticker = InstallerRunTicker()
             val exitCode = runInstaller(
                 java = javaPath,
                 installer = installer,
                 gameRoot = gameRoot,
                 logFile = logFile,
             ) { line ->
-                runLines += 1
-                val seconds = ((System.currentTimeMillis() - runStartedAt) / 1000L).toInt()
-                onProgress(
-                    ForgeProgress(
-                        step = ForgeStep.RUN,
-                        detail = "已跑 " + runLines + " 行 · 已用 " + seconds + " 秒 · " + line.take(160),
-                        done = runLines.toLong(),
-                        total = 0L,
-                    ),
-                )
+                ticker.onLine(line)?.let { snap ->
+                    onProgress(
+                        ForgeProgress(
+                            step = ForgeStep.RUN,
+                            detail = snap.summary,
+                            done = snap.lines.toLong(),
+                            total = 0L,
+                        ),
+                    )
+                }
             }
 
             step = ForgeStep.VERIFY
