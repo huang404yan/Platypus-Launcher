@@ -70,4 +70,13 @@ interface LauncherBackend {
      * 也不能删到用户的系统 JDK。
      */
     val launcherDir: File? get() = null
+
+    /**
+     * 便携模式的数据目录：非空就说明这一份启动器把设置、账号、实例索引全放在
+     * 启动器目录里，没往系统用户目录写东西（见 core 的 `PortableMode`）。
+     *
+     * 给默认 null：常规模式（以及只关心实例与运行时的假后端）都是 null，界面据此
+     * 不显示那行状态。
+     */
+    val portableDataDir: File? get() = null
 }

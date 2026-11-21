@@ -480,6 +480,30 @@ tasks.register<JavaExec>("duplicateImportSmoke") {
     )
 }
 
+// `gradle :app-desktop:portableSmoke [-PportableDir=dist/_portable-smoke]`
+//
+// 便携模式的装配点验收：造一个带 portable.txt 的启动器目录 + 一个游戏目录，走一遍
+// DesktopServices.create（含 homeDir），断言设置落在 <启动器目录>/data/platypus/ 下、
+// 游戏目录里没被写一份、重开后能读回、以及不传 homeDir 时仍回老位置。
+// 纯本地文件操作，不联网不起游戏。
+// ─────────────────────────────────────────────────────────────────────────────
+tasks.register<JavaExec>("portableSmoke") {
+    group = "verification"
+    description = "无头验收：便携模式把启动器数据放在 <启动器目录>/data，不写进游戏目录（开发期用）"
+    dependsOn(tasks.named("testClasses"))
+    mainClass.set("io.github.huang404yan.platypus.desktop.PortableSmokeKt")
+    classpath = sourceSets["test"].runtimeClasspath
+    workingDir = rootProject.projectDir
+    jvmArgs("-Dfile.encoding=UTF-8")
+
+    argumentProviders.add(
+        CommandLineArgumentProvider {
+            val dir = providers.gradleProperty("portableDir").orElse("dist/_portable-smoke").get()
+            listOf(rootProject.file(dir).absolutePath)
+        },
+    )
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // 品牌与打包参数
 //

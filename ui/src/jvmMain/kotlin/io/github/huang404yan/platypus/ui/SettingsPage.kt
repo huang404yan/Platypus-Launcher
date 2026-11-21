@@ -59,6 +59,7 @@ import io.github.huang404yan.platypus.core.settings.usernameProblem
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.io.File
 
 /** 「启动」二级项的 id，与 Navigation.kt 里 PAGE_SUB_TABS 的定义对应。 */
 const val SETTINGS_TAB_LAUNCH = "launch"
@@ -848,6 +849,8 @@ fun SettingsPage(
                 loadedFrom = loadedFrom,
                 savedAt = savedAt,
                 loaded = loaded,
+                portableDataDir = backend.portableDataDir,
+                launcherDir = backend.launcherDir,
                 onResetDefaults = { resetDefaults() },
             )
             else -> {
@@ -1642,9 +1645,12 @@ private fun OtherTab(
     loadedFrom: String,
     savedAt: Long,
     loaded: Boolean,
+    portableDataDir: File?,
+    launcherDir: File?,
     onResetDefaults: () -> Unit,
 ) {
     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        PortableCard(portableDataDir = portableDataDir, launcherDir = launcherDir)
         SettingCard("设置文件", "纯 JSON，可以直接用编辑器改；改坏了删掉它就会回到默认值。") {
             Text(
                 if (loadedFrom.isBlank()) "还没读到路径（可能是后端把设置存在别处）。" else loadedFrom,
@@ -1665,6 +1671,50 @@ private fun OtherTab(
         SettingCard("恢复默认值", "只是把输入框填回默认，要点「保存」才写进文件。") {
             OutlinedButton(onClick = onResetDefaults, enabled = loaded) { Text("填回默认值") }
         }
+    }
+}
+
+/**
+ * 便携模式那张卡：开着就说明数据在哪儿，没开就说怎么开。
+ *
+ * 为什么要有这张卡：便携模式下数据不在 %APPDATA%，用户去常见位置找设置文件会找不到，
+ * 继而以为「设置丢了」。这里把真实路径摆出来，附带切换办法。
+ */
+@Composable
+private fun PortableCard(portableDataDir: File?, launcherDir: File?) {
+    if (portableDataDir != null) {
+        SettingCard(
+            "便携模式",
+            "这一份启动器不往系统用户目录写东西：设置、账号、实例清单都在下面这个目录里，" +
+                "跟着启动器文件夹一起搬走或删掉。",
+        ) {
+            InfoLine("数据目录", portableDataDir.absolutePath)
+            Text(
+                "想换回常规位置：关掉程序，删掉启动器目录里的 portable.txt（或取消环境变量 " +
+                    "PLATYPUS_PORTABLE）再打开。已经写在这份目录里的东西不会自己搬回去。",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        return
+    }
+    SettingCard(
+        "便携模式",
+        "把启动器和它的数据装在一个文件夹里，不往 %APPDATA% 写东西，拷到 U 盘就能带走。",
+    ) {
+        Text(
+            "现在没用便携模式：设置、账号、实例清单放在游戏目录下的 platypus/ 里。",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Text(
+            "想开：在启动器目录" +
+                (launcherDir?.let { "（" + it.absolutePath + "）" } ?: "") +
+                "里新建一个空的 portable.txt，重开程序。之后设置、账号、实例清单会写到那下面的 data/ 里 —— " +
+                "已经写在别处的不搬，所以先用便携模式跑一次确认没问题，再考虑清理旧位置。",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
     }
 }
 

@@ -13,6 +13,7 @@ import androidx.compose.ui.window.application
 import androidx.compose.ui.window.rememberWindowState
 import io.github.huang404yan.platypus.core.Brand
 import io.github.huang404yan.platypus.core.instance.InstanceScanner
+import io.github.huang404yan.platypus.core.instance.PortableMode
 import io.github.huang404yan.platypus.core.theme.LauncherTheme
 import io.github.huang404yan.platypus.ui.App
 import io.github.huang404yan.platypus.ui.defaultGameRoot
@@ -28,6 +29,17 @@ import java.io.File
  * 再小就没法并排放下侧栏与表单了——各页面自己还有滚动兜底。
  */
 fun main(args: Array<String>) {
+    // 便携模式：启动器目录下有 portable.txt（或环境变量 PLATYPUS_PORTABLE=1）时，
+    // 设置、账号、实例索引全落在 <启动器目录>/data 下，不往系统用户目录写。
+    // 目录建不出来（只读介质、Program Files 无写权限）就当没开，退回常规位置。
+    val launcherDir = installDir()
+    val portableHome = PortableMode.dataDir(launcherDir)
+    if (portableHome != null) {
+        println("[portable] 便携模式，数据目录 = " + portableHome.absolutePath)
+    } else if (launcherDir != null && PortableMode.isEnabled(launcherDir)) {
+        println("[portable] 想用便携模式，但 " + PortableMode.dataDirIn(launcherDir).absolutePath + " 建不出来，退回常规位置")
+    }
+
     // 目录优先级：命令行参数 > 环境变量 > 安装目录下的 game\ > %APPDATA%\.minecraft。
     // 第三条是这一版才加的：以前默认落在 C 盘的用户目录里，便携版拷到别的机器、
     // 或者用户想把整个启动器连游戏一起搬走时，游戏数据会留在原地。
@@ -50,7 +62,8 @@ fun main(args: Array<String>) {
     val services = DesktopServices.create(
         gameRoot = root.takeIf { it.isNotBlank() }?.let(::File),
         instanceIndex = null,
-        launcherDir = installDir(),
+        launcherDir = launcherDir,
+        homeDir = portableHome,
     )
 
     application {

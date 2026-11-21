@@ -43,6 +43,13 @@ class DesktopServices private constructor(
     override val auth: AccountAuth,
     /** 外置登录（Yggdrasil）。 */
     override val yggdrasil: YggdrasilAccountAuth,
+    /**
+     * 便携模式的数据目录（<启动器目录>/data）。常规模式下为 null。
+     *
+     * 它非空就说明这一份启动器不往系统用户目录写东西：设置、账号、实例、服务端索引
+     * 全在这下面，与游戏目录彼此独立。界面拿它显示状态。
+     */
+    override val portableDataDir: File?,
 ) : LauncherBackend {
 
     /**
@@ -72,11 +79,33 @@ class DesktopServices private constructor(
          *   托管运行时（自动补的 Java）落在这里的 java/ 下，而不是游戏目录 —— 见
          *   [DesktopJavaRuntimeService]。null 时退回游戏目录，方便无头冒烟与单测。
          */
-        fun create(gameRoot: File?, instanceIndex: File?, launcherDir: File?): DesktopServices {
+        fun create(gameRoot: File?, instanceIndex: File?, launcherDir: File?): DesktopServices =
+            create(gameRoot, instanceIndex, launcherDir, homeDir = null)
+
+        /**
+         * @param homeDir 便携模式的数据目录（<启动器目录>/data）。给了就把设置、账号、
+         *   实例、服务端索引全放它下面，与游戏目录无关；常规模式传 null。
+         *
+         * 之所以让它压过 gameRoot：便携模式下游戏目录可能被用户指到 U 盘里已有的那份
+         * .minecraft，而启动器自己的数据必须留在启动器目录里 —— 拔了 U 盘游戏没了，
+         * 账号与设置不该跟着一起消失。
+         */
+        fun create(
+            gameRoot: File?,
+            instanceIndex: File?,
+            launcherDir: File?,
+            homeDir: File?,
+        ): DesktopServices {
             // 账号仓库要被登录流程和界面共用一份：两边各 new 一个会让「刚登录的账号
             // 没出现在列表里」这类问题变成偶发。
-            val accountRepository = JsonAccountRepository(defaultAccountIndex(gameRoot))
-            return assemble(gameRoot, instanceIndex, accountRepository, launcherDir?.takeIf { it.isDirectory })
+            val accountRepository = JsonAccountRepository(defaultAccountIndex(gameRoot, homeDir))
+            return assemble(
+                gameRoot = gameRoot,
+                instanceIndex = instanceIndex,
+                accountRepository = accountRepository,
+                launcherDir = launcherDir?.takeIf { it.isDirectory },
+                homeDir = homeDir,
+            )
         }
 
         private fun assemble(
@@ -84,16 +113,17 @@ class DesktopServices private constructor(
             instanceIndex: File?,
             accountRepository: AccountRepository,
             launcherDir: File?,
+            homeDir: File?,
         ): DesktopServices {
             // 设置仓库与登录共用同一份：Client ID 存在设置里，登录时现读，
             // 两个实例指向同一个文件也问题不大，但共用一份能少一次「为什么刚填的没生效」。
-            val settingsRepository = JsonSettingsRepository(settingsFile(gameRoot))
+            val settingsRepository = JsonSettingsRepository(settingsFile(gameRoot, homeDir))
             return DesktopServices(
                 javaRuntimes = DesktopJavaRuntimeService(gameRoot = gameRoot, launcherDir = launcherDir),
                 gameRuntime = DesktopGameRuntime(),
-                instances = JsonInstanceRepository(instanceIndex ?: defaultInstanceIndex(gameRoot)),
+                instances = JsonInstanceRepository(instanceIndex ?: defaultInstanceIndex(gameRoot, homeDir)),
                 settings = settingsRepository,
-                servers = JsonServerRepository(defaultServerIndex(gameRoot)),
+                servers = JsonServerRepository(defaultServerIndex(gameRoot, homeDir)),
                 accounts = accountRepository,
                 // 应用 ID 的取舍在 ClientIds 里：这个包自带的优先（正式版由构建方注入，
                 // 下载的人不用做任何事），没有才用用户自己填的（孵化版）。两者都是现读，
@@ -107,28 +137,23 @@ class DesktopServices private constructor(
                 // authlib-injector 落在 <gameRoot>/platypus/authlib-injector/ 下面，是这份
                 // 游戏目录的附属物，所以跟着 gameRoot 走；没有游戏目录时退到用户目录。
                 yggdrasil = YggdrasilAccountAuth(
-                    gameRoot = gameRoot ?: fallbackHome(),
+                    gameRoot = dataRoot(gameRoot, homeDir),
                     repository = accountRepository,
                 ),
+                portableDataDir = homeDir,
             )
         }
 
         /** 账号索引与实例索引同层：有游戏目录时 <gameRoot>/platypus/accounts.json。 */
-        private fun defaultAccountIndex(gameRoot: File?): File {
-            if (gameRoot != null) return JsonAccountRepository.defaultIndexFile(gameRoot)
-            return JsonAccountRepository.defaultIndexFile(fallbackHome())
-        }
+        private fun defaultAccountIndex(gameRoot: File?, homeDir: File?): File =
+            JsonAccountRepository.defaultIndexFile(dataRoot(gameRoot, homeDir))
 
         /** 服务端索引与实例索引同层：有游戏目录时 <gameRoot>/platypus/servers.json。 */
-        private fun defaultServerIndex(gameRoot: File?): File {
-            if (gameRoot != null) return JsonServerRepository.defaultIndexFile(gameRoot)
-            return JsonServerRepository.defaultIndexFile(fallbackHome())
-        }
+        private fun defaultServerIndex(gameRoot: File?, homeDir: File?): File =
+            JsonServerRepository.defaultIndexFile(dataRoot(gameRoot, homeDir))
 
-        private fun defaultInstanceIndex(gameRoot: File?): File {
-            if (gameRoot != null) return JsonInstanceRepository.defaultIndexFile(gameRoot)
-            return JsonInstanceRepository.defaultIndexFile(fallbackHome())
-        }
+        private fun defaultInstanceIndex(gameRoot: File?, homeDir: File?): File =
+            JsonInstanceRepository.defaultIndexFile(dataRoot(gameRoot, homeDir))
 
         /**
          * 设置文件与实例索引同层：有游戏目录时放 <gameRoot>/platypus/settings.json，
@@ -137,10 +162,17 @@ class DesktopServices private constructor(
          * 刻意不跟着「用户当前选中的目录」漂移：设置本身记的就是那个目录，
          * 若设置文件也跟着目录走，换目录就看不到上次的选择了。
          */
-        private fun settingsFile(gameRoot: File?): File {
-            if (gameRoot != null) return JsonSettingsRepository.defaultFile(gameRoot)
-            return JsonSettingsRepository.defaultFile(fallbackHome())
-        }
+        private fun settingsFile(gameRoot: File?, homeDir: File?): File =
+            JsonSettingsRepository.defaultFile(dataRoot(gameRoot, homeDir))
+
+        /**
+         * 启动器自己的数据该落在哪个根上，优先级：便携目录 > 游戏目录 > 用户目录。
+         *
+         * 便携模式排第一的理由见 [create] 的 homeDir 说明：启动器数据要跟着启动器走，
+         * 而不是跟着游戏目录走。三者都可能为 null 之外的场合才用到 [fallbackHome]。
+         */
+        private fun dataRoot(gameRoot: File?, homeDir: File?): File =
+            homeDir ?: gameRoot ?: fallbackHome()
 
         private fun fallbackHome(): File {
             val home = System.getProperty("user.home").orEmpty().ifBlank { "." }
