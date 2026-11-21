@@ -47,6 +47,7 @@ import io.github.huang404yan.platypus.core.instance.DeletionPlan
 import io.github.huang404yan.platypus.core.instance.Instance
 import io.github.huang404yan.platypus.core.instance.InstanceCatalog
 import io.github.huang404yan.platypus.core.instance.InstanceDeleter
+import io.github.huang404yan.platypus.core.instance.InstanceSection
 import io.github.huang404yan.platypus.core.instance.InstanceScanner
 import io.github.huang404yan.platypus.core.instance.LoaderKind
 import io.github.huang404yan.platypus.core.instance.LocalInstance
@@ -54,10 +55,13 @@ import io.github.huang404yan.platypus.core.instance.MemoryDefaults
 import io.github.huang404yan.platypus.core.instance.PruneResult
 import io.github.huang404yan.platypus.core.instance.ScanResult
 import io.github.huang404yan.platypus.core.instance.formatBytes
+import io.github.huang404yan.platypus.core.instance.groupNames
 import io.github.huang404yan.platypus.core.instance.instanceKey
 import io.github.huang404yan.platypus.core.instance.mergeInstances
 import io.github.huang404yan.platypus.core.instance.missingNotice
 import io.github.huang404yan.platypus.core.instance.pruneMissing
+import io.github.huang404yan.platypus.core.instance.sectionize
+import io.github.huang404yan.platypus.core.instance.withGroup
 import io.github.huang404yan.platypus.core.runtime.GameJavaRules
 import io.github.huang404yan.platypus.core.runtime.JavaRuntime
 import io.github.huang404yan.platypus.core.runtime.findExactMajor
@@ -135,6 +139,15 @@ fun InstancePage(
     var query by remember { mutableStateOf("") }
     /** 「登记的实例目录已经不在了」那一行提示；没有摘掉任何东西就是空串。 */
     var prunedNotice by remember { mutableStateOf("") }
+    /** 正在改分组的实例（null = 没开对话框）。 */
+    var groupTarget by remember { mutableStateOf<Instance?>(null) }
+    /**
+     * 是否按分组分段摆卡片。
+     *
+     * 默认关：老用户进来时看到的应该还是原来那一整片，突然被切成几段会以为列表错乱。
+     * 只要有一条实例有组名，按钮旁边就会写「N 个已分组」，提示这个开关有用。
+     */
+    var groupBySection by remember { mutableStateOf(false) }
 
     val scope = rememberCoroutineScope()
 
@@ -265,6 +278,43 @@ fun InstancePage(
                 "已收藏 " + updated.name + "，它会排在列表最前面。"
             } else {
                 "已取消收藏 " + updated.name + "。"
+            }
+            rescan()
+        }
+    }
+
+    /**
+     * 把实例改到某个组（空串 = 移出分组）。
+     *
+     * 与收藏一样只写 instances.json，不动版本目录。落盘用 [withGroup] —— 它顺手把
+     * 只扫描到的外部实例登记进来，否则下次启动这条分组就丢了（扫描结果里没有组名）。
+     */
+    fun saveGroup(instance: Instance, group: String) {
+        if (backend == null) {
+            editNotice = "后端未装配：没法保存分组。"
+            return
+        }
+        val updated = withGroup(instance, group)
+        if (updated.group == instance.group) {
+            groupTarget = null
+            return
+        }
+        scope.launch {
+            val error = withContext(Dispatchers.IO) {
+                runCatching { backend.instances.save(updated) }.exceptionOrNull()
+            }
+            groupTarget = null
+            if (error != null) {
+                editNotice = "分组没存上：" + describe(error)
+                return@launch
+            }
+            // 分了组就把分段摆打开：用户刚给一条实例归了类，接着想看的是「几组都在哪儿」，
+            // 而不是「我分完了但列表还是原来那一整片」。
+            groupBySection = updated.group.isNotEmpty() || groupBySection
+            editNotice = if (updated.group.isEmpty()) {
+                "已把 " + updated.name + " 移出分组。"
+            } else {
+                "已把 " + updated.name + " 放进「" + updated.group + "」。"
             }
             rescan()
         }
@@ -471,6 +521,13 @@ fun InstancePage(
     val allInstances = mergeInstances(registered, result?.instances.orEmpty(), result?.libraryVersions.orEmpty())
     val merged = InstanceCatalog.search(allInstances, query)
     val scannedOnly = merged.count { !it.registered }
+    // 分段只在「按组摆」打开时算，且切的是过滤后的 merged —— 搜索词照样生效，
+    // 搜「forge」时每组里只剩 forge 那几条，被筛空的组不会冒出一个空标题。
+    val sections = if (groupBySection) sectionize(merged) else emptyList()
+    // 组名候选取自全量而不是过滤后的：把一条实例从「Mod」挪到「联机」时，
+    // 「Mod」可能正好被当前搜索词筛掉了，但它仍然是个存在的组。
+    val knownGroups = groupNames(allInstances)
+    val groupedCount = allInstances.count { it.group.isNotBlank() }
 
     // 整页滚动：默认窗口里卡片一多，下面几张就被切在窗口外，用户得先最大化才看得全。
     // 这里不用「固定头 + weight(1f) 列表」是因为顶部那几行（目录、新建卡片、提示）
@@ -565,6 +622,29 @@ fun InstancePage(
                 },
             )
         }
+        // 分组开关：默认关着（老用户进来还是原来那一整片）。只要有人分过组，
+        // 旁边就把「已分组几条、共几组」写出来，否则这个按钮看起来像个没用的小开关。
+        if (allInstances.isNotEmpty()) {
+            Row(
+                Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                TextButton(onClick = { groupBySection = !groupBySection }) {
+                    Text(if (groupBySection) "不分段" else "按组摆")
+                }
+                Text(
+                    if (groupedCount == 0) {
+                        "还没有分组。卡片上的「分组」可以给实例归个类，之后这里能按组摆。"
+                    } else {
+                        "已分组 " + groupedCount + " 个实例，共 " + knownGroups.size + " 组：" +
+                            knownGroups.joinToString("、") + "。"
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
         if (query.isNotBlank() && merged.isEmpty()) {
             Hint("没有名字里带「" + query.trim() + "」的版本。清空搜索看全部。")
         }
@@ -607,12 +687,9 @@ fun InstancePage(
                     // 卡片网格：版本是“我盘上有几个”的东西，一屏看得到比一条条往下读快。
                     // 用 FlowRow 而不是 LazyVerticalGrid：外层已经是整页滚动，
                     // 嵌一个自带滚动的网格会出现两层滚轮。
-                    FlowRow(
-                        Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(10.dp),
-                        verticalArrangement = Arrangement.spacedBy(10.dp),
-                    ) {
-                    merged.forEach { instance ->
+                    // 卡片只写一遍：分段与不分段共用同一段构建代码，
+                    // 否则以后给卡片加一个回调就得改两个地方，总有一处会漏。
+                    val card: @Composable (Instance) -> Unit = { instance ->
                         key(instanceKey(instance)) {
                             InstanceCard(
                                 instance = instance,
@@ -620,6 +697,7 @@ fun InstancePage(
                                 effectiveMemoryMb = Instance.effectiveMemoryMb(instance, defaultMemoryMb),
                                 onMemoryChange = { picked -> saveMemoryMb(instance, picked) },
                                 onTogglePin = { togglePin(instance) },
+                                onGroup = { groupTarget = instance },
                                 onRegister = { register(instance) },
                                 onLaunch = { onLaunch(instance) },
                                 onRemove = { removeRegistration(instance) },
@@ -635,9 +713,67 @@ fun InstancePage(
                             )
                         }
                     }
+                    if (!groupBySection) {
+                        FlowRow(
+                            Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            verticalArrangement = Arrangement.spacedBy(10.dp),
+                        ) {
+                            merged.forEach { card(it) }
+                        }
+                    } else {
+                        // 一段一组，段头写组名与条数。未分组那一段排在最后、用灰一点的标题，
+                        // 因为它是「剩下没归类的」，不是用户建的组。
+                        sections.forEach { section ->
+                            key("section:" + section.name) {
+                                Row(
+                                    Modifier.fillMaxWidth(),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                ) {
+                                    Text(
+                                        if (section.ungrouped) "未分组" else section.name,
+                                        style = MaterialTheme.typography.titleMedium,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = if (section.ungrouped) {
+                                            MaterialTheme.colorScheme.onSurfaceVariant
+                                        } else {
+                                            MaterialTheme.colorScheme.onSurface
+                                        },
+                                    )
+                                    Text(
+                                        section.instances.size.toString() + " 个",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
+                                FlowRow(
+                                    Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                                ) {
+                                    section.instances.forEach { card(it) }
+                                }
+                            }
+                        }
                     }
                 }
             }
+        }
+    }
+
+    // 按实例 key 包一层：对话框里的输入框只在打开那一下取初值（见 GroupDialog），
+    // 换一个实例改分组时若复用同一份组合，框里会留着上一条的组名。
+    val pendingGroup = groupTarget
+    if (pendingGroup != null) {
+        key(instanceKey(pendingGroup)) {
+            GroupDialog(
+                instanceName = pendingGroup.name,
+                current = pendingGroup.group,
+                knownGroups = knownGroups,
+                onDismiss = { groupTarget = null },
+                onConfirm = { picked -> saveGroup(pendingGroup, picked) },
+            )
         }
     }
 
@@ -860,6 +996,8 @@ private fun InstanceCard(
     onOpenDir: () -> Unit,
     /** 点那颗星：收藏 / 取消收藏，收藏后排在列表最前面。 */
     onTogglePin: () -> Unit,
+    /** 「分组」：弹对话框改组名（空串 = 不分组）。 */
+    onGroup: () -> Unit,
     enabled: Boolean,
 ) {
     Card(
@@ -908,6 +1046,17 @@ private fun InstanceCard(
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
+                    // 组名单独一行、带「组」字前缀：光秃秃一个词会和版本名混在一起，
+                    // 用户会以为这是另一个版本。没分组就不写这行，和「上次玩」同一个取舍。
+                    if (instance.group.isNotBlank()) {
+                        Text(
+                            "组 " + instance.group,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.primary,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
                     val java = instance.javaPath
                     if (!java.isNullOrBlank()) {
                         Text(
@@ -949,6 +1098,11 @@ private fun InstanceCard(
                 OutlinedButton(onClick = onDetails, enabled = enabled) { Text("详情") }
                 // 删除文件对「已登记」和「仅扫描到」都开放：用户清理磁盘时不关心当初是谁登记的。
                 OutlinedButton(onClick = onDelete, enabled = enabled) { Text("删除文件…") }
+                // 「分组」对「已登记」和「仅扫描到」都开放：给扫描到的实例分组时
+                // 顺手把它登记下来（见 core 的 withGroup），所以不需要先登记。
+                OutlinedButton(onClick = onGroup, enabled = enabled) {
+                    Text(if (instance.group.isBlank()) "分组" else "改组")
+                }
                 if (instance.registered) {
                     OutlinedButton(onClick = onRemove, enabled = enabled) { Text("移除登记") }
                 } else {

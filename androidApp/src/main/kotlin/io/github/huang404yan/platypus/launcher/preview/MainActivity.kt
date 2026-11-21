@@ -56,6 +56,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
@@ -92,8 +93,11 @@ import io.github.huang404yan.platypus.core.instance.JsonInstanceRepository
 import io.github.huang404yan.platypus.core.instance.LoaderKind
 import io.github.huang404yan.platypus.core.instance.ScanResult
 import io.github.huang404yan.platypus.core.instance.instanceKey
+import io.github.huang404yan.platypus.core.instance.groupNames
 import io.github.huang404yan.platypus.core.instance.lastPlayedText
 import io.github.huang404yan.platypus.core.instance.mergeInstances
+import io.github.huang404yan.platypus.core.instance.sectionize
+import io.github.huang404yan.platypus.core.instance.withGroup
 import io.github.huang404yan.platypus.core.theme.LauncherTheme
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -508,6 +512,11 @@ private fun InstancePage() {
     var result by remember { mutableStateOf<ScanResult?>(null) }
     var scanning by remember { mutableStateOf(false) }
     var selected by remember { mutableStateOf<Instance?>(null) }
+    // 分组对话框的目标。与桌面一样单独存一个实例而不是布尔，理由见 [groupBySection] 注释。
+    var groupTarget by remember { mutableStateOf<Instance?>(null) }
+    // 默认不分段：老用户进来看到的应该还是原来那一整片，突然被切成几段会以为
+    // 列表错乱或实例丢了。只有手动点过「按组摆」之后才按组排。
+    var groupBySection by remember { mutableStateOf(false) }
     // 实例一多，列表就得能搜：手机上滚一屏只放得下四五条，
     // 二十多个版本时靠滑很难找到「前几天刚装的那个」。
     var query by remember { mutableStateOf("") }
@@ -574,6 +583,48 @@ private fun InstancePage() {
                 result = result?.let { r ->
                     r.copy(instances = r.instances.map { if (instanceKey(it) == instanceKey(instance)) instance else it })
                 }
+            }
+            scan()
+        }
+    }
+
+    /**
+     * 存分组。
+     *
+     * 与 [togglePin] 同一套：先就地改列表，让段头和卡片上的组名立刻反映出来，
+     * 再后台写盘；失败就把原样刷回来 + 留一句说明。手机上点完看不见变化，用户会当成没点中。
+     *
+     * 写的是 [withGroup] 的结果（顺手 registered=true）：只扫描到的外部实例不在
+     * instances.json 里，不登记下次扫描分组就丢。
+     */
+    fun saveGroup(instance: Instance, group: String) {
+        val updated = withGroup(instance, group)
+        if (updated.group == instance.group) {
+            // 组名没变（或是只多了首尾空白）：不用写盘，直接收起对话框。
+            groupTarget = null
+            return
+        }
+        result = result?.let { r ->
+            r.copy(instances = r.instances.map { if (instanceKey(it) == instanceKey(updated)) updated else it })
+        }
+        selected = selected?.let { if (instanceKey(it) == instanceKey(updated)) updated else it }
+        if (updated.group.isNotEmpty()) groupBySection = true
+        groupTarget = null
+        scope.launch {
+            val ok = withContext(Dispatchers.IO) {
+                runCatching {
+                    JsonInstanceRepository(JsonInstanceRepository.defaultIndexFile(File(root.trim())))
+                        .save(updated)
+                }.isSuccess
+            }
+            if (!ok) {
+                result = result?.let { r ->
+                    r.copy(instances = r.instances.map { if (instanceKey(it) == instanceKey(instance)) instance else it })
+                }
+                Notices.push(
+                    "分组没存上",
+                    "「" + instance.name + "」的分组只在这一页生效，下次扫描会回到原来的样子。",
+                )
             }
             scan()
         }
@@ -687,6 +738,39 @@ private fun InstancePage() {
                         )
                     }
                     val shown = InstanceCatalog.search(current.instances, query)
+                    // 卡片只写一遍，分段与不分段共用：以后给卡片加回调动一处就够，
+                    // 写两遍迟早只改了一处。
+                    val card: @Composable (Instance) -> Unit = { instance ->
+                        InstanceCard(
+                            instance = instance,
+                            onClick = { selected = instance },
+                            onTogglePin = { togglePin(instance) },
+                            onGroup = { groupTarget = instance },
+                        )
+                    }
+                    // 组名取全量不取搜索结果：当前搜索词可能把「Mod」那几条筛掉了，
+                    // 但它仍然是存在的组，改组时不该看不见。
+                    val knownGroups = groupNames(current.instances)
+                    val sections = if (groupBySection) sectionize(shown) else emptyList()
+                    if (knownGroups.isNotEmpty()) {
+                        // 「按组摆」只在真有组时才给。一个组都没有的时候，这个开关点了
+                        // 也和现在一样，放那儿只是让人觉得少点了什么。
+                        Row(
+                            Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            TextButton(onClick = { groupBySection = !groupBySection }) {
+                                Text(if (groupBySection) "不分段" else "按组摆")
+                            }
+                            Text(
+                                if (query.isBlank()) "共 " + knownGroups.size + " 个组"
+                                else "共 " + knownGroups.size + " 个组，下面只列搜到的",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
                     if (shown.isEmpty()) {
                         Text(
                             "没有一条对得上「" + query + "」。",
@@ -698,22 +782,73 @@ private fun InstancePage() {
                         modifier = Modifier.weight(1f),
                         verticalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
-                        items(shown, key = { instanceKey(it) }) { instance ->
-                            InstanceCard(
-                                instance = instance,
-                                onClick = { selected = instance },
-                                onTogglePin = { togglePin(instance) },
-                            )
+                        if (!groupBySection) {
+                            items(shown, key = { instanceKey(it) }) { instance ->
+                                card(instance)
+                            }
+                        } else {
+                            sections.forEach { section ->
+                                item(key = "section:" + section.name) {
+                                    GroupHeader(name = section.name, count = section.instances.size)
+                                }
+                                items(section.instances, key = { instanceKey(it) }) { instance ->
+                                    card(instance)
+                                }
+                            }
                         }
                     }
                 }
             }
         }
     }
+
+    // 对话框放在页面最后、且拿 pending 快照：分组保存后会改写 result 里的同一实例，
+    // 直接读 groupTarget 会在保存那一刻闪一下新名字再关掉。
+    val pendingGroup = groupTarget
+    if (pendingGroup != null) {
+        GroupDialog(
+            instanceName = pendingGroup.name,
+            current = pendingGroup.group,
+            knownGroups = groupNames(result?.instances.orEmpty()),
+            onDismiss = { groupTarget = null },
+            onConfirm = { picked -> saveGroup(pendingGroup, picked) },
+        )
+    }
+}
+
+/**
+ * 分段列表里的组标题行。
+ *
+ * 未分组那段没有名字，写「未分组」而不是空着：空着看起来像列表中间断了一截。
+ */
+@Composable
+private fun GroupHeader(name: String, count: Int) {
+    Row(
+        Modifier.fillMaxWidth().padding(top = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Text(
+            if (name.isEmpty()) "未分组" else name,
+            style = MaterialTheme.typography.labelLarge,
+            fontWeight = FontWeight.SemiBold,
+            color = if (name.isEmpty()) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface,
+        )
+        Text(
+            count.toString() + " 个",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
 }
 
 @Composable
-private fun InstanceCard(instance: Instance, onClick: () -> Unit, onTogglePin: () -> Unit) {
+private fun InstanceCard(
+    instance: Instance,
+    onClick: () -> Unit,
+    onTogglePin: () -> Unit,
+    onGroup: () -> Unit,
+) {
     Card(
         Modifier.fillMaxWidth().clickable(onClick = onClick),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
@@ -744,6 +879,14 @@ private fun InstanceCard(instance: Instance, onClick: () -> Unit, onTogglePin: (
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
+                // 组名带「组」字前缀：光秃秃一个词（尤其叫「1.20」这种）会和版本名混成一片。
+                if (instance.group.isNotBlank()) {
+                    Text(
+                        "组 " + instance.group,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                }
             }
             // 星放在徽标上方：星是用户的选择，徽标是机器的事实，两者不该并成一排。
             Column(
@@ -752,6 +895,14 @@ private fun InstanceCard(instance: Instance, onClick: () -> Unit, onTogglePin: (
             ) {
                 PinStar(pinned = instance.pinned, onClick = onTogglePin)
                 LoaderBadge(instance.loader)
+                // 分组按钮与星、徽标同列：卡片主体点一下是进详情，分组是卡片上的
+                // 第二个动作，摆在右边竖列的末尾，手指不会在滑动时误触。
+                TextButton(onClick = onGroup) {
+                    Text(
+                        if (instance.group.isBlank()) "分组" else "改组",
+                        style = MaterialTheme.typography.labelSmall,
+                    )
+                }
             }
         }
     }
