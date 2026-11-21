@@ -97,11 +97,13 @@ val PAGE_SUB_TABS: Map<Page, List<SubTab>> = mapOf(
         SubTab(SETTINGS_TAB_UI, "界面"),
         SubTab(SETTINGS_TAB_OTHER, "其他"),
     ),
-    // 「更多」三项：帮助在最前（遇到问题第一站），关于与诊断在后。
+    // 「更多」四项：帮助在最前（遇到问题第一站），关于与诊断在后，
+    // 百宝箱压在最后 —— 它是「平时想不起来、想起来才去翻」的工具页，不该占前排。
     Page.MORE to listOf(
         SubTab(MORE_TAB_HELP, "帮助"),
         SubTab(MORE_TAB_ABOUT, "关于与鸣谢"),
         SubTab(MORE_TAB_DIAG, "诊断"),
+        SubTab(MORE_TAB_TOOLBOX, "百宝箱"),
     ),
 )
 
@@ -114,10 +116,13 @@ const val DOWNLOAD_TAB_RESOURCEPACKS = "resourcepacks"
 const val DOWNLOAD_TAB_SHADERS = "shaders"
 const val DOWNLOAD_TAB_SERVER = "server"
 
-/** 「更多」下的三个二级项 id。 */
+/** 「更多」下的四个二级项 id。 */
 const val MORE_TAB_HELP = "help"
 const val MORE_TAB_ABOUT = "about"
 const val MORE_TAB_DIAG = "diag"
+
+/** 百宝箱：清日志垃圾、看谁占着盘。 */
+const val MORE_TAB_TOOLBOX = "toolbox"
 
 /** 某个一级页面的默认二级项：没配就返回空串。 */
 fun defaultSubTab(page: Page): String = PAGE_SUB_TABS[page]?.firstOrNull()?.id.orEmpty()

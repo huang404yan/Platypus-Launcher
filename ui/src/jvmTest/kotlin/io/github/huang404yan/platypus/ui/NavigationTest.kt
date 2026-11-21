@@ -107,10 +107,13 @@ class NavigationTest {
     }
 
     @Test
-    fun `更多下面是帮助关于与诊断`() {
+    fun `更多下面是帮助关于与诊断和百宝箱`() {
         val subs = PAGE_SUB_TABS.getValue(Page.MORE)
-        assertEquals(listOf(MORE_TAB_HELP, MORE_TAB_ABOUT, MORE_TAB_DIAG), subs.map { it.id })
-        assertEquals(listOf("帮助", "关于与鸣谢", "诊断"), subs.map { it.label })
+        assertEquals(
+            listOf(MORE_TAB_HELP, MORE_TAB_ABOUT, MORE_TAB_DIAG, MORE_TAB_TOOLBOX),
+            subs.map { it.id },
+        )
+        assertEquals(listOf("帮助", "关于与鸣谢", "诊断", "百宝箱"), subs.map { it.label })
     }
 
     @Test

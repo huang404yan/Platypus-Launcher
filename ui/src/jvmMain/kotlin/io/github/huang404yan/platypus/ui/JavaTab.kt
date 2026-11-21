@@ -30,8 +30,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import io.github.huang404yan.platypus.core.instance.Instance
+import io.github.huang404yan.platypus.core.runtime.GameJavaRules
+import io.github.huang404yan.platypus.core.runtime.JavaRecommendation
+import io.github.huang404yan.platypus.core.runtime.JavaRecommender
 import io.github.huang404yan.platypus.core.runtime.JavaRuntime
 import io.github.huang404yan.platypus.core.runtime.JavaRuntimeOffer
+import io.github.huang404yan.platypus.core.runtime.JavaVerdict
 import io.github.huang404yan.platypus.core.runtime.ManagedJava
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -64,6 +69,8 @@ internal fun JavaTab(
 
     var offers by remember { mutableStateOf<List<JavaRuntimeOffer>>(emptyList()) }
     var detected by remember { mutableStateOf<List<JavaRuntime>>(emptyList()) }
+    // 这一页要回答的不只是「有哪些 Java」，还有「我手上这几个版本各自够不够」。
+    var instances by remember { mutableStateOf<List<Instance>>(emptyList()) }
     var loading by remember { mutableStateOf(true) }
     var catalogError by remember { mutableStateOf("") }
     var detecting by remember { mutableStateOf(false) }
@@ -103,12 +110,19 @@ internal fun JavaTab(
         loading = true
         catalogError = ""
         val result = runCatching {
-            withContext(Dispatchers.IO) { backend.javaRuntimes.catalog() to backend.javaRuntimes.detect() }
+            withContext(Dispatchers.IO) {
+                val catalog = backend.javaRuntimes.catalog()
+                val local = backend.javaRuntimes.detect()
+                // 实例读失败不该连带整页报错：没有实例列表就只是少一张卡。
+                val owned = runCatching { backend.instances.list() }.getOrDefault(emptyList())
+                Triple(catalog, local, owned)
+            }
         }
         loading = false
-        result.onSuccess { (list, local) ->
+        result.onSuccess { (list, local, owned) ->
             offers = list
             detected = local
+            instances = owned
             if (list.isEmpty()) {
                 catalogError = "这台机器一份可下载的运行时都没列出来。可能是断网，也可能是当前平台官方没提供。"
             }
@@ -194,13 +208,47 @@ internal fun JavaTab(
             }
         }
 
+        SettingCard(
+            "各版本要的 Java",
+            "按每个版本要的主版本算了一遍。同一份 Java 能覆盖的归到一行，省得逐个点开看。",
+        ) {
+            if (instances.isEmpty()) {
+                Text(
+                    "还没有登记过版本。先去「启动」页装一个，这里才有东西可算。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            } else {
+                // 按主版本归并再算：几十个实例往往只需要两三种 Java，逐个算既慢又会把同一句话说很多遍。
+                val grouped = instances
+                    .groupBy { GameJavaRules.requiredMajor(it.gameVersion) }
+                    .entries
+                    .sortedBy { it.key }
+                for (entry in grouped) {
+                    val major = entry.key
+                    val owned = entry.value
+                    val rec = JavaRecommender.recommend(major, detected, offers)
+                    JavaNeedRow(
+                        major = major,
+                        instances = owned,
+                        recommendation = rec,
+                        busy = installing.isNotBlank(),
+                        onDownload = { rec.offer?.let { download(it) } },
+                    )
+                }
+            }
+        }
+
         SettingCard("本机已经找到的 Java", "启动游戏时会从这些里挑；一个都对不上才用上面的托管版本。") {
             OutlinedButton(
                 onClick = {
                     if (backend == null) return@OutlinedButton
                     scope.launch {
                         detecting = true
-                        runCatching { withContext(Dispatchers.IO) { backend.javaRuntimes.detect() } }
+                        // 点了「重新探测」就得真去探，不能 30 秒内的缓存糊弄过去。
+                        runCatching {
+                            withContext(Dispatchers.IO) { backend.javaRuntimes.detect(useCache = false) }
+                        }
                             .onSuccess { detected = it }
                             .onFailure {
                                 notice = "重新探测失败：" + (it.message ?: it.javaClass.simpleName)
@@ -362,6 +410,62 @@ private fun RuntimeRow(
                 color = MaterialTheme.colorScheme.primary,
             )
         } else {
+            Button(onClick = onDownload, enabled = !busy) { Text("下载") }
+        }
+    }
+}
+
+/**
+ * 「某个主版本要的 Java，本机够不够」一行。
+ *
+ * 为什么按主版本归并而不是逐实例列：几十个实例往往只要两三种 Java，
+ * 逐条列会把同一个结论重复很多遍，真正的差异（哪个版本没 Java）反而被淹没。
+ *
+ * 右边那颗按钮只在「本机没有、而清单里正好有这项」时才出现 ——
+ * 缺的版本官方没有时给一颗点了会失败的按钮，比不给更糟。
+ */
+@Composable
+private fun JavaNeedRow(
+    major: Int,
+    instances: List<Instance>,
+    recommendation: JavaRecommendation,
+    busy: Boolean,
+    onDownload: () -> Unit,
+) {
+    val tint = when (recommendation.verdict) {
+        JavaVerdict.READY -> MaterialTheme.colorScheme.primary
+        JavaVerdict.CAN_DOWNLOAD -> MaterialTheme.colorScheme.onSurface
+        JavaVerdict.NOT_AVAILABLE, JavaVerdict.UNKNOWN_NEED -> MaterialTheme.colorScheme.error
+    }
+    Row(
+        Modifier.fillMaxWidth().padding(vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(
+                "Java " + major,
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.SemiBold,
+                color = tint,
+            )
+            // 名字最多点三个，剩下的折成「等 N 个」：这一行的结论跟具体是哪个版本无关。
+            val names = instances.map { it.name.ifBlank { it.id } }
+            val shownNames = names.take(3).joinToString("、")
+            Text(
+                if (names.size > 3) shownNames + " 等 " + names.size + " 个版本" else shownNames,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Text(
+                JavaRecommender.describe(recommendation),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        if (recommendation.verdict == JavaVerdict.READY) {
+            Text("够用", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
+        } else if (recommendation.verdict == JavaVerdict.CAN_DOWNLOAD && recommendation.offer != null) {
             Button(onClick = onDownload, enabled = !busy) { Text("下载") }
         }
     }

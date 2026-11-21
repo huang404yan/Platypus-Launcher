@@ -58,6 +58,7 @@ import io.github.huang404yan.platypus.core.packs.PackKind
 import io.github.huang404yan.platypus.core.packs.PackScanResult
 import io.github.huang404yan.platypus.core.packs.PackScanner
 import io.github.huang404yan.platypus.core.runtime.GameJavaRules
+import io.github.huang404yan.platypus.core.runtime.JavaRecommender
 import io.github.huang404yan.platypus.core.runtime.JavaRuntime
 import io.github.huang404yan.platypus.core.runtime.findExactMajor
 import kotlinx.coroutines.Dispatchers
@@ -1083,8 +1084,11 @@ private fun JavaCard(
     onJavaPathChange: (String) -> Unit,
     runtimes: List<JavaRuntime>,
 ) {
+    // 推荐结论与启动页共用一份判断（[JavaRecommender]），否则同一台机器上两个页面会各说一套。
+    val recommendation = JavaRecommender.recommend(required, runtimes)
     DetailCard("Java") {
         DetailLine("当前设置", javaPath.ifBlank { "没设，启动时按版本要求自动找" })
+        DetailLine("推荐", JavaRecommender.describe(recommendation))
         OutlinedTextField(
             value = javaPath,
             onValueChange = onJavaPathChange,
@@ -1121,9 +1125,12 @@ private fun JavaCard(
             }
             if (runtimes.findExactMajor(required) == null) {
                 Text(
-                    "注意：没有正好是 Java " + required + " 的运行时。本启动器不做高版本顶替，启动会失败。",
+                    // 上面那条「推荐」已经说了本机有没有；这里只补一句最容易被误解的事：
+                    // 为什么不拿更高的那份顶上。
+                    "没有正好是 Java " + required + " 的也不会拿更高版本顶替：1.16.5 这类版本在 Java 16+ 上会直接崩，" +
+                        "悄悄换一份比明确报错更难查。",
                     style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.error,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
         }

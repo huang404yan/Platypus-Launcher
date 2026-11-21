@@ -55,6 +55,16 @@ data class Instance(
      * 有记录的后面，而不是被当成「刚玩过」掉到前面去。
      */
     val lastPlayedAt: Long = 0L,
+    /**
+     * 用户手动置顶（界面上叫「收藏」）。
+     *
+     * 参照 PCL 的「收藏的版本」（ModMinecraft.vb 的 IsStar），但存在我们自己的
+     * `instances.json` 里，不写进版本目录下的 ini —— 那个目录可能同时被别的启动器
+     * 用着，往里塞私货是污染，卸载我们之后对方还得清理。
+     *
+     * 默认 false 是为了不改老数据的意思：老实例一律算没置顶，排序与从前一致。
+     */
+    val pinned: Boolean = false,
 ) {
     companion object {
         const val DEFAULT_MEMORY_MB = 2048
@@ -122,16 +132,20 @@ fun mergeInstances(
 }
 
 /**
- * 实例列表的排序：登记的在前，其次最近玩过的在前，最后按名字。
+ * 实例列表的排序：置顶的在前，其次登记的在前，再按最近玩过，最后按名字。
+ *
+ * 置顶排在最前，且压过「登记的在前」：用户手动钉上去的那几条，意思就是
+ * 「不管其他规则，这几条我要一直看得到」。压缩包里带一堆外部版本时会特别明显。
  *
  * 「登记的在前」保留旧行为：扫描到的外部实例排在后面，用户自己建的那几条不会
- * 被别的启动器装的版本挤下去。第三级用名字而不是 id，是为了让两个从没启动过的
+ * 被别的启动器装的版本挤下去。第四级用名字而不是 id，是为了让两个从没启动过的
  * 实例之间也有稳定顺序 —— 少了这一级，同一次扫描两次刷新可能顺序不同。
  *
  * 时间戳取 0（从没启动过）的排在所有有记录之后：0 不能被当成「很久以前刚玩过」。
  */
 private val instanceOrder: Comparator<Instance> =
-    compareByDescending<Instance> { it.registered }
+    compareByDescending<Instance> { it.pinned }
+        .thenByDescending { it.registered }
         .thenByDescending { it.lastPlayedAt }
         .thenBy { it.name.lowercase() }
 

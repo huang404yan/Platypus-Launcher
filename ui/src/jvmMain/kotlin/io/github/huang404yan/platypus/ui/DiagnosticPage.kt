@@ -85,7 +85,8 @@ fun DiagnosticPage(backend: LauncherBackend? = null, initialGameRoot: String? = 
         detecting = true
         scope.launch {
             runtimes = try {
-                service.detect()
+                // 诊断页是「现在到底有什么」的地方，一律现探。
+                service.detect(useCache = false)
             } catch (t: Throwable) {
                 notice = "探测 Java 失败：" + (t.message ?: t.javaClass.simpleName)
                 emptyList()

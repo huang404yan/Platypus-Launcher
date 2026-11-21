@@ -1,10 +1,12 @@
 package io.github.huang404yan.platypus.desktop
 
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.awt.ComposeWindow
 import androidx.compose.ui.graphics.painter.BitmapPainter
 import androidx.compose.ui.graphics.toComposeImageBitmap
 import androidx.compose.ui.unit.dp
@@ -68,8 +70,31 @@ fun main(args: Array<String>) {
 
     application {
         val windowState = rememberWindowState(width = 1280.dp, height = 820.dp)
+        // 点右上角那个 × 只是「提出关窗」，不直接退：还有游戏在跑的时候要先问一句
+        // （见 App 的 closeSignal）。真正退出的入口只有一个 —— onCloseConfirmed。
+        var closeSignal by remember { mutableStateOf(0) }
+
+        // 托盘：系统支持时，关窗口＝收起来，游戏与下载照常跑。
+        // 这里三个状态都要走快照（而不是普通变量）：装没装上、点没点开，都会改变界面上的文案。
+        var trayReady by remember { mutableStateOf(false) }
+        val windowRef = remember { mutableStateOf<ComposeWindow?>(null) }
+        val tray = remember {
+            TrayController(
+                onOpen = {
+                    windowRef.value?.let { w ->
+                        w.isVisible = true
+                        // 从托盘叫回来时要抢到最前面：用户刚在别的窗口干活，不抢焦点会「点了没反应」。
+                        w.toFront()
+                        w.requestFocus()
+                    }
+                },
+                onExit = ::exitApplication,
+            )
+        }
+        DisposableEffect(Unit) { onDispose { tray.dispose() } }
+
         Window(
-            onCloseRequest = ::exitApplication,
+            onCloseRequest = { closeSignal++ },
             title = title,
             icon = loadWindowIcon(),
             state = windowState,
@@ -77,6 +102,12 @@ fun main(args: Array<String>) {
             LaunchedEffect(Unit) {
                 // 拖到比这还小，侧栏与表单会互相挤，不如直接卡住下限。
                 window.minimumSize = Dimension(1024, 640)
+            }
+            LaunchedEffect(Unit) {
+                windowRef.value = window
+                // 图标读不到（资源缺失）或系统不支持托盘时 install 返回 false，
+                // 之后一切退回「关窗口就是退出」的老行为，不留下一个空白通知区格子。
+                trayReady = tray.install(loadTrayBytes(), title)
             }
             // 标题栏由系统画，深色主题下那条浅灰白接缝很扎眼，所以这里跟着配色改。
             // 存成一个状态而不是直接在回调里调：窗口刚组合时 peer 可能还没建好，
@@ -105,6 +136,27 @@ fun main(args: Array<String>) {
                 backend = services,
                 // 配色不再影响标题栏，接口保留只是为了不牵动 ui 模块的签名。
                 onThemeChanged = { },
+                closeSignal = closeSignal,
+                onCloseConfirmed = { exitApplication() },
+                // 托盘装上了才给这条回调：给了就意味着「×」不再是退出。
+                onHideToTray = if (trayReady) {
+                    { gameCount ->
+                        window.isVisible = false
+                        // 第一次收起时弹一句说明，之后不再打扰（见 TrayController.hintHidden）。
+                        tray.hintHidden(gameCount)
+                    }
+                } else {
+                    null
+                },
+                // 窗口收进托盘之后界面上那张卡没人看得见，这时才补一个系统气泡；
+                // 窗口在前台时不弹，界面上已经说完了。
+                onSystemNotice = if (trayReady) {
+                    { title, body ->
+                        if (!window.isVisible) tray.mirror(title, body)
+                    }
+                } else {
+                    null
+                },
             )
         }
     }
@@ -160,4 +212,18 @@ private fun loadWindowIcon(): BitmapPainter? {
         ?: loader?.getResourceAsStream("icon/platypus-adult.png")?.use { it.readBytes() }
         ?: return null
     return runCatching { BitmapPainter(Image.makeFromEncoded(bytes).toComposeImageBitmap()) }.getOrNull()
+}
+
+/**
+ * 托盘图标的原始字节，取法与窗口图标一致（同样是 adult/baby 两份）。
+ *
+ * 不复用 [loadWindowIcon]：那条路已经把字节解成了 Compose 的 BitmapPainter，
+ * 而 AWT 的 TrayIcon 只吃 java.awt.Image，得自己过一遍 ImageIO。
+ * 读不到返回 null，[TrayController.install] 会据此放弃装托盘。
+ */
+private fun loadTrayBytes(): ByteArray? {
+    val name = if (Brand.isPreview) "icon/platypus-baby.png" else "icon/platypus-adult.png"
+    val loader = Thread.currentThread().contextClassLoader
+    return loader?.getResourceAsStream(name)?.use { it.readBytes() }
+        ?: loader?.getResourceAsStream("icon/platypus-adult.png")?.use { it.readBytes() }
 }

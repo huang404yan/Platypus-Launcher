@@ -1,6 +1,7 @@
 package io.github.huang404yan.platypus.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
@@ -44,6 +45,7 @@ import androidx.compose.ui.unit.dp
 import io.github.huang404yan.platypus.core.download.DownloadReport
 import io.github.huang404yan.platypus.core.instance.DeletionPlan
 import io.github.huang404yan.platypus.core.instance.Instance
+import io.github.huang404yan.platypus.core.instance.InstanceCatalog
 import io.github.huang404yan.platypus.core.instance.InstanceDeleter
 import io.github.huang404yan.platypus.core.instance.InstanceScanner
 import io.github.huang404yan.platypus.core.instance.LoaderKind
@@ -126,6 +128,8 @@ fun InstancePage(
     /** 「连存档一起删」勾选框；默认不勾，存档是唯一重新下载不回来的东西。 */
     var deleteSavesToo by remember { mutableStateOf(false) }
     var deleting by remember { mutableStateOf(false) }
+    /** 实例列表的过滤词；空串 = 不筛。 */
+    var query by remember { mutableStateOf("") }
 
     val scope = rememberCoroutineScope()
 
@@ -210,6 +214,37 @@ fun InstancePage(
                 "已保存：" + clamped + " MB（跟随设置里的默认内存）。"
             } else {
                 "已保存：" + clamped + " MB。"
+            }
+            rescan()
+        }
+    }
+
+    /**
+     * 切换收藏（置顶）。
+     *
+     * 落在 instances.json 的 pinned 字段里，不往版本目录写文件 —— 那种目录常常是
+     * 别的启动器（甚至压缩包）带来的，往里塞我们自己的 ini 属于污染别人的目录。
+     * 顺带 registered = true：用户既然主动钉了它，这条就该被我们记住，
+     * 哪怕它当初只是扫出来的。
+     */
+    fun togglePin(instance: Instance) {
+        if (backend == null) {
+            editNotice = "后端未装配：没法保存收藏。"
+            return
+        }
+        val updated = instance.copy(pinned = !instance.pinned, registered = true)
+        scope.launch {
+            val error = withContext(Dispatchers.IO) {
+                runCatching { backend.instances.save(updated) }.exceptionOrNull()
+            }
+            if (error != null) {
+                editNotice = "收藏没存上：" + describe(error)
+                return@launch
+            }
+            editNotice = if (updated.pinned) {
+                "已收藏 " + updated.name + "，它会排在列表最前面。"
+            } else {
+                "已取消收藏 " + updated.name + "。"
             }
             rescan()
         }
@@ -413,7 +448,8 @@ fun InstancePage(
     }
 
     val busy = phase is NewPhase.Running
-    val merged = mergeInstances(registered, result?.instances.orEmpty(), result?.libraryVersions.orEmpty())
+    val allInstances = mergeInstances(registered, result?.instances.orEmpty(), result?.libraryVersions.orEmpty())
+    val merged = InstanceCatalog.search(allInstances, query)
     val scannedOnly = merged.count { !it.registered }
 
     // 整页滚动：默认窗口里卡片一多，下面几张就被切在窗口外，用户得先最大化才看得全。
@@ -493,6 +529,25 @@ fun InstancePage(
         if (message.isNotBlank()) Hint(message)
 
         val current = result
+        // 有实例才给搜索框：一条都没有时它是块占地方的空白，
+        // 首屏应该留给「新建实例」那一步。
+        if (allInstances.isNotEmpty()) {
+            OutlinedTextField(
+                value = query,
+                onValueChange = { query = it },
+                modifier = Modifier.fillMaxWidth(),
+                label = { Text("搜版本（名字、版本号、加载器、目录，用空格分词）") },
+                singleLine = true,
+                trailingIcon = {
+                    if (query.isNotEmpty()) {
+                        TextButton(onClick = { query = "" }) { Text("清空") }
+                    }
+                },
+            )
+        }
+        if (query.isNotBlank() && merged.isEmpty()) {
+            Hint("没有名字里带「" + query.trim() + "」的版本。清空搜索看全部。")
+        }
         Box(Modifier.fillMaxWidth()) {
             when {
                 current == null && merged.isEmpty() -> Hint("还没有扫描。填入目录后点「扫描」。")
@@ -504,6 +559,10 @@ fun InstancePage(
                     }
                 }
 
+                // 搜索筛空的情况上面已经提示过，这里不再重复一句「没有识别到版本」——
+                // 那句话说的是目录里没版本，而目录里其实有，只是被筛掉了。
+                query.isNotBlank() && merged.isEmpty() -> Unit
+
                 merged.isEmpty() -> {
                     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                         Hint("没有识别到版本。点「新建实例」装一个，或检查 versions/ 下每个版本是否都有同名 .json。")
@@ -514,7 +573,8 @@ fun InstancePage(
                 else -> Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     val warningCount = current?.warnings.orEmpty().size
                     Text(
-                        "找到 " + merged.size + " 个实例（已登记 " + registered.size + " · 仅扫描到 " + scannedOnly + "）" +
+                        (if (query.isBlank()) "找到 " else "搜到 ") + merged.size + " 个实例（共 " + allInstances.size +
+                            " 个，已登记 " + registered.size + " · 仅扫描到 " + scannedOnly + "）" +
                             if (warningCount == 0) "" else "，" + warningCount + " 条提示",
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.SemiBold,
@@ -538,11 +598,18 @@ fun InstancePage(
                                 // 跟随默认内存的实例，卡片上显示与滑条都用生效值（见 Instance.effectiveMemoryMb）。
                                 effectiveMemoryMb = Instance.effectiveMemoryMb(instance, defaultMemoryMb),
                                 onMemoryChange = { picked -> saveMemoryMb(instance, picked) },
+                                onTogglePin = { togglePin(instance) },
                                 onRegister = { register(instance) },
                                 onLaunch = { onLaunch(instance) },
                                 onRemove = { removeRegistration(instance) },
                                 onDelete = { prepareDelete(instance) },
                                 onDetails = { onOpenSetup(instance) },
+                                onOpenDir = {
+                                    if (!openInExplorer(File(instance.directory))) {
+                                        editNotice = "这台机器没法打开文件管理器。" +
+                                            "版本目录在 " + instance.directory
+                                    }
+                                },
                                 enabled = !busy && !deleting,
                             )
                         }
@@ -768,6 +835,10 @@ private fun InstanceCard(
     onLaunch: () -> Unit,
     onRemove: () -> Unit,
     onDelete: () -> Unit,
+    /** 「打开所在文件夹」：在资源管理器里定位到这一版。 */
+    onOpenDir: () -> Unit,
+    /** 点那颗星：收藏 / 取消收藏，收藏后排在列表最前面。 */
+    onTogglePin: () -> Unit,
     enabled: Boolean,
 ) {
     Card(
@@ -796,12 +867,18 @@ private fun InstanceCard(
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
+                    // 点目录这一行 = 打开所在文件夹。原先想删掉目录文本换成按钮，
+                    // 但目录本身是有用的信息（同名版本靠它区分），所以让这一行直接可点：
+                    // 比在卡片上再加第五个按钮省地方，也不用把动作行挤成两排。
                     Text(
                         instance.directory,
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable(enabled = enabled, onClick = onOpenDir),
                     )
                     Text(
                         effectiveMemoryMb.toString() + " MB" +
@@ -832,7 +909,12 @@ private fun InstanceCard(
                         )
                     }
                 }
-                LoaderBadge(instance.loader)
+                // 右上角一列：星在最上（收藏是「我要一直看到它」的态度，放最显眼处），
+                // 加载器徽标在下（那是这台机器的事实，不是用户的选择）。
+                Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    PinMark(pinned = instance.pinned, enabled = enabled, onClick = onTogglePin)
+                    LoaderBadge(instance.loader)
+                }
             }
 
             // 动作按钮用 FlowRow 折行：卡片宽度固定而按钮文字随「已登记 / 仅扫描到」变化，

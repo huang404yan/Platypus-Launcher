@@ -22,6 +22,17 @@ data class JavaRuntime(
 interface JavaRuntimeService {
     suspend fun detect(): List<JavaRuntime>
 
+    /**
+     * 探测本机 Java，允许用短期缓存顶上。
+     *
+     * 探测一次要把候选 java 逐个真跑起来（几秒），而启动页、实例详情、Java 页、
+     * 诊断页会在同一屏里各调一次。这里给实现方一个挂缓存的口子：默认实现照旧全量探，
+     * 桌面端用 [JavaDetectCache] 挡掉密集重复（见 DesktopJavaRuntimeService）。
+     *
+     * [useCache] = false 是「用户点了重新探测」「刚装完或刚删掉一份运行时」的强制刷新。
+     */
+    suspend fun detect(useCache: Boolean): List<JavaRuntime> = detect()
+
     /** 缺失时下载；返回可用运行时。 */
     suspend fun ensure(major: Int, onProgress: (Float) -> Unit = {}): JavaRuntime
 

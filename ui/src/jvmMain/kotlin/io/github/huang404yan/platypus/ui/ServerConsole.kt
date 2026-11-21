@@ -6,12 +6,11 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -19,7 +18,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -399,11 +397,6 @@ internal fun ServerConsoleCard(
     onSend: (String) -> Unit,
 ) {
     var input by remember { mutableStateOf("") }
-    val listState = rememberLazyListState()
-    // 新行来了就滚到底：盯着控制台的人要的是最新一行，不是最旧一行。
-    LaunchedEffect(state.lines.size) {
-        if (state.lines.isNotEmpty()) listState.scrollToItem(state.lines.size - 1)
-    }
     Card(Modifier.fillMaxWidth()) {
         Column(
             Modifier.fillMaxWidth().padding(12.dp),
@@ -473,7 +466,11 @@ internal fun ServerConsoleCard(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 } else {
-                    LazyColumn(state = listState, verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    AutoScrollLogList(
+                        itemCount = state.lines.size,
+                        modifier = Modifier.fillMaxSize(),
+                        verticalArrangement = Arrangement.spacedBy(2.dp),
+                    ) {
                         items(state.lines) { line ->
                             Text(
                                 line,

@@ -21,11 +21,11 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
@@ -79,7 +79,9 @@ import io.github.huang404yan.platypus.core.launch.LaunchArguments
 import io.github.huang404yan.platypus.core.launch.LaunchDiagnosis
 import io.github.huang404yan.platypus.core.launch.LaunchEvent
 import io.github.huang404yan.platypus.core.launch.LaunchRequest
+import io.github.huang404yan.platypus.core.launch.RunningGames
 import io.github.huang404yan.platypus.core.runtime.GameJavaRules
+import io.github.huang404yan.platypus.core.runtime.JavaRecommender
 import io.github.huang404yan.platypus.core.runtime.JavaRuntime
 import io.github.huang404yan.platypus.core.runtime.findExactMajor
 import io.github.huang404yan.platypus.core.saves.AutoBackupPolicy
@@ -94,6 +96,8 @@ import java.io.File
 import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -141,6 +145,22 @@ fun LaunchPage(
      * 用户 2026-11-16 报的那条 bug 就是这个。
      */
     refreshTick: Int = 0,
+    /**
+     * 「这轮运行里哪些版本还在跑」。
+     *
+     * 由 App 层持有并传进来，不在这一页里 new：切页会把这一页整个销毁，
+     * 记在这儿的话，用户去下载页装个模组再回来，游戏还在跑、界面却说没在跑，
+     * 于是又点一次启动 —— 盘上多一个 java 进程，两份进程抢同一份存档。
+     */
+    runningGames: RunningGames = remember { RunningGames() },
+    /**
+     * [runningGames] 每次增减都会加一，用来触发重组。
+     *
+     * 那张表是普通对象不是 Compose 快照状态：它要能在非 Compose 的回调（进程退出）
+     * 里安全地改，同时又不该让 ui 模块去依赖 state 之外的线程模型。用一个计数器当信号源
+     * 是这类「外部可变的共享事实」最省事也最不容易错的做法。
+     */
+    runningTick: Int = 0,
     /**
      * 界面模式。
      *
@@ -223,6 +243,14 @@ fun LaunchPage(
     val logs = remember { mutableStateListOf<String>() }
     val buffer = remember { LogBuffer() }
     var handle by remember { mutableStateOf<GameHandle?>(null) }
+    /**
+     * 这一页的日志 / 阶段条现在归属哪一个实例。
+     *
+     * 同一页先后可以起好几个实例（见 RunningGames），但界面只有一份日志区：
+     * 不区分归属的话，A 的日志和 B 的日志会混在同一列里，读起来是一份谁都不是的东西。
+     * 所以只有「当前归属」那一个的事件才写界面状态，其余的只更新 RunningGames。
+     */
+    var logOwnerKey by remember { mutableStateOf("") }
     var menuReached by remember { mutableStateOf(false) }
     // 日志区按钮的一次性反馈（复制/导出成功或失败），不做气泡通知，一行字够了
     var notice by remember { mutableStateOf("") }
@@ -239,25 +267,41 @@ fun LaunchPage(
     var quickSupported by remember { mutableStateOf(true) }
     LaunchedEffect(selected?.directory) {
         val instance = selected ?: return@LaunchedEffect
-        quickSupported = runCatching {
-            val json = File(File(instance.directory), File(instance.directory).name + ".json")
-            if (!json.isFile) return@runCatching true
-            LaunchArguments.supportsQuickPlay(parseVersionJson(json.readText()))
-        }.getOrDefault(true)
+        // 读版本 json 要碰磁盘（几百 KB 的 json 在机械盘上不是瞬时的），
+        // 放在组合线程里会让「切实例」这一下卡一帧。
+        quickSupported = withContext(Dispatchers.IO) {
+            runCatching {
+                val json = File(File(instance.directory), File(instance.directory).name + ".json")
+                if (!json.isFile) return@runCatching true
+                LaunchArguments.supportsQuickPlay(parseVersionJson(json.readText()))
+            }.getOrDefault(true)
+        }
     }
 
     /** 扫描目录 + 读登记，登记的排在前面。 */
-    suspend fun rescan() {
+    suspend fun rescan() = coroutineScope {
+        // 每次重扫顺手对一次「还在跑」的账：进程退出事件会丢（外面杀了、启动器崩过），
+        // 丢一次界面就把那一版永远画成运行中，按钮也永远停在「结束这个」上。
+        // 放在这里而不是定时轮询：重扫是「用户正在看这份列表」的信号，够频、也够省。
+        runningGames.pruneDead()
         val text = rootText.trim()
-        val result = withContext(Dispatchers.IO) {
+        // 扫目录与读登记表互不依赖，并行发起：扫目录要遍历 versions/ 下几十个 json，
+        // 读登记表只是一次小文件读取。串着做的话打开启动器时那段等待是两份相加。
+        val result = async(Dispatchers.IO) {
             if (text.isEmpty()) null else InstanceScanner.scan(File(text))
         }
-        val saved = withContext(Dispatchers.IO) {
+        val saved = async(Dispatchers.IO) {
             runCatching { backend.instances.list() }.getOrDefault(emptyList())
         }
-        scanned = result
-        registered = saved
-        val merged = mergeInstances(saved, result?.instances.orEmpty(), result?.libraryVersions.orEmpty())
+        val scannedResult = result.await()
+        val savedList = saved.await()
+        scanned = scannedResult
+        registered = savedList
+        val merged = mergeInstances(
+            savedList,
+            scannedResult?.instances.orEmpty(),
+            scannedResult?.libraryVersions.orEmpty(),
+        )
         val focused = focusKey?.takeIf { it.isNotBlank() }?.let { key ->
             merged.firstOrNull { instanceKey(it) == key }
         }
@@ -273,12 +317,13 @@ fun LaunchPage(
     }
 
     /** 版本 json 里声明的 javaVersion.component；读不到就返回 null，由后端按主版本推。 */
-    fun javaComponentOf(instance: Instance): String? =
+    suspend fun javaComponentOf(instance: Instance): String? = withContext(Dispatchers.IO) {
         runCatching {
             val json = File(File(instance.directory), File(instance.directory).name + ".json")
-            if (!json.isFile) return null
+            if (!json.isFile) return@withContext null
             parseVersionJson(json.readText()).javaVersion?.component?.takeIf { it.isNotBlank() }
         }.getOrNull()
+    }
 
     /**
      * 静默装一份托管 Java：进度照常打在 [javaPhase] 上，失败不弹窗、不留错误页。
@@ -295,10 +340,12 @@ fun LaunchPage(
                 backend.javaRuntimes.ensureRuntime(major, null) { fraction ->
                     javaPhase = JavaPhase.Installing(fraction, "正在下载 Java " + major)
                 }
-                val refreshed = runCatching { backend.javaRuntimes.detect() }.getOrDefault(emptyList())
+                val refreshed = runCatching { backend.javaRuntimes.detect(useCache = false) }
+                    .getOrDefault(emptyList())
                 javaPhase = JavaPhase.Done(refreshed)
             } catch (t: Throwable) {
-                val fallback = runCatching { backend.javaRuntimes.detect() }.getOrDefault(emptyList())
+                val fallback = runCatching { backend.javaRuntimes.detect(useCache = false) }
+                    .getOrDefault(emptyList())
                 javaPhase = JavaPhase.Done(fallback)
             }
         }
@@ -315,7 +362,9 @@ fun LaunchPage(
         javaPhase = JavaPhase.Detecting
         scope.launch {
             val found = try {
-                backend.javaRuntimes.detect()
+                // 这是「探一次」的显式动作（打开启动器 / 点重新探测），绕开缓存：
+                // 用户在这个页面上最常问的就是「我刚装的 Java 怎么没出来」。
+                backend.javaRuntimes.detect(useCache = false)
             } catch (t: Throwable) {
                 // 探测失败不能当成「没有 Java」，原文要原样带到界面上
                 javaPhase = JavaPhase.Failed(t.message ?: t.javaClass.simpleName, duringInstall = false)
@@ -336,7 +385,9 @@ fun LaunchPage(
                 val runtime = backend.javaRuntimes.ensureRuntime(major, javaComponentOf(instance)) { fraction ->
                     javaPhase = JavaPhase.Installing(fraction, "正在下载 Java " + major)
                 }
-                val refreshed = runCatching { backend.javaRuntimes.detect() }.getOrDefault(emptyList())
+                // 刚下完，必须看盘上新状态，不能拿缓存里的旧列表把这一份盖掉。
+                val refreshed = runCatching { backend.javaRuntimes.detect(useCache = false) }
+                    .getOrDefault(emptyList())
                 javaPhase = JavaPhase.Done(refreshed)
                 selectedJava = runtime
             } catch (t: Throwable) {
@@ -389,6 +440,29 @@ fun LaunchPage(
             }
         }
         return updated
+    }
+
+    /**
+     * 在启动页给某个版本加 / 摘收藏。
+     *
+     * 与实例页那颗星是同一个字段（Instance.pinned），所以这里点完不必自己重排：
+     * [rescan] 走 mergeInstances，排序里置顶压在最前。写盘用 copy（只改一个字段），
+     * 免得把别处刚存的 lastPlayedAt 或内存冲回去。
+     */
+    fun togglePin(instance: Instance) {
+        val updated = instance.copy(pinned = !instance.pinned, registered = true)
+        // 先就地改一下列表里这一条，点下去立刻能看到星填充；磁盘失败再重扫回真实状态。
+        registered = registered.map { if (it.id == updated.id) updated else it }
+        selected = selected?.let { if (it.id == updated.id) updated else it }
+        scope.launch {
+            val error = withContext(Dispatchers.IO) {
+                runCatching { backend.instances.save(updated) }.exceptionOrNull()
+            }
+            if (error != null) {
+                notice = "收藏没存上：" + (error.message ?: error.javaClass.simpleName)
+            }
+            rescan()
+        }
     }
 
     /**
@@ -483,7 +557,11 @@ fun LaunchPage(
         stageText = ""
         stageFraction = 0f
         handle = null
-        startedAt = System.currentTimeMillis()
+        // 界面上那点东西（日志、阶段条、状态行）从此归这个实例。
+        // 别的实例的事件不再写它们 —— 两路日志混成一列，读起来就是一份谁都不是的东西。
+        logOwnerKey = launchedKey
+        val launchStartedAt = System.currentTimeMillis()
+        startedAt = launchStartedAt
         autoBackupNotice = ""
         phase = LaunchPhase.Starting
         val offlineSession = OfflineProfile.session(username.trim().ifBlank { "Dev" })
@@ -553,17 +631,26 @@ fun LaunchPage(
                     quickPlayServer = quickTarget,
                     gameLanguage = gameLanguage,
                 )
+                // 事件回调来自 IO 线程，可能同时有别的实例在跑：只有「当前归属这一版」的事件
+                // 才写界面上那点状态，其余实例的只更新运行表。判断放在这里而不是各分支里，
+                // 免得将来加一种事件又漏一处。注意 Started / Exited 对每一个实例都要处理
+                // （运行表靠它们），真正要分归属的只有日志行与阶段文字。
                 val started = backend.gameRuntime.launch(request) { event ->
+                    val ownsUi = logOwnerKey == launchedKey
                     when (event) {
                         is LaunchEvent.Stage -> {
-                            stageText = event.name
-                            // 只前进不后退：解压原生库会边解边报 0.15，回退会让进度条来回抖。
-                            if (event.fraction > stageFraction) stageFraction = event.fraction
+                            if (ownsUi) {
+                                stageText = event.name
+                                // 只前进不后退：解压原生库会边解边报 0.15，回退会让进度条来回抖。
+                                if (event.fraction > stageFraction) stageFraction = event.fraction
+                            }
                         }
                         is LaunchEvent.Started -> {
-                            stageText = "已启动"
-                            stageFraction = 1f
-                            phase = LaunchPhase.Running(event.pid)
+                            if (ownsUi) {
+                                stageText = "已启动"
+                                stageFraction = 1f
+                                phase = LaunchPhase.Running(event.pid)
+                            }
                             // 「上次玩什么时候」只在这一刻记：进程真的起来了才算玩过。
                             // 放在退出时记会有两个问题 —— 崩在启动阶段的那次也算一次，
                             // 而崩溃时正好不该再动磁盘。写盘失败不拦启动，也不提示：
@@ -578,61 +665,112 @@ fun LaunchPage(
                             }
                         }
                         is LaunchEvent.LogLine -> {
-                            buffer.add(event.text)
-                            logs.add(event.text)
-                            if (logs.size > MAX_VISIBLE_LINES) logs.removeAt(0)
-                            if (!menuReached && LaunchDiagnosis.reachedMenu(listOf(event.text))) {
-                                menuReached = true
+                            // buffer 只给归属者用：它喂的是「这次启动有没有到主菜单」与崩溃归因，
+                            // 别的实例的行混进来，这份归因就不再是这一次的。
+                            if (ownsUi) {
+                                buffer.add(event.text)
+                                logs.add(event.text)
+                                if (logs.size > MAX_VISIBLE_LINES) logs.removeAt(0)
+                                if (!menuReached && LaunchDiagnosis.reachedMenu(listOf(event.text))) {
+                                    menuReached = true
+                                }
                             }
                         }
                         is LaunchEvent.Exited -> {
-                            stageText = ""
-                            // 事件回调本来就在 IO 线程，这里同步读一次崩溃报告（最多 256 KB）即可，
-                            // 不额外开协程：退出这一刻界面正等着出结论，异步读会让卡片晚一拍才出现。
-                            // 两道闸：退出码为 0 说明游戏自己退干净了；报告还得比本次启动新。
-                            val crash = if (event.code == 0) null else runCatching {
-                                CrashReports.read(File(instance.directory))
-                                    ?.takeIf { it.modifiedAt >= startedAt - CRASH_MTIME_SLACK_MS }
-                            }.getOrNull()
-                            phase = LaunchPhase.Exited(
-                                code = event.code,
-                                diagnosis = event.diagnosis,
-                                reachedMenu = LaunchDiagnosis.reachedMenu(buffer.tail(1_000)),
-                                crash = crash,
-                            )
-                            // 自动备份：只在退出码为 0 时做。非 0 可能是崩在半路，
-                            // 那时世界文件未必写完，打出来的 zip 有可能是半份 ——
-                            // 备份的意义是留一个能用的还原点，不是留一个刚好坏在那儿的文件。
-                            // 回调本就在 IO 线程，这里直接同步跑（与上面读崩溃报告同一个理由）。
-                            if (event.code == 0) {
-                                autoBackupNotice = runAutoBackup(instance, backupPolicy)
+                            // 先摘运行表：不管这一页现在盯着谁，这个进程都确实没了。
+                            // 「结束这个」按钮、卡片上的运行中标记都靠它。
+                            runningGames.remove(launchedKey)
+                            // 退出的不是现在盯着的那一版：界面状态（状态行、崩溃卡片、自动备份）
+                            // 都不该被它改掉 —— 那会让用户以为正在玩的那个崩了。
+                            if (ownsUi) {
+                                stageText = ""
+                                // 事件回调本来就在 IO 线程，这里同步读一次崩溃报告（最多 256 KB）即可，
+                                // 不额外开协程：退出这一刻界面正等着出结论，异步读会让卡片晚一拍才出现。
+                                // 两道闸：退出码为 0 说明游戏自己退干净了；报告还得比本次启动新。
+                                val crash = if (event.code == 0) null else runCatching {
+                                    CrashReports.read(File(instance.directory))
+                                        ?.takeIf { it.modifiedAt >= startedAt - CRASH_MTIME_SLACK_MS }
+                                }.getOrNull()
+                                phase = LaunchPhase.Exited(
+                                    code = event.code,
+                                    diagnosis = event.diagnosis,
+                                    reachedMenu = LaunchDiagnosis.reachedMenu(buffer.tail(1_000)),
+                                    crash = crash,
+                                )
+                                // 自动备份：只在退出码为 0 时做。非 0 可能是崩在半路，
+                                // 那时世界文件未必写完，打出来的 zip 有可能是半份 ——
+                                // 备份的意义是留一个能用的还原点，不是留一个刚好坏在那儿的文件。
+                                // 回调本就在 IO 线程，这里直接同步跑（与上面读崩溃报告同一个理由）。
+                                if (event.code == 0) {
+                                    autoBackupNotice = runAutoBackup(instance, backupPolicy)
+                                }
                             }
                         }
                     }
                 }
                 handle = started
+                // 登记到「这轮运行里哪些版本在跑」：进程起来了才算，失败的那次不进表。
+                // 之后页面上所有「这一版在不在跑」的判断都读这张表，不读这一页的 phase。
+                runningGames.put(
+                    RunningGames.Entry(
+                        key = launchedKey,
+                        name = instance.name.ifBlank { instance.id },
+                        gameVersion = instance.gameVersion,
+                        directory = instance.directory,
+                        pid = started.pid ?: -1L,
+                        startedAt = launchStartedAt,
+                        handle = started,
+                    ),
+                )
                 // 用户在浮层上点了「取消启动」：进程这时才拿到句柄，立刻停它。
                 if (launchCancelRequested) {
                     launchCancelRequested = false
                     runCatching { started.stop() }
+                    runningGames.remove(launchedKey)
                     handle = null
                     stageText = ""
                     stageFraction = 0f
                     if (phase is LaunchPhase.Running) phase = LaunchPhase.Idle
                 }
             } catch (t: Throwable) {
-                phase = LaunchPhase.Failed(t.message ?: t.javaClass.simpleName)
+                // 启动失败也要摘表：进程根本没起来，留在表里会让界面一直显示「运行中」。
+                runningGames.remove(launchedKey)
+                if (logOwnerKey == launchedKey) {
+                    phase = LaunchPhase.Failed(t.message ?: t.javaClass.simpleName)
+                }
             }
         }
     }
 
-    fun stopGame() {
-        val current = handle ?: return
-        stageText = "正在停止"
+    /**
+     * 结束某个实例的游戏。
+     *
+     * 默认结束当前选中那一版；卡片上没给 key 时，退回「这一页最近起的那一个」（handle）。
+     * 两者都读运行表而不读 phase：phase 只记得最近一次由这一页起的进程。
+     */
+    fun stopGame(key: String? = null) {
+        val targetKey = key ?: selected?.let { instanceKey(it) } ?: return
+        val entry = runningGames.get(targetKey)
+        if (entry == null) {
+            // 表里没有但它还在这页手里（例如登记之前就失败了）：兜底把本地句柄停掉。
+            val current = handle ?: return
+            scope.launch {
+                runCatching { current.stop() }
+                handle = null
+                if (phase !is LaunchPhase.Exited) phase = LaunchPhase.Idle
+            }
+            return
+        }
+        if (logOwnerKey == targetKey) stageText = "正在停止"
         scope.launch {
-            runCatching { current.stop() }
-            handle = null
-            if (phase !is LaunchPhase.Exited) phase = LaunchPhase.Idle
+            runCatching { entry.handle.stop() }
+            // 进程可能自己先退了（Exited 里已经摘过），这里再摘一次是无害的幂等操作。
+            runningGames.remove(targetKey)
+            if (logOwnerKey == targetKey) {
+                handle = null
+                stageText = ""
+                if (phase !is LaunchPhase.Exited) phase = LaunchPhase.Idle
+            }
         }
     }
 
@@ -674,8 +812,11 @@ fun LaunchPage(
                 }
             }
         }
-        if (rootText.isNotBlank()) rescan()
+        // 先起 Java 探测，再扫目录：两者互不依赖，探测要跑注册表查询和若干个 java 进程，
+        // 串起来就是「打开启动器 → 先等实例列表、再等 Java 行出现」，两个进度条一前一后。
+        // detectJava 内部本来就 scope.launch 立即返回，把顺序换过来就等于让它们并行。
         detectJava()
+        if (rootText.isNotBlank()) rescan()
     }
 
     // 副页面关掉后重扫一次：登记 / 新建 / 删除都发生在那边，这一页的 registered 需要跟上。
@@ -697,15 +838,30 @@ fun LaunchPage(
     }
 
     // 选中实例后按游戏版本要求挑一个主版本正好匹配的 Java；没有就不选，由界面提示缺什么。
+    // 挑法统一交给 [JavaRecommender]，详情页与设置页说的是同一套话，不会这页说「缺 17」那页说「没有正好是 17 的」。
     LaunchedEffect(selected?.directory, javaPhase) {
         val instance = selected ?: return@LaunchedEffect
         val list = (javaPhase as? JavaPhase.Done)?.runtimes ?: return@LaunchedEffect
         val required = GameJavaRules.requiredMajor(instance.gameVersion)
-        val exact = list.findExactMajor(required)
-        selectedJava = exact ?: selectedJava?.takeIf { it.majorVersion == required }
+        val pick = JavaRecommender.recommend(required, list).runtime
+        // 挑不到就只在「现有这份主版本还对」时保留它，否则清空 —— 界面靠 selectedJava 为空来提示缺 Java。
+        selectedJava = pick ?: selectedJava?.takeIf { it.majorVersion == required }
     }
 
-    val busy = phase is LaunchPhase.Starting || phase is LaunchPhase.Running
+    // busy 只表示「这一页正在拉起一个进程」。
+    //
+    // 这里以前把「运行中」也算进去，于是只要有一个游戏在跑，整页的按钮全灰：
+    // 想趁游戏跑着再开一个别的版本，或者只是想看一眼别的版本设置，都做不到。
+    // 现在运行中不锁页面 —— 要防的只是同一个实例被起两次，那一条由侧栏按钮
+    // （selectedRunning 非空时变成「结束这个」）和卡片上的运行中标记来挡。
+    val busy = phase is LaunchPhase.Starting
+
+    /** 正在跑的那批（列表用来给卡片打「运行中」标记、侧栏用来显示「共 N 个」）。 */
+    val runningEntries = remember(runningTick) { runningGames.all() }
+    /** 当前选中这一版的运行记录；非空时左栏按钮改成「结束这个」。 */
+    val selectedRunning = remember(runningTick, selected?.directory) {
+        selected?.let { runningGames.get(instanceKey(it)) }
+    }
 
     // 孵化版没有内置 Client ID 时，正版登录这条路根本走不通；预先拦住，别让用户在登录那一刻才发现。
     // missingProblem 读的是「内置 + 设置里的」两份来源，用户填过就从这里消失（见 ClientIds）。
@@ -713,7 +869,13 @@ fun LaunchPage(
     val clientGatePassed = Edition.current() != Edition.PREVIEW || clientIssue == null
     val requiredMajor = selected?.let { GameJavaRules.requiredMajor(it.gameVersion) }
     val merged = mergeInstances(registered, scanned?.instances.orEmpty(), scanned?.libraryVersions.orEmpty())
-    val exactJava = requiredMajor?.let { major -> (javaPhase as? JavaPhase.Done)?.runtimes?.findExactMajor(major) }
+    // 本机有没有这一版要的 Java，统一问 JavaRecommender：它把「本机已有优先、没有再看能不能下」
+    // 这一套判断收在一处，界面只负责把结论转成人话。
+    val recommendation = JavaRecommender.recommend(
+        requiredMajor = requiredMajor,
+        runtimes = (javaPhase as? JavaPhase.Done)?.runtimes.orEmpty(),
+    )
+    val exactJava = recommendation.runtime
 
     // PCL 的启动页是左栏选版本 + 大号启动按钮、右栏放设置与日志（PageLaunchLeft.xaml）。
     // 照这个分法：左栏回答「现在要启动哪一个」，右栏回答「启动过程中与之后发生了什么」。
@@ -723,7 +885,9 @@ fun LaunchPage(
         LaunchSidePanel(
             selected = selected,
             busy = busy,
-            running = phase is LaunchPhase.Running,
+            running = selectedRunning != null,
+            /** 这一轮里一共有几个进程在跑（含别的版本）。 */
+            runningCount = runningEntries.size,
             stageText = stageText,
             username = username,
             onUsernameChange = { username = it },
@@ -733,10 +897,16 @@ fun LaunchPage(
             identityTab = identityTab,
             onIdentityTab = { identityTab = it },
             onOpenAccountPage = onOpenAccountPage,
-            canLaunch = selected != null && selectedJava != null && (clientGatePassed || testLaunch),
+            // 选中的这一版已经在跑时，主按钮不能再拉一次：同一个实例起两份会互抢存档目录。
+            // 这时左栏下方那颗「结束这个版本的游戏」就是这一版唯一的主动作。
+            canLaunch = selected != null && selectedJava != null && (clientGatePassed || testLaunch) &&
+                selectedRunning == null,
             // 「按钮是灰的，为什么」——以前只在折叠块里才看得到缺 Java，用户以为是要先填 clientId。
             blockedHint = when {
                 selected == null -> "还没选版本。在右边点一张版本卡片。"
+                // 已经跑起来的那一版不再重复说明缺什么：此刻按钮灰的原因是「它在跑」，
+                // 再讲一遍 Java 或应用 ID 会把人引到错的方向。要结束就点下面的按钮。
+                selectedRunning != null -> ""
                 // 这条要排在「缺 Java」前面：门禁没过时补 Java 也没用，说了反而误导。
                 !clientGatePassed && !testLaunch ->
                     "孵化版是开源空壳：没有内置应用 ID，也没有下载与搜索服务地址，正版登录走不通，所以启动被拦下了。" +
@@ -757,11 +927,15 @@ fun LaunchPage(
                 } else {
                     "本机一个 Java 都没有。去「版本设置 → 启动与 Java」，里面能一键补 Java。"
                 }
-                else -> ("需要一个 Java " + requiredMajor + " 才能启动。" + if (showsDirAndJava) {
-                    "点下面「游戏目录与 Java（点开改）」，里面能一键补 Java " + requiredMajor + "。"
+                // 推荐已经说「本机有」，但挑选那一步还没跑（换实例后的同一帧）：
+                // 这时说「缺 Java」是误报，等一下就好。
+                recommendation.ready -> "正在准备 Java " + requiredMajor + "…"
+                // 说法统一由 JavaRecommender 给：它知道本机到底是没有、还是官方清单也没有这一版。
+                else -> JavaRecommender.describe(recommendation) + if (showsDirAndJava) {
+                    "点下面「游戏目录与 Java（点开改）」，里面能一键补。"
                 } else {
-                    "去「版本设置 → 启动与 Java」，里面能一键补 Java " + requiredMajor + "。"
-                })
+                    "去「版本设置 → 启动与 Java」，里面能一键补。"
+                }
             },
             onLaunch = { launchGame(bypassClientGate = testLaunch) },
             showTestLaunch = Edition.current() == Edition.PREVIEW,
@@ -815,11 +989,16 @@ fun LaunchPage(
                             // 直接写 instance.memoryMb 会和设置页里的默认值对不上。
                             effectiveMemoryMb = Instance.effectiveMemoryMb(instance, defaultMemoryMb),
                             selected = selectedKey != null && instanceKey(instance) == selectedKey,
+                            // 「这个版本正在跑」跟页面无关，是进程的事实：从这张表读，
+                            // 不从这一页的 phase 读 —— 后者只记得「最近一次由这一页起的那个」。
+                            running = runningGames.isRunning(instanceKey(instance)),
                             enabled = !busy,
                             onClick = {
                                 selected = instance
                             },
                             onOpenSetup = { onOpenSetup(instance) },
+                            onStop = { stopGame(instanceKey(instance)) },
+                            onTogglePin = { togglePin(instance) },
                         )
                     }
                 }
@@ -915,7 +1094,7 @@ fun LaunchPage(
                                 Modifier.fillMaxWidth().heightIn(max = 110.dp),
                                 verticalArrangement = Arrangement.spacedBy(6.dp),
                             ) {
-                                items(current.runtimes) { runtime ->
+                                items(current.runtimes, key = { it.path }) { runtime ->
                                     JavaRow(
                                         runtime = runtime,
                                         selected = runtime.path == selectedJava?.path,
@@ -991,10 +1170,6 @@ fun LaunchPage(
             }
 
             // 日志
-            val listState = rememberLazyListState()
-            LaunchedEffect(logs.size) {
-                if (logs.isNotEmpty()) listState.scrollToItem(logs.size - 1)
-            }
             Row(
                 Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
@@ -1043,7 +1218,10 @@ fun LaunchPage(
                         )
                     }
                 } else {
-                    LazyColumn(Modifier.fillMaxSize().padding(10.dp), state = listState) {
+                    AutoScrollLogList(
+                        itemCount = logs.size,
+                        modifier = Modifier.fillMaxSize().padding(10.dp),
+                    ) {
                         items(logs) { line ->
                             Text(
                                 line,
@@ -1194,6 +1372,11 @@ private class LogBuffer {
 @Composable
 private fun CrashCard(crash: CrashReport, instanceDir: File?, onNotice: (String) -> Unit) {
     var expanded by remember(crash.file.path) { mutableStateOf(false) }
+    // 报告全文只读一次：展开时读盘，之后重组、滚动都用这份缓存。
+    // 原来写在 items(...) 的参数里，每重组一次就重新读一遍 256 KB。
+    val reportLines = remember(crash.file.path, expanded) {
+        if (expanded) crash.file.readTextSafe().lines() else emptyList()
+    }
     Card(
         Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer),
@@ -1247,8 +1430,12 @@ private fun CrashCard(crash: CrashReport, instanceDir: File?, onNotice: (String)
                     shape = RoundedCornerShape(6.dp),
                 ) {
                     LazyColumn(Modifier.fillMaxSize().padding(8.dp)) {
-                        items(crash.file.readTextSafe().lines()) { line ->
-                            Text(line, style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace)
+                        items(reportLines.size) { index ->
+                            Text(
+                                reportLines[index],
+                                style = MaterialTheme.typography.bodySmall,
+                                fontFamily = FontFamily.Monospace,
+                            )
                         }
                     }
                 }
@@ -1373,6 +1560,8 @@ private fun LaunchSidePanel(
     selected: Instance?,
     busy: Boolean,
     running: Boolean,
+    /** 这一轮里一共几个版本在跑；> 1 时左栏会多一行说明有多份进程。 */
+    runningCount: Int = 0,
     stageText: String,
     username: String,
     onUsernameChange: (String) -> Unit,
@@ -1477,7 +1666,16 @@ private fun LaunchSidePanel(
                 modifier = Modifier.fillMaxWidth().height(54.dp),
                 enabled = !busy && canLaunch,
             ) {
-                Text(if (busy) "启动中…" else "启动游戏", style = MaterialTheme.typography.titleMedium)
+                // 这一版在跑时按钮是灰的，文案必须跟着变：还写「启动游戏」的灰按钮，
+                // 用户会以为是自己没满足什么条件，而真正的原因恰恰相反。
+                Text(
+                    when {
+                        running -> "这个版本正在运行"
+                        busy -> "启动中…"
+                        else -> "启动游戏"
+                    },
+                    style = MaterialTheme.typography.titleMedium,
+                )
             }
             // 孵化版唯一的绕行口：没填 Client ID 也能把这一版跑起来（登录该失败还是失败）。
             if (showTestLaunch) {
@@ -1494,9 +1692,23 @@ private fun LaunchSidePanel(
                     )
                 }
             }
-            if (running || busy) {
-                OutlinedButton(onClick = onStop, modifier = Modifier.fillMaxWidth(), enabled = running) {
-                    Text(if (running) "停止游戏" else "正在启动…")
+            // 运行中不再把启动按钮变灰（见调用方的 busy 说明），所以这里必须给一条
+            // 明确出口：否则用户看着「启动游戏」亮着，点了会被挡回来，却不知道为什么。
+            if (running) {
+                OutlinedButton(onClick = onStop, modifier = Modifier.fillMaxWidth()) {
+                    Text("结束这个版本的游戏")
+                }
+                if (runningCount > 1) {
+                    SectionHint("这一轮里一共 " + runningCount + " 个版本在跑。右边卡片上标着「运行中」的那些，点进去也能单独结束。")
+                }
+            } else if (busy) {
+                OutlinedButton(onClick = onStop, modifier = Modifier.fillMaxWidth(), enabled = false) {
+                    Text("正在启动…")
+                }
+                // 正在起新版、旧版还在跑：这时候最容易被忽略的就是那几份进程，
+                // 一句提示比让用户自己去找卡片上的标记省事。
+                if (runningCount > 0) {
+                    SectionHint("另外还有 " + runningCount + " 个版本在跑，可以从右边卡片上单独结束。")
                 }
             } else if (stageText.isNotBlank()) {
                 SectionHint(stageText)
@@ -1531,9 +1743,15 @@ private fun InstanceTile(
     /** 这一版实际会用多少 MB（跟随默认时是设置里的值，见 [Instance.effectiveMemoryMb]）。 */
     effectiveMemoryMb: Int,
     selected: Boolean,
+    /** 这一版的进程现在还活着（见 RunningGames）。与 [selected] 是两件事：选中的不一定在跑。 */
+    running: Boolean,
     enabled: Boolean,
     onClick: () -> Unit,
     onOpenSetup: () -> Unit,
+    /** 结束这一版的进程。只在 [running] 时才会画出来。 */
+    onStop: () -> Unit = {},
+    /** 点卡片头部那颗星：收藏 / 取消收藏。收藏后本页也会把它排到最前（见 instanceOrder）。 */
+    onTogglePin: () -> Unit = {},
 ) {
     Surface(
         Modifier
@@ -1567,13 +1785,33 @@ private fun InstanceTile(
                     Spacer(Modifier.width(8.dp))
                     LoaderTag(instance.loader)
                     Spacer(Modifier.weight(1f))
+                    // 「运行中」排在「当前」前面：已经跑起来的那一版最该被一眼看到，
+                    // 用户切回来第一件事往往是「我的游戏还在不在」。
+                    if (running) {
+                        Text(
+                            "运行中",
+                            Modifier
+                                .background(
+                                    MaterialTheme.colorScheme.primary.copy(alpha = 0.16f),
+                                    RoundedCornerShape(6.dp),
+                                )
+                                .padding(horizontal = 6.dp, vertical = 1.dp),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.primary,
+                        )
+                        Spacer(Modifier.width(6.dp))
+                    }
                     if (selected) {
                         Text(
                             "当前",
                             style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.primary,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
+                    // 星贴在行尾：它是「我对这一版的态度」，而旁边那排徽标
+                    //（运行中 / 当前）都是机器事实 —— 靠边站才不会和它们看混。
+                    Spacer(Modifier.width(6.dp))
+                    PinMark(pinned = instance.pinned, enabled = enabled, onClick = onTogglePin)
                 }
                 Text(
                     buildString {
@@ -1609,8 +1847,22 @@ private fun InstanceTile(
             }
             // 「版本设置」= 这个版本的详情：内存、JVM 参数、Mod / 资源包 / 光影都在那个面板里，
             // 所以启动页这边不再单开「版本选择」副页面入口（主区的「管理版本…」已经管这件事）。
-            OutlinedButton(onClick = onOpenSetup, modifier = Modifier.fillMaxWidth(), enabled = enabled) {
-                Text("版本设置", style = MaterialTheme.typography.labelSmall)
+            // 版本在跑时，「版本设置」旁边再多一个「结束」：用户在图上看得出哪一版在跑，
+            // 就必然想就地把它关掉，否则得先去左栏选中它、再点左栏那颗按钮 —— 绕了一圈。
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (running) {
+                    OutlinedButton(
+                        onClick = onStop,
+                        modifier = Modifier.weight(1f),
+                        enabled = enabled,
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error),
+                    ) {
+                        Text("结束", style = MaterialTheme.typography.labelSmall)
+                    }
+                }
+                OutlinedButton(onClick = onOpenSetup, modifier = Modifier.weight(1f), enabled = enabled) {
+                    Text("版本设置", style = MaterialTheme.typography.labelSmall)
+                }
             }
         }
     }

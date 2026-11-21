@@ -1,6 +1,7 @@
 package io.github.huang404yan.platypus.desktop.runtime
 
 import io.github.huang404yan.platypus.core.runtime.JavaCandidatePaths
+import io.github.huang404yan.platypus.core.runtime.JavaDetectCache
 import io.github.huang404yan.platypus.core.runtime.JavaProbeParser
 import io.github.huang404yan.platypus.core.runtime.JavaRuntime
 import io.github.huang404yan.platypus.core.runtime.JavaRuntimeOffer
@@ -84,7 +85,19 @@ class DesktopJavaRuntimeService(
         get() = listOfNotNull(launcherDir?.let(ManagedJava::rootOf), gameRoot?.let(ManagedJava::legacyRootOf))
             .distinctBy { it.absoluteFile.normalize().path.lowercase() }
 
-    override suspend fun detect(): List<JavaRuntime> = withContext(Dispatchers.IO) {
+    /** 探测结果缓存。见 [JavaDetectCache] 与 [detect] 的 useCache 参数。 */
+    private val detectCache = JavaDetectCache()
+
+    override suspend fun detect(): List<JavaRuntime> = detect(useCache = true)
+
+    override suspend fun detect(useCache: Boolean): List<JavaRuntime> {
+        if (useCache) detectCache.get()?.let { return it }
+        val result = fullDetect()
+        detectCache.put(result)
+        return result
+    }
+
+    private suspend fun fullDetect(): List<JavaRuntime> = withContext(Dispatchers.IO) {
         val candidates = JavaCandidatePaths.candidates(
             env = buildSearchEnv(),
             windows = windows,
@@ -147,7 +160,9 @@ class DesktopJavaRuntimeService(
         component: String?,
         onProgress: (Float) -> Unit,
     ): JavaRuntime {
-        val all = detect()
+        // 这里必须绕开缓存：用户点「自动补 Java」时刚被缓存住的列表里多半没有这一份，
+        // 拿缓存顶就等于「点了没反应」。
+        val all = detect(useCache = false)
         all.findExactMajor(major)?.let {
             onProgress(1f)
             return it
@@ -167,6 +182,8 @@ class DesktopJavaRuntimeService(
             throw JavaRuntimeUnavailableException("自动下载 Java " + major + " 失败：" + e.message + " " + suffix)
         }
         onProgress(1f)
+        // 盘上多了一份运行时，缓存里那份旧列表立刻过期。
+        detectCache.invalidate()
         // 装完立刻探一次，拿到 vendor/arch；探不动也用文件路径兜底（文件确实存在）。
         val probed = probe(java.path)?.runtime
         return probed?.copy(managed = true) ?: JavaRuntime(
@@ -237,6 +254,7 @@ class DesktopJavaRuntimeService(
         } catch (e: JavaRuntimeInstallException) {
             throw JavaRuntimeUnavailableException("下载 Java " + major + " 失败：" + e.message)
         }
+        detectCache.invalidate()
         val probed = probe(java.path)?.runtime
         return probed?.copy(managed = true) ?: JavaRuntime(
             path = java.path,
@@ -281,6 +299,8 @@ class DesktopJavaRuntimeService(
             lastRemoveError = "删到一半失败：" + failure!!.absolutePath + "（文件被占用）"
             return@withContext false
         }
+        // 少了一份运行时，缓存里那份列表不能再当真。
+        detectCache.invalidate()
         true
     }
 

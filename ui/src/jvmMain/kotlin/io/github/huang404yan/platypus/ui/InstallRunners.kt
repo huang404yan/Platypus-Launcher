@@ -125,6 +125,13 @@ internal object OneClickRunner {
                     loader = loader,
                 ) { step -> onStep(step, startedAt) }
                 val elapsed = System.currentTimeMillis() - startedAt
+                // 装完的东西用户这会儿可能根本没在看这一页（切页不会打断任务），
+                // 所以在进程级挂一条提示，App 那一层负责画出来。
+                Notices.push(
+                    title = "装好了：" + outcome.versionId,
+                    body = "用时 " + formatDuration(elapsed) + "。点这里去启动它。",
+                    goto = Page.LAUNCH,
+                )
                 _state.update {
                     it.copy(
                         phase = InstallPhase.Finished(outcome),
@@ -360,6 +367,11 @@ internal object ModpackRunner {
                         )
                     }
                 }
+                Notices.push(
+                    title = "整合包装好了：" + outcome.instance.name,
+                    body = "写了 " + outcome.overrideFiles + " 个包内文件，用时 " + formatDuration(outcome.elapsedMs) + "。点这里去启动它。",
+                    goto = Page.LAUNCH,
+                )
                 _state.update {
                     it.copy(phase = ImportPhase.Finished(outcome), progress = null, message = "")
                 }

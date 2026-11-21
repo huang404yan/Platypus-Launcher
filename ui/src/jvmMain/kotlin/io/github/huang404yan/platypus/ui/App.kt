@@ -12,6 +12,8 @@ import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.TooltipArea
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -26,8 +28,12 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.runtime.collectAsState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -37,6 +43,8 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.launch
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -59,6 +67,7 @@ import io.github.huang404yan.platypus.core.download.DownloadSource
 import io.github.huang404yan.platypus.core.instance.Instance
 import io.github.huang404yan.platypus.core.instance.InstanceLayouts
 import io.github.huang404yan.platypus.core.instance.instanceKey
+import io.github.huang404yan.platypus.core.launch.RunningGames
 import io.github.huang404yan.platypus.core.packs.PackKind
 import io.github.huang404yan.platypus.core.theme.LauncherTheme
 import io.github.huang404yan.platypus.core.theme.launcherThemeOf
@@ -78,6 +87,31 @@ fun App(
     // 主题在 Run 时才定下来（要先读设置），而标题栏是宿主窗口画的、这里碰不到，
     // 所以把「最终选了哪套」回调出去，由 app-desktop 去改标题栏。
     onThemeChanged: (LauncherTheme) -> Unit = {},
+    /**
+     * 宿主每收到一次「关闭窗口」就把它加一。
+     *
+     * 为什么不让宿主自己判断能不能关：有没有游戏在跑，只有这一层知道（见 [RunningGames]）。
+     * 宿主只管把请求递进来，关不关由这里决定 —— 有游戏在跑就先问一句。
+     * 这个形状对安卓端也成立：安卓有返回键，同样要把「按了返回但游戏还在跑」这件事问清楚。
+     */
+    closeSignal: Int = 0,
+    /** 确认可以关的时候回调宿主，由它去真正结束进程。 */
+    onCloseConfirmed: () -> Unit = {},
+    /**
+     * 把窗口收起来（不结束进程）的办法，宿主能提供时才给。
+     *
+     * 传 null 表示这台机器没有托盘：关窗口只能是真的退出，对话框里也就不该出现
+     * 「收进托盘」这种点了没用的选项。参数是当时还在跑的游戏数，宿主用它决定气泡里说什么。
+     */
+    onHideToTray: ((runningGameCount: Int) -> Unit)? = null,
+    /**
+     * 把一条完成提示也送到系统通知区，宿主能提供时才给。
+     *
+     * 为什么由宿主来做：窗口藏进托盘之后界面上那张小卡没人看得见，而界面上那张卡又
+     * 必须留着（窗口还开着的时候看这里最快）。两边各说一遍，由这一层决定什么时候说。
+     * 传 null 表示没有托盘，界面上那张卡是唯一的出口。
+     */
+    onSystemNotice: ((title: String, body: String) -> Unit)? = null,
 ) {
     // 配色提到 MaterialTheme 外面：整套 ColorScheme 由它决定，改它等于换一层皮，
     // 页面代码一行都不用知道 —— 全仓库的颜色都走 MaterialTheme.colorScheme。
@@ -152,6 +186,13 @@ fun App(
         // 就会出现「明明登记成功了，主页的版本卡片里没有」。
         var overlayTick by remember { mutableStateOf(0) }
 
+        // 「哪个版本在跑」是进程的事实，不能记在启动页里：切一次页，页面整个被销毁重建，
+        // 再回到启动页就会以为什么都没在跑。表放在这一层，页面只负责往里登记与读。
+        // tick 是因为 RunningGames 故意不是 Compose 快照状态（core 模块不认识 Compose），
+        // 它变了只会调用我们给的 onChange，这里把 tick 加一，界面才会重画。
+        var runningTick by remember { mutableStateOf(0) }
+        val runningGames = remember { RunningGames { runningTick++ } }
+
         // 首次运行那扇门走完时加一。模式选择排在它后面：正式版那扇门没正版账号是关不掉的，
         // 摆在它前面等于给「点两下绕过登录」开了条路。
         var firstRunTick by remember { mutableStateOf(0) }
@@ -167,9 +208,75 @@ fun App(
 
         LaunchedEffect(Unit) { println("[ui] initial page=" + page) }
 
+        // 顶栏那颗胶囊读的是数量，跟着 tick 重算：RunningGames 不是快照状态。
+        val runningCount = remember(runningTick) { runningGames.size }
+
+        // 装完 / 导入完的提示。任务活在页面之外（切页不打断），
+        // 完成那一刻用户多半不在那一页，所以提示必须画在这一层。
+        val notices = Notices.items.collectAsState().value
+
+        // 新提示出现时也往系统通知区送一份。要不要真的弹，由宿主按「窗口现在看不看得见」
+        // 决定 —— 可见性只有宿主知道，这一层不假装知道。窗口在面前时界面上那张卡
+        // 已经说完了，宿主那边会跳过，不会双重打扰。
+        // key 用最后一条的 id 而不是 size：一条消失的同时进来一条，size 没变但内容变了。
+        val latestNoticeId = notices.lastOrNull()?.id ?: 0L
+        LaunchedEffect(latestNoticeId) {
+            val mirror = onSystemNotice ?: return@LaunchedEffect
+            val latest = notices.lastOrNull() ?: return@LaunchedEffect
+            mirror(latest.title, latest.body)
+        }
+
+        val closeScope = rememberCoroutineScope()
+
+        // 「去某个页面」只有一份写法：顶栏胶囊、通知卡都走它。
+        // 两处各自抄一遍的后果是将来加页面时只改到一处，点下去看着有反应但不跳。
+        // 这里刻意不套 remember：lambda 读的是 page，套了 remember 就会永远读到第一次
+        // 组合时那个值（stale capture），表现为「点通知没反应」。重建 lambda 的代价可以忽略。
+        val goToPage: (Page) -> Unit = { target ->
+            if (page != target) subSelection.remove(target.name)
+            page = target
+            closeOverlay()
+        }
+
+        // 键盘入口：Ctrl+1..5 去五个一级页，Esc 退出副页面。
+        // 副页面盖着时不收数字键 —— 用户正对着「版本设置」做改动，底下的页面被换掉
+        // 只会让人以为点错了。
+        KeyboardShortcutHook(
+            overlayOpen = overlay != null,
+            enabled = overlay == null,
+        ) { intent ->
+            when (intent) {
+                is LauncherIntent.GoPage -> goToPage(intent.page)
+                LauncherIntent.CloseTop -> closeOverlay()
+            }
+        }
+
+        // 宿主说要关窗，但还有版本在跑：先让用户看见有哪几个，并给两条出路。
+        // 不直接杀进程 —— 用户点右上角那个 × 的意图可能只是「先把启动器收起来」，
+        // 拿它当「结束游戏」会使存档停在半截。
+        var closeAsk by remember { mutableStateOf(false) }
+        LaunchedEffect(closeSignal) {
+            if (closeSignal == 0) return@LaunchedEffect
+            when {
+                // 有版本在跑：先问一句，别让存档停在半截。
+                runningGames.size > 0 -> closeAsk = true
+                // 没游戏在跑但有托盘：点 × 就是收起来，不是退出。
+                // 这是托盘程序的通行做法（PCL / HMCL / 绝大多数常驻程序都这样）：
+                // 通知区还有图标，用户随时能叫回来；真要走托盘右键的「退出」。
+                // 反过来做（点 × 直接杀进程、托盘图标跟着消失）会让「最小化到托盘」
+                // 这个能力实际上永远用不上 —— 用户根本没有别的办法把窗口收起来。
+                onHideToTray != null -> onHideToTray(0)
+                else -> onCloseConfirmed()
+            }
+        }
+
         Column(Modifier.fillMaxSize()) {
             TopBar(
                 current = page,
+                runningCount = runningCount,
+                // 回到启动页并关掉可能正盖着的副页面：只在顶栏点一下却还停在
+                // 「版本设置」的覆盖层上，看起来就是「点了没反应」。
+                onOpenRunning = { goToPage(Page.LAUNCH) },
                 onSelect = { target ->
                     // 点的是另一个一级项才重置它自己的二级项：从「下载 / 光影包」切到「设置」，
                     // 再点「下载」回来，应该回到「原版游戏」；而点当前这个一级项本身
@@ -247,6 +354,8 @@ fun App(
                             },
                             refreshTick = overlayTick,
                             uiMode = uiMode,
+                            runningGames = runningGames,
+                            runningTick = runningTick,
                         )
                         Page.DOWNLOAD -> SubContent(sub) { shownSub -> when (shownSub) {
                             DOWNLOAD_TAB_MODS -> ModsPage(
@@ -308,6 +417,7 @@ fun App(
                         Page.MORE -> SubContent(sub) { shownSub -> when (shownSub) {
                             MORE_TAB_ABOUT -> AboutPage()
                             MORE_TAB_DIAG -> DiagnosticPage(backend = backend, initialGameRoot = initialGameRoot)
+                            MORE_TAB_TOOLBOX -> ToolboxPage(backend = backend, initialGameRoot = initialGameRoot)
                             else -> HelpPage { target ->
                                 // 「去这里」要既切页又选中那一页的二级项：只切页的话，
                                 // 用户会落在默认的二级项上，还是找不到说明里说的那个入口。
@@ -436,6 +546,78 @@ fun App(
             tick = firstRunTick,
             onPicked = { uiMode = it },
         )
+
+        // 还有版本在跑时的关窗询问。三条路各说各的后果，不替用户选：
+        // 「收进托盘」是把窗口藏起来、进程与游戏都留着（托盘里能再叫回来）；
+        // 「结束游戏并退出」走的是游戏自己的 stop（会先发退出命令，给存档一点时间）。
+        // 没有托盘（onHideToTray 为 null）时退回老的「只关启动器 + 说清后果」。
+        if (closeAsk) {
+            val busyEntries = remember(runningTick, closeAsk) { runningGames.all() }
+            AlertDialog(
+                onDismissRequest = { closeAsk = false },
+                title = { Text(if (busyEntries.size == 1) "还有一个游戏在跑" else "还有 " + busyEntries.size + " 个游戏在跑") },
+                text = {
+                    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        busyEntries.forEach { entry ->
+                            Text(
+                                entry.name.ifBlank { entry.gameVersion },
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.SemiBold,
+                            )
+                        }
+                        Text(
+                            if (onHideToTray != null) {
+                                "选「收进托盘」，游戏照常在后台跑，双击通知区的图标就能把启动器叫回来。" +
+                                    "想让它们正常退出，选「结束游戏并退出」——那条会让游戏自己走一遍存盘再关。"
+                            } else {
+                                "选「只关启动器」，游戏会在后台继续跑，但启动器退出后就不再记得它们 ——" +
+                                    "下次打开看不到这几条记录，要停只能在任务管理器里找 java。" +
+                                    "想让它们正常退出，选「结束游戏并退出」：那条会让游戏自己走一遍存盘再关。"
+                            },
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                },
+                confirmButton = {
+                    TextButton(onClick = { closeAsk = false }) { Text("先不关") }
+                },
+                dismissButton = {
+                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        val hide = onHideToTray
+                        TextButton(onClick = {
+                            closeAsk = false
+                            // 有托盘就收起来（进程留着，游戏继续），没有就只能是退出。
+                            if (hide != null) hide(busyEntries.size) else onCloseConfirmed()
+                        }) { Text(if (hide != null) "收进托盘" else "只关启动器") }
+                        TextButton(
+                            onClick = {
+                                closeAsk = false
+                                closeScope.launch {
+                                    busyEntries.forEach { entry ->
+                                        runCatching { entry.handle.stop() }
+                                        runningGames.remove(entry.key)
+                                    }
+                                    onCloseConfirmed()
+                                }
+                            },
+                            colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error),
+                        ) { Text("结束游戏并退出") }
+                    }
+                },
+            )
+        }
+
+        // 完成提示画在最上层：页面的覆盖层与弹窗都可能盖住内容区，但谁都盖不住这里。
+        // 没提示时整块不组合，不占位置也不吃点击。
+        if (notices.isNotEmpty()) {
+            Box(Modifier.fillMaxSize()) {
+                NoticeStack(notices) { notice ->
+                    Notices.dismiss(notice.id)
+                    notice.goto?.let(goToPage)
+                }
+            }
+        }
         }
     }
 }
@@ -453,7 +635,15 @@ fun App(
  * 竖排侧栏要吃掉 180~220dp 的宽度，还把「同一件事的入口」摊成好几个一级项。
  */
 @Composable
-private fun TopBar(current: Page, onSelect: (Page) -> Unit) {
+@OptIn(ExperimentalFoundationApi::class)
+private fun TopBar(
+    current: Page,
+    onSelect: (Page) -> Unit,
+    /** 这一轮里还有几个版本在跑。0 就不画提示。 */
+    runningCount: Int = 0,
+    /** 点那个提示时去哪儿。默认切到启动页。 */
+    onOpenRunning: () -> Unit = {},
+) {
     val compact = LocalWindowInfo.current.containerSize.width < 1100
     // 两端默认展开：第一次打开要让人知道自己用的是哪个启动器（孵化版）。
     var brandOpen by remember { mutableStateOf(true) }
@@ -501,16 +691,49 @@ private fun TopBar(current: Page, onSelect: (Page) -> Unit) {
             // 中间：五项权重均分，把剩下的宽度全吃掉。
             Row(Modifier.weight(1f).fillMaxHeight(), verticalAlignment = Alignment.CenterVertically) {
                 Page.entries.forEach { item ->
-                    TopTab(
-                        page = item,
-                        selected = item == current,
-                        showLabel = showLabels,
-                        glyphSize = if (compact) 18.dp else 22.dp,
+                    // 悬停给一句「这项叫什么 + 快捷键」：文字藏起来时只看图标认不全，
+                    // 而快捷键不写出来，没人会知道它存在。
+                    TooltipArea(
+                        tooltip = {
+                            Surface(
+                                shape = RoundedCornerShape(8.dp),
+                                color = MaterialTheme.colorScheme.inverseSurface,
+                                tonalElevation = 0.dp,
+                            ) {
+                                Text(
+                                    item.label + "  ·  " + pageShortcut(item),
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp),
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = MaterialTheme.colorScheme.inverseOnSurface,
+                                )
+                            }
+                        },
+                        delayMillis = 520,
                         modifier = Modifier.weight(1f).fillMaxHeight(),
-                    ) { onSelect(item) }
+                    ) {
+                        TopTab(
+                            page = item,
+                            selected = item == current,
+                            showLabel = showLabels,
+                            glyphSize = if (compact) 18.dp else 22.dp,
+                            modifier = Modifier.fillMaxSize(),
+                        ) { onSelect(item) }
+                    }
                 }
             }
-            // 右端：文字开关 + 版本号。
+            // 右端：在跑的版本数 + 文字开关 + 版本号。
+            //
+            // 为什么摆在顶栏而不是只留在启动页：游戏跑起来之后，用户会切去下载页装模组、
+            // 去设置里改内存，这时启动页上那些「运行中」标记全看不见了。顶栏是每一页都在的，
+            // 一个数字就够说明「还开着」，点一下回到启动页去结束。
+            if (runningCount > 0) {
+                Spacer(Modifier.width(if (compact) 4.dp else 8.dp))
+                RunningPill(
+                    count = runningCount,
+                    compact = compact,
+                    onClick = onOpenRunning,
+                )
+            }
             // 文字开关放在这里而不是某个一级项里：它改的是「这一排怎么显示」，
             // 不是某一页的内容，塞进任何一项下面都属于找错地方。
             Spacer(Modifier.width(if (compact) 4.dp else 8.dp))
@@ -613,6 +836,50 @@ private fun TopTab(
                     .background(accent, RoundedCornerShape(topStart = 2.dp, topEnd = 2.dp)),
             )
         }
+    }
+}
+
+/**
+ * 顶栏右端那颗「N 个在跑」的胶囊。
+ *
+ * 用主色底 + 主色字，旁边配一个小三角（游戏的形状）而不是文字标签：
+ * 顶栏这一排都是中性灰的字，唯一带色的一块自然就是「正在发生的事」。
+ * 数量只有 1 时也写「1」，不省成「运行中」—— 多开是这一版的关键能力，
+ * 数字要一直在，用户才会意识到「原来还能再开一个」。
+ */
+@Composable
+private fun RunningPill(count: Int, compact: Boolean, onClick: () -> Unit) {
+    val accent = MaterialTheme.colorScheme.primary
+    val background by animateColorAsState(
+        targetValue = accent.copy(alpha = 0.14f),
+        animationSpec = motionTween(Motion.FAST),
+        label = "runningPillBg",
+    )
+    Row(
+        Modifier
+            .background(background, RoundedCornerShape(10.dp))
+            .clickable(onClick = onClick)
+            .padding(horizontal = if (compact) 7.dp else 9.dp, vertical = 5.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(5.dp),
+    ) {
+        Canvas(Modifier.size(if (compact) 11.dp else 12.dp)) {
+            val w = this.size.width
+            val tri = Path().apply {
+                moveTo(w * 0.16f, w * 0.06f)
+                lineTo(w * 0.94f, w * 0.5f)
+                lineTo(w * 0.16f, w * 0.94f)
+                close()
+            }
+            drawPath(tri, accent)
+        }
+        Text(
+            count.toString(),
+            style = MaterialTheme.typography.labelMedium,
+            fontWeight = FontWeight.SemiBold,
+            color = accent,
+            maxLines = 1,
+        )
     }
 }
 

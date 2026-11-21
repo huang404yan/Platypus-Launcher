@@ -44,6 +44,10 @@ import io.github.huang404yan.platypus.core.Brand
 import io.github.huang404yan.platypus.core.Endpoints
 import io.github.huang404yan.platypus.core.download.DownloadPreference
 import io.github.huang404yan.platypus.core.download.DownloadSource
+import io.github.huang404yan.platypus.core.download.DownloadSources
+import io.github.huang404yan.platypus.core.download.ProbeResult
+import io.github.huang404yan.platypus.core.download.SourceProbe
+import io.github.huang404yan.platypus.core.install.VanillaInstaller
 import io.github.huang404yan.platypus.core.instance.Instance
 import io.github.huang404yan.platypus.core.instance.InstanceLayouts
 import io.github.huang404yan.platypus.core.instance.MemoryDefaults
@@ -1117,6 +1121,12 @@ private fun DownloadTab(
     connections: Int,
     onPickConnections: (Int) -> Unit,
 ) {
+    // 测速结果只活在这一页里：它是「这会儿哪条快」的现场快照，
+    // 存进设置文件下次打开还挂着昨天的数字，比不显示更误导。
+    var probing by remember { mutableStateOf(false) }
+    var probeResults by remember { mutableStateOf<List<ProbeResult>>(emptyList()) }
+    var probeError by remember { mutableStateOf("") }
+    val probeScope = rememberCoroutineScope()
     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         // 空壳包才显示这一格：完整版的地址在包里写死，用户没有可填的东西。
         if (Endpoints.shell) {
@@ -1170,6 +1180,95 @@ private fun DownloadTab(
                     onSelect = { onPick(option) },
                 )
             }
+        }
+        SettingCard(
+            "测一下哪条源快",
+            "在这台机器、这个时段各取一小段版本清单，看哪条真的快。" +
+                "镜像不是永远快：实测过同一台机器上它从 8 秒掉到 200 毫秒，" +
+                "这段时间里「优先国内镜像」反而是拖累。只读 256 KB，不会真去下游戏。",
+        ) {
+            val candidates = remember(serverBase) {
+                if (Endpoints.shell) {
+                    // 空壳包里官方主机是不通的（包不带你也不填地址就什么都下不了），
+                    // 拿它跟镜像比是在比「一条坏路」，结论没有参考价值。
+                    emptyList()
+                } else {
+                    listOf(VanillaInstaller.MANIFEST_URL, VanillaInstaller.MANIFEST_MIRROR_URL)
+                        .filter { it.isNotBlank() }
+                        .distinct()
+                }
+            }
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Button(
+                    onClick = {
+                        if (probing || candidates.isEmpty()) return@Button
+                        probing = true
+                        probeError = ""
+                        probeResults = emptyList()
+                        probeScope.launch {
+                            runCatching { SourceProbe.probe(candidates) }
+                                .onSuccess { probeResults = it }
+                                .onFailure { probeError = it.message ?: it.javaClass.simpleName }
+                            probing = false
+                        }
+                    },
+                    enabled = !probing && candidates.isNotEmpty(),
+                ) { Text(if (probing) "正在测…" else "开始测速") }
+                if (probeResults.isNotEmpty()) {
+                    Text(
+                        "刚刚测的，关掉这一页就没了。",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+            if (candidates.isEmpty()) {
+                Text(
+                    "这个包没带现成的下载地址，先把上面那个服务地址填上，再来测。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                )
+            }
+            if (probeError.isNotBlank()) {
+                Text(probeError, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+            }
+            val best = SourceProbe.fastest(probeResults)
+            probeResults.forEach { result ->
+                ProbeRow(
+                    result = result,
+                    isBest = best != null && best.url == result.url,
+                )
+            }
+            if (probeResults.isNotEmpty()) {
+                val suggestion = SourceProbe.suggestedSource(probeResults)
+                if (suggestion == null) {
+                    Text(
+                        "两条都没测成。可能是这会儿网络不通，也可能镜像暂时对这台机器限速了 —— 隔一会儿再试一次。",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                } else {
+                    val alreadyPicked = suggestion == current
+                    Text(
+                        "按这次的结果，建议用「" + suggestion.label + "」。",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                    OutlinedButton(onClick = { onPick(suggestion) }, enabled = !alreadyPicked) {
+                        Text(if (alreadyPicked) "现在就是这个" else "照这个改")
+                    }
+                }
+            }
+            Text(
+                "测出来的数只代表刚才那一下：镜像会按 IP 限速，" +
+                    "不同时段能差十倍。真要判断，隔一会儿再测一次看看是不是同一个结论。",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
         SettingCard(
             "同时下几个文件",
@@ -1288,6 +1387,48 @@ private fun DownloadTab(
             )
         }
     }
+}
+
+/**
+ * 一条测速结果：左边地址（截短显示），右边速度，最快的那条标一下。
+ *
+ * 不显示完整 URL 的原因：官方源与镜像的路径完全一样，只有主机不同，
+ * 整串铺出来会撑爆卡片宽度，而且用户想认的只是「官方 / 镜像」。
+ */
+@Composable
+private fun ProbeRow(result: ProbeResult, isBest: Boolean) {
+    val tint = when {
+        !result.ok -> MaterialTheme.colorScheme.error
+        isBest -> MaterialTheme.colorScheme.primary
+        else -> MaterialTheme.colorScheme.onSurfaceVariant
+    }
+    Row(
+        Modifier.fillMaxWidth().padding(vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Text(
+            probeHostLabel(result.url),
+            style = MaterialTheme.typography.bodyMedium,
+            fontWeight = if (isBest) FontWeight.SemiBold else FontWeight.Normal,
+            modifier = Modifier.weight(1f),
+        )
+        if (isBest) {
+            Text("最快", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
+        }
+        Text(SourceProbe.describe(result), style = MaterialTheme.typography.bodySmall, color = tint)
+    }
+}
+
+/** 把地址收敛成「国内镜像 / 官方源 / 主机名」三档之一。 */
+internal fun probeHostLabel(url: String): String {
+    if (DownloadSources.isMirror(url)) return "国内镜像"
+    // 解析失败（空串、没写 scheme）时不抛：这一行是给人看结果的，
+    // 不该因为地址长得怪就把整张测速卡带崩。
+    val host = runCatching { java.net.URI(url).host }.getOrNull().orEmpty()
+    if (host.isBlank()) return "官网"
+    // 同样卡边界：evilmojang.com 也是以 mojang.com 结尾，但它不是 Mojang 的域名。
+    return if (host == "mojang.com" || host.endsWith(".mojang.com")) "官方源" else host
 }
 
 @Composable
@@ -1512,6 +1653,15 @@ private fun InterfaceTab(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
+            }
+        }
+        SettingCard(
+            "键盘",
+            "不管焦点停在哪，这些组合键都直接生效。表格是从顶栏那五项生成的，"
+                + "以后加页面会自动多一行，不会出现「这里还写着旧顺序」的情况。",
+        ) {
+            Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                SHORTCUT_HINTS.forEach { hint -> InfoLine(hint.combo, hint.what) }
             }
         }
         SettingCard("还没做的", "没做的不摆控件。") {

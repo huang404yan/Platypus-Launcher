@@ -19,6 +19,7 @@ class InstanceRepositoryTest {
         memoryMb: Int = 2048,
         loader: LoaderKind = LoaderKind.VANILLA,
         lastPlayedAt: Long = 0L,
+        pinned: Boolean = false,
     ) = Instance(
         id = id,
         name = name,
@@ -27,6 +28,7 @@ class InstanceRepositoryTest {
         memoryMb = memoryMb,
         loader = loader,
         lastPlayedAt = lastPlayedAt,
+        pinned = pinned,
     )
 
     @Test
@@ -221,5 +223,35 @@ class InstanceRepositoryTest {
         )
         val merged = mergeInstances(registered, emptyList(), listOf("1.20.1-forge-47.4.0"))
         assertEquals(1, merged.size)
+    }
+
+    @Test
+    fun pinnedSortsBeforeEverythingElse() {
+        // 置顶压过「登记的在前」和「最近玩过的在前」两条：用户手动钉上去就是
+        // 「不管别的规则，这条我要一直看得到」。
+        val registered = listOf(
+            instance(id = "recent", name = "Recent", directory = File("C:/mc/versions/recent").path, lastPlayedAt = 9_000L),
+            instance(id = "pinned", name = "Zz", directory = File("C:/mc/versions/pinned").path, pinned = true),
+            instance(id = "old", name = "Old", directory = File("C:/mc/versions/old").path, lastPlayedAt = 1_000L),
+        )
+        val scanned = listOf(
+            instance(id = "ext", name = "Ext", directory = File("C:/mc/versions/ext").path, pinned = true),
+        )
+        val merged = mergeInstances(registered, scanned)
+        // 两条置顶都在最前，组内仍按「登记的在前」分开；其余照旧按上次玩倒序。
+        assertEquals(listOf("pinned", "ext", "recent", "old"), merged.map { it.id })
+    }
+
+    @Test
+    fun savesAndReloadsPinned() = runBlocking {
+        // 与 lastPlayedAt 同理：字段漏了序列化的话，重启之后收藏会整体消失。
+        val root = tempDir()
+        try {
+            val repo = JsonInstanceRepository(JsonInstanceRepository.defaultIndexFile(root))
+            repo.save(instance(directory = File(root, "versions/1.20.1").path, pinned = true))
+            assertTrue(repo.find("1.20.1")!!.pinned)
+        } finally {
+            root.deleteRecursively()
+        }
     }
 }
