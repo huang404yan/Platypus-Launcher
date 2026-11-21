@@ -1,23 +1,10 @@
 package io.github.huang404yan.platypus.ui
 
-import androidx.compose.animation.core.animateDpAsState
-import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.tween
-import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.LocalIndication
-import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.foundation.interaction.collectIsHoveredAsState
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -36,10 +23,9 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
+import io.github.huang404yan.platypus.core.component.ComponentInventories
 import io.github.huang404yan.platypus.core.instance.Instance
 import io.github.huang404yan.platypus.core.instance.InstanceLayouts
 import io.github.huang404yan.platypus.core.instance.LoaderKind
@@ -549,7 +535,12 @@ private fun LegacyModsRow(snapshot: InstanceModsSnapshot, onAdopt: () -> Unit) {
 }
 
 /**
- * 一串模组条目。启用区和停用分组共用它，免得两处各写一份 `InstalledModRow` 的参数。
+ * 一串模组条目。
+ *
+ * 2026-11-21 起渲染改用 [ComponentRow]（与资源包、光影、数据包同一套骨架），这里只负责
+ * 把模组特有的三样东西接进去：多选勾选框（leading）、更新状态那一行（extraDetail）、
+ * 「更新到 x」按钮（trailing）。以前这整段骨架在这里和 PacksPage 里各写了一遍，
+ * 同样是「一条已装的东西」，两页的行高、图标大小、删除措辞都不一样。
  */
 @Composable
 private fun ModList(
@@ -570,17 +561,55 @@ private fun ModList(
             // 多选只认真有新版可装的条目：勾上再一个个跳过，看着像坏了
             val canPick = update != null &&
                 update.status == ModUpdateStatus.OUTDATED && update.latest != null
-            InstalledModRow(
-                entry = entry,
-                update = update,
+            // 折一次就够了：重组时 entry 没变就不必重建这个 data class
+            val component = remember(entry) { ComponentInventories.ofMod(entry) }
+            val updating = updatingFile == entry.fileName
+            ComponentRow(
+                component = component,
                 busy = busy,
-                updating = updatingFile == entry.fileName,
-                pickMode = pickMode,
-                picked = entry.fileName in pickedFiles,
-                onTogglePicked = { if (canPick) onTogglePicked(entry.fileName) },
-                onToggleEnabled = { enabled -> onToggleEnabled(entry, enabled) },
+                onToggleEnabled = { onToggleEnabled(entry, it) },
                 onDelete = { onDelete(entry) },
-                onUpdate = onUpdate,
+                // 整行可点：日常模式下点条目就是启用/停用（用户要的「点一下关、再点一下开」），
+                // 多选模式下点条目是加入/移出更新队列。里面的按钮自己会消费点击，不会误触。
+                onClick = when {
+                    pickMode && canPick -> ({ onTogglePicked(entry.fileName) })
+                    pickMode -> null
+                    else -> ({ onToggleEnabled(entry, !entry.enabled) })
+                },
+                leading = {
+                    if (pickMode) {
+                        Checkbox(
+                            checked = entry.fileName in pickedFiles,
+                            onCheckedChange = { if (canPick) onTogglePicked(entry.fileName) },
+                            enabled = canPick,
+                        )
+                    }
+                },
+                hint = when {
+                    pickMode && entry.fileName in pickedFiles -> "已选入更新队列"
+                    pickMode -> "点这条选入更新队列"
+                    else -> null
+                },
+                extraDetail = listOfNotNull(
+                    entry.loader?.let { loaderLabel(it) },
+                    update?.let {
+                        when (it.status) {
+                            ModUpdateStatus.UP_TO_DATE -> "已是最新 " + it.currentVersion
+                            ModUpdateStatus.NOT_ON_MODRINTH -> "Modrinth 不认识这个文件"
+                            ModUpdateStatus.NO_COMPATIBLE_VERSION -> "没有适配当前版本的更新"
+                            else -> null
+                        }
+                    },
+                    update?.takeIf { it.status == ModUpdateStatus.OUTDATED }
+                        ?.let { "有新版本 " + (it.latestVersion ?: "") },
+                ),
+                trailing = {
+                    if (update != null && update.status == ModUpdateStatus.OUTDATED) {
+                        OutlinedButton(onClick = { onUpdate(update) }, enabled = !busy) {
+                            Text(if (updating) "更新中…" else "更新到 " + (update.latestVersion ?: "新版"))
+                        }
+                    }
+                },
             )
         }
     }
@@ -645,205 +674,6 @@ private fun DisabledModsGroup(
     }
 }
 
-/**
- * 一条已装模组。
- *
- * 勾选框就是启用/停用：勾上 = 文件名是 .jar，取消 = 改成 .jar.disabled。这一条以前要求
- * 用户自己开资源管理器改名（界面上还理直气壮写着那句话），是「有了但不好用」里最典型的一处。
- *
- * 删除要二次确认：模组文件不在回收站里，点一下就没了。
- */
-@Composable
-private fun InstalledModRow(
-    entry: ModEntry,
-    update: ModUpdateResult?,
-    busy: Boolean,
-    updating: Boolean,
-    pickMode: Boolean,
-    picked: Boolean,
-    onTogglePicked: () -> Unit,
-    onToggleEnabled: (Boolean) -> Unit,
-    onDelete: () -> Unit,
-    onUpdate: (ModUpdateResult) -> Unit,
-) {
-    var confirmDelete by remember { mutableStateOf(false) }
-    val canPick = update != null && update.status == ModUpdateStatus.OUTDATED && update.latest != null
-    // 整行可点：日常模式下点条目就是启用/停用（用户要的「点一下关、再点一下开」），
-    // 多选模式下点条目是加入/移出更新队列。里面的按钮自己会消费点击，不会误触。
-    val rowClick: (() -> Unit)? = when {
-        pickMode && canPick -> onTogglePicked
-        pickMode -> null
-        else -> ({ onToggleEnabled(!entry.enabled) })
-    }
-    // 悬停时描一道边（PCL 的 RectBack）：光靠指针形状判断「这条能不能点」太弱，
-    // 一百多个条目扫下来，鼠标停在哪一条上根本看不出来。
-    val interaction = remember { MutableInteractionSource() }
-    val hovered by interaction.collectIsHoveredAsState()
-    val hoverAlpha by animateFloatAsState(
-        targetValue = if (hovered) 1f else 0f,
-        // 进得快、出得慢：移进来要立刻觉得「能点」，移走则不必抢眼。
-        animationSpec = motionTween(if (hovered) Motion.FAST else Motion.BASE),
-        label = "modRowHover",
-    )
-    Card(
-        modifier = Modifier.fillMaxWidth().then(
-            if (rowClick != null) {
-                Modifier.clickable(
-                    interactionSource = interaction,
-                    indication = LocalIndication.current,
-                    onClick = rowClick,
-                )
-            } else {
-                Modifier
-            },
-        ),
-        border = if (hoverAlpha > 0.01f) {
-            BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = hoverAlpha * 0.5f))
-        } else {
-            null
-        },
-        colors = CardDefaults.cardColors(
-            containerColor = when {
-                !pickMode -> MaterialTheme.colorScheme.surface
-                picked -> MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
-                else -> MaterialTheme.colorScheme.surface
-            },
-        ),
-    ) {
-        // 左边一张方图标、右边两行字：行高从「一行文件名」变成「一张缩略图」，
-        // 所以内边距和行距都比原来松一档 —— 挤成一行行小字时，扫一眼分不出哪个是哪个。
-        Row(
-            Modifier.fillMaxWidth().padding(10.dp),
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            if (pickMode) {
-                Checkbox(checked = picked, onCheckedChange = { onTogglePicked() }, enabled = canPick)
-            }
-            // 左侧这条 5dp 竖条就是「启用」标记（PCL 的 RectCheck）：勾上时从 0 长到 32dp，
-            // 取消时缩回去。比一个勾选框轻，一百多个条目排下来也不会满屏小方块。
-            val barHeight by animateDpAsState(
-                targetValue = if (entry.enabled) 32.dp else 0.dp,
-                // 长出来比缩回去慢一档：长出来是「确认开启」，可以稍等；缩回去是撤销，越快越好。
-                animationSpec = motionTween(
-                    if (entry.enabled) Motion.SLOW else Motion.FAST,
-                    Motion.decelerate,
-                ),
-                label = "modEnabledBar",
-            )
-            Box(
-                Modifier
-                    .width(5.dp)
-                    .height(barHeight)
-                    .clip(RoundedCornerShape(2.dp))
-                    .background(MaterialTheme.colorScheme.primary),
-            )
-            ModIcon(entry, size = 40.dp)
-            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Row(
-                    Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    // 停用的条目划一条删除线（PCL 同款）：一眼能分出「装着但没加载」的那些。
-                    Text(
-                        entry.title,
-                        style = MaterialTheme.typography.bodyMedium,
-                        textDecoration = if (entry.enabled) null else TextDecoration.LineThrough,
-                        color = if (entry.enabled) {
-                            MaterialTheme.colorScheme.onSurface
-                        } else {
-                            MaterialTheme.colorScheme.onSurfaceVariant
-                        },
-                        modifier = Modifier.weight(1f),
-                    )
-                    if (update != null && update.status == ModUpdateStatus.OUTDATED) {
-                        Text(
-                            "有新版本 " + (update.latestVersion ?: ""),
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.primary,
-                        )
-                    }
-                    Text(
-                        formatSizeShort(entry.sizeBytes),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-                val detail = buildString {
-                    append(entry.fileName)
-                    entry.loader?.let { append(" · ").append(loaderLabel(it)) }
-                    if (!entry.enabled) append(" · 停用中（不会加载）")
-                    update?.let {
-                        if (it.status == ModUpdateStatus.UP_TO_DATE) append(" · 已是最新 ").append(it.currentVersion)
-                        if (it.status == ModUpdateStatus.NOT_ON_MODRINTH) append(" · Modrinth 不认识这个文件")
-                        if (it.status == ModUpdateStatus.NO_COMPATIBLE_VERSION) append(" · 没有适配当前版本的更新")
-                    }
-                }
-                Text(
-                    detail,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                entry.problem?.let {
-                    Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error)
-                }
-                Row(
-                    Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    // 这里原来是一个 Checkbox。现在整行可点，再放勾选框反而让人以为「只有勾选框能点」，
-                    // 于是只留一行状态字，把「点哪」写清楚。
-                    Text(
-                        when {
-                            pickMode && picked -> "已选入更新队列"
-                            pickMode -> "点这条选入更新队列"
-                            entry.enabled -> "已启用 · 点这条可停用"
-                            else -> "已停用 · 点这条可启用"
-                        },
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.weight(1f),
-                    )
-                    // 明确的启用/停用按钮：整行也能点，但「点整行会怎样」得先看那行小字才知道，
-                    // 多给一个写着动作的按钮，不用试。
-                    TextButton(onClick = { onToggleEnabled(!entry.enabled) }, enabled = !busy) {
-                        Text(if (entry.enabled) "停用" else "启用")
-                    }
-                    if (update != null && update.status == ModUpdateStatus.OUTDATED) {
-                        OutlinedButton(onClick = { onUpdate(update) }, enabled = !busy) {
-                            Text(if (updating) "更新中…" else "更新到 " + (update.latestVersion ?: "新版"))
-                        }
-                    }
-                    TextButton(onClick = { confirmDelete = true }, enabled = !confirmDelete) { Text("删除") }
-                }
-            }
-        }
-    }
-    if (confirmDelete) {
-        AlertDialog(
-            onDismissRequest = { confirmDelete = false },
-            title = { Text("删除这个模组文件？") },
-            text = {
-                Text(
-                    "会直接删掉 " + entry.fileName + "，不进回收站。只是暂时不想用的话，点「停用」就行。",
-                )
-            },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        confirmDelete = false
-                        onDelete()
-                    },
-                ) { Text("删除文件") }
-            },
-            dismissButton = {
-                TextButton(onClick = { confirmDelete = false }) { Text("取消") }
-            },
-        )
-    }
-}
 
 /**
  * 「作者声明这些不能共存」的卡片。

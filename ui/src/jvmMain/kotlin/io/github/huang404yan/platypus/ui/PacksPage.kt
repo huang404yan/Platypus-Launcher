@@ -1,6 +1,5 @@
 package io.github.huang404yan.platypus.ui
 
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -13,10 +12,8 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -33,6 +30,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import io.github.huang404yan.platypus.core.component.Component
+import io.github.huang404yan.platypus.core.component.ComponentInventories
+import io.github.huang404yan.platypus.core.component.ComponentOps
 import io.github.huang404yan.platypus.core.instance.Instance
 import io.github.huang404yan.platypus.core.instance.InstanceLayouts
 import io.github.huang404yan.platypus.core.instance.InstanceScanner
@@ -40,7 +40,6 @@ import io.github.huang404yan.platypus.core.instance.LoaderKind
 import io.github.huang404yan.platypus.core.instance.instanceKey
 import io.github.huang404yan.platypus.core.instance.mergeInstances
 import io.github.huang404yan.platypus.core.mods.ModProject
-import io.github.huang404yan.platypus.core.packs.PackEntry
 import io.github.huang404yan.platypus.core.packs.PackFileOps
 import io.github.huang404yan.platypus.core.packs.PackInstallProgress
 import io.github.huang404yan.platypus.core.packs.PackInstaller
@@ -171,17 +170,11 @@ fun PacksPage(
      *
      * 文件夹形态的包这里会失败并把原因显示出来 —— 对目录改名游戏照样认，假装停用只会让人困惑。
      */
-    suspend fun setEnabled(entry: PackEntry, enabled: Boolean) {
-        val dir = currentInstanceDir() ?: run {
-            opError = "先选一个实例。"
-            return
-        }
+    suspend fun setEnabled(component: Component, enabled: Boolean) {
         opNotice = ""
         opError = ""
         try {
-            val renamed = withContext(Dispatchers.IO) {
-                PackFileOps.setEnabled(PackScanner.dirOf(kind, dir), entry.fileName, enabled)
-            }
+            val renamed = withContext(Dispatchers.IO) { ComponentOps.setEnabled(component, enabled) }
             opNotice = (if (enabled) "已启用 " else "已停用 ") + renamed.name
             rescanPacks()
         } catch (e: CancellationException) {
@@ -191,18 +184,12 @@ fun PacksPage(
         }
     }
 
-    suspend fun deletePack(entry: PackEntry) {
-        val dir = currentInstanceDir() ?: run {
-            opError = "先选一个实例。"
-            return
-        }
+    suspend fun deletePack(component: Component) {
         opNotice = ""
         opError = ""
         try {
-            val removed = withContext(Dispatchers.IO) {
-                PackFileOps.delete(PackScanner.dirOf(kind, dir), entry.fileName)
-            }
-            opNotice = if (removed) "已删除 " + entry.fileName else "文件已经不在了：" + entry.fileName
+            val removed = withContext(Dispatchers.IO) { ComponentOps.delete(component) }
+            opNotice = if (removed) "已删除 " + component.fileName else "文件已经不在了：" + component.fileName
             rescanPacks()
         } catch (e: CancellationException) {
             throw e
@@ -390,8 +377,8 @@ fun PacksPage(
             opNotice = opNotice,
             opError = opError,
             onRefresh = { scope.launch { rescanPacks() } },
-            onToggleEnabled = { entry, enabled -> scope.launch { setEnabled(entry, enabled) } },
-            onDelete = { entry -> scope.launch { deletePack(entry) } },
+            onToggleEnabled = { component, enabled -> scope.launch { setEnabled(component, enabled) } },
+            onDelete = { component -> scope.launch { deletePack(component) } },
             kindDirName = kind.dirName,
         )
     }
@@ -474,8 +461,8 @@ private fun BrowsePacksTab(
     opNotice: String,
     opError: String,
     onRefresh: () -> Unit,
-    onToggleEnabled: (PackEntry, Boolean) -> Unit,
-    onDelete: (PackEntry) -> Unit,
+    onToggleEnabled: (Component, Boolean) -> Unit,
+    onDelete: (Component) -> Unit,
     kindDirName: String,
 ) {
     Column(modifier, verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -549,7 +536,7 @@ private fun BrowsePacksTab(
     }
 }
 
-/** 已装清单：卡片列表 + 启停勾选 + 二次确认删除。 */
+/** 已装清单：统一组件行 + 停用分组 + 二次确认删除。 */
 @Composable
 private fun InstalledPacksColumn(
     modifier: Modifier,
@@ -557,9 +544,12 @@ private fun InstalledPacksColumn(
     opNotice: String,
     opError: String,
     onRefresh: () -> Unit,
-    onToggleEnabled: (PackEntry, Boolean) -> Unit,
-    onDelete: (PackEntry) -> Unit,
+    onToggleEnabled: (Component, Boolean) -> Unit,
+    onDelete: (Component) -> Unit,
 ) {
+    // 折成统一组件壳：图标、停用分组、删除措辞由 ComponentList 那一套统一，
+    // 这一页只负责「扫描结果从哪来」和「点下去改哪个文件」。
+    val inventory = remember(snapshot) { snapshot?.let { ComponentInventories.ofPacks(it) } }
     Card(modifier) {
         Column(Modifier.fillMaxSize().padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Row(
@@ -569,11 +559,11 @@ private fun InstalledPacksColumn(
             ) {
                 Column(Modifier.weight(1f)) {
                     Text(
-                        if (snapshot == null) "已装" else "已装 · " + snapshot.totalCount + " 个",
+                        if (inventory == null) "已装" else "已装 · " + inventory.totalCount + " 个",
                         style = MaterialTheme.typography.bodyMedium,
                         fontWeight = FontWeight.SemiBold,
                     )
-                    snapshot?.let {
+                    inventory?.let {
                         Text(
                             it.dir.absolutePath,
                             style = MaterialTheme.typography.labelSmall,
@@ -586,13 +576,12 @@ private fun InstalledPacksColumn(
             if (opNotice.isNotBlank()) PackHint(opNotice)
             if (opError.isNotBlank()) PackHint(opError, error = true)
 
-            val current = snapshot
+            val current = inventory
             when {
                 current == null -> PackHint("先选一个实例。")
                 !current.exists -> PackHint("这个实例还没有 " + current.dir.name + "/ 目录。从上面搜一个装进来，或者把 .zip 手动放进去。")
                 current.totalCount == 0 -> PackHint("空的。从上面搜一个装进来，或者把 .zip 手动放进 " + current.dir.name + "/。")
                 else -> {
-                    val all = current.packs + current.disabled
                     // 列表项带增删动画：停用会把这一条从「已启用」挪到「已停用」分组，
                     // 启用反过来，删除则整条消失 —— 没有这一步，它是在原地瞬间换位置的，
                     // 用户分不清「是我点错了」还是「它自己动了」。
@@ -600,12 +589,24 @@ private fun InstalledPacksColumn(
                     // animateItem 没有接收 spec 的入口，0ms 会让它在中间帧上闪一下。
                     val animateRows = !LocalReduceMotion.current
                     LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        items(all, key = { it.path }) { entry ->
+                        if (current.disabled.isNotEmpty()) {
+                            item(key = "disabled-group") {
+                                DisabledComponentsGroup(
+                                    components = current.disabled,
+                                    busy = false,
+                                    onToggleEnabled = onToggleEnabled,
+                                    onDelete = onDelete,
+                                )
+                            }
+                        }
+                        items(current.enabled, key = { it.id }) { component ->
                             Box(if (animateRows) Modifier.animateItem() else Modifier) {
-                                InstalledPackRow(
-                                    entry = entry,
-                                    onToggleEnabled = { onToggleEnabled(entry, it) },
-                                    onDelete = { onDelete(entry) },
+                                ComponentRow(
+                                    component = component,
+                                    busy = false,
+                                    onToggleEnabled = { onToggleEnabled(component, it) },
+                                    onDelete = { onDelete(component) },
+                                    onClick = { onToggleEnabled(component, !component.enabled) },
                                 )
                             }
                         }
@@ -617,76 +618,7 @@ private fun InstalledPacksColumn(
     }
 }
 
-@Composable
-private fun InstalledPackRow(
-    entry: PackEntry,
-    onToggleEnabled: (Boolean) -> Unit,
-    onDelete: () -> Unit,
-) {
-    var confirmDelete by remember { mutableStateOf(false) }
-    // 整行就是开关：点一下停用，再点一下启用。原来的勾选框在 2026-11-16 去掉 ——
-    // 用户要的是「点关闭再次点击启用」，一个行级点击比一个 24dp 的小方块好按得多。
-    Card(
-        modifier = Modifier.fillMaxWidth().clickable { onToggleEnabled(!entry.enabled) },
-        colors = CardDefaults.cardColors(
-            containerColor = if (entry.enabled) {
-                MaterialTheme.colorScheme.surface
-            } else {
-                MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
-            },
-        ),
-    ) {
-        Column(Modifier.fillMaxWidth().padding(10.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            Row(
-                Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(entry.title, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
-                Text(
-                    if (entry.enabled) "已启用 · 点这条可停用" else "已停用 · 点这条可启用",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                TextButton(onClick = { confirmDelete = true }) { Text("删除") }
-            }
-            entry.displayName?.let {
-                Text(
-                    entry.fileName,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            Text(
-                buildString {
-                    append(formatBytesShort(entry.sizeBytes))
-                    entry.packFormat?.let { append("  ·  pack_format ").append(it) }
-                    if (entry.isDirectory) append("  ·  文件夹")
-                    if (!entry.enabled) append("  ·  已停用")
-                },
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            entry.problem?.let { PackHint(it, error = true) }
-        }
-    }
-    if (confirmDelete) {
-        AlertDialog(
-            onDismissRequest = { confirmDelete = false },
-            title = { Text("删掉 " + entry.fileName + "？") },
-            text = { Text("会直接删掉这个文件，不进回收站。只是暂时不想用的话，把左边的勾去掉就行。") },
-            confirmButton = {
-                TextButton(onClick = {
-                    confirmDelete = false
-                    onDelete()
-                }) { Text("删除") }
-            },
-            dismissButton = {
-                TextButton(onClick = { confirmDelete = false }) { Text("取消") }
-            },
-        )
-    }
-}
+
 
 @Composable
 private fun PackSearchRow(project: ModProject, busy: Boolean, targetDir: String, onInstall: () -> Unit) {
