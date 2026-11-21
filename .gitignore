@@ -34,3 +34,4 @@ branding/
 # 放在仓库里会让第一次打开仓库的人以为这是产品文档，实际情况是 58 篇内部笔记。
 # README 里的图片另存了一份 assets/，不受这条影响。
 docs/
+.git-commit-msg.tmp

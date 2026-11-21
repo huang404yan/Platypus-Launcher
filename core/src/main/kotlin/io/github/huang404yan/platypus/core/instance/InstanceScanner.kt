@@ -19,6 +19,13 @@ data class ScanResult(
      * 界面上要解释「为什么装一个 Forge 只多出一条」时可以拿它说话。
      */
     val libraryVersions: List<String> = emptyList(),
+    /**
+     * `versions/` 下实际存在的目录名，判「登记的实例还在不在盘上」用（见 [pruneMissing]）。
+     *
+     * 单独带出去而不是让调用方自己再列一遍：这本来就是 scan 已经做过的那次列举。
+     * null = 这次没扫到 versions/，[pruneMissing] 见到它就原样放过，不当成「目录全没了」。
+     */
+    val versionNames: VersionNames? = null,
 )
 
 /**
@@ -50,11 +57,18 @@ object InstanceScanner {
         val versionsDir = File(root, "versions")
         val parsed = mutableListOf<ParsedVersion>()
 
-        if (!versionsDir.isDirectory) {
+        // versions/ 下真实存在的目录名：既拿来遍历，也顺手交给调用方判实例在不在盘上。
+        // 一次列举两处用，省掉每个页面各来一遍 File.exists()。
+        val versionDirs = if (versionsDir.isDirectory) {
+            versionsDir.listFiles { f -> f.isDirectory }?.sortedBy { it.name }.orEmpty()
+        } else {
+            null
+        }
+
+        if (versionDirs == null) {
             warnings += "没有 versions/ 目录，也没有可用的版本"
         } else {
-            val dirs = versionsDir.listFiles { f -> f.isDirectory }?.sortedBy { it.name }.orEmpty()
-            for (dir in dirs) {
+            for (dir in versionDirs) {
                 val id = dir.name
                 // 正在装的目录不列出来：装到一半的 json 已经在盘上了，
                 // 但文件还没下完、加载器还没叠好，提前出现只会让人以为装重了。
@@ -95,6 +109,7 @@ object InstanceScanner {
             instances = instances.sortedBy { it.name.lowercase() },
             warnings = warnings,
             libraryVersions = libraryVersions.sorted(),
+            versionNames = VersionNames.of(versionDirs),
         )
     }
 

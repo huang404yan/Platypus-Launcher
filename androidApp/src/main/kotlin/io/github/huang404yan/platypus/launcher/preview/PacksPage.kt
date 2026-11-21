@@ -41,6 +41,7 @@ import io.github.huang404yan.platypus.core.instance.JsonInstanceRepository
 import io.github.huang404yan.platypus.core.instance.LoaderKind
 import io.github.huang404yan.platypus.core.instance.instanceKey
 import io.github.huang404yan.platypus.core.instance.mergeInstances
+import io.github.huang404yan.platypus.core.instance.pruneMissing
 import io.github.huang404yan.platypus.core.mods.ModProject
 import io.github.huang404yan.platypus.core.packs.PackEntry
 import io.github.huang404yan.platypus.core.packs.PackFileOps
@@ -115,7 +116,9 @@ internal fun PacksPage() {
                 JsonInstanceRepository(JsonInstanceRepository.defaultIndexFile(dir)).list()
             }.getOrNull().orEmpty()
             runCatching { InstanceScanner.scan(dir) }.getOrNull()?.let { scan ->
-                scan.copy(instances = mergeInstances(registered, scan.instances, scan.libraryVersions))
+                // 登记的实例可能早就在资源管理器里被删了，只摘展示、不写盘（理由见 pruneMissing）。
+                val live = pruneMissing(registered, scan.versionNames)
+                scan.copy(instances = mergeInstances(live.kept, scan.instances, scan.libraryVersions))
             }
         }
         val found = scanned?.instances.orEmpty()

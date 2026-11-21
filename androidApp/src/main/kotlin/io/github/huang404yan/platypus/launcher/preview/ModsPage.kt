@@ -37,8 +37,11 @@ import androidx.compose.ui.unit.dp
 import io.github.huang404yan.platypus.core.instance.Instance
 import io.github.huang404yan.platypus.core.instance.InstanceLayouts
 import io.github.huang404yan.platypus.core.instance.InstanceScanner
+import io.github.huang404yan.platypus.core.instance.JsonInstanceRepository
 import io.github.huang404yan.platypus.core.instance.LoaderKind
 import io.github.huang404yan.platypus.core.instance.instanceKey
+import io.github.huang404yan.platypus.core.instance.mergeInstances
+import io.github.huang404yan.platypus.core.instance.pruneMissing
 import io.github.huang404yan.platypus.core.mods.InstanceMods
 import io.github.huang404yan.platypus.core.mods.InstanceModsSnapshot
 import io.github.huang404yan.platypus.core.mods.ModConflict
@@ -128,7 +131,15 @@ internal fun ModsPage() {
         val scanned = withContext(Dispatchers.IO) {
             runCatching { InstanceScanner.scan(File(path)) }.getOrNull()
         }
-        val found = scanned?.instances.orEmpty()
+        // 模组页先前只列扫描结果、完全没读登记表，于是「已登记但目录里没有 json」的实例
+        // 在这里看不到。合并的口径要跟实例页一致，否则同一个目录在两边是不同的两套列表。
+        val registered = withContext(Dispatchers.IO) {
+            runCatching { JsonInstanceRepository(JsonInstanceRepository.defaultIndexFile(File(path))).list() }
+                .getOrNull().orEmpty()
+        }
+        // 登记的实例可能早就在资源管理器里被删了，只摘展示、不写盘（理由见 pruneMissing）。
+        val live = pruneMissing(registered, scanned?.versionNames)
+        val found = mergeInstances(live.kept, scanned?.instances.orEmpty(), scanned?.libraryVersions.orEmpty())
         instances = found
         if (found.none { instanceKey(it) == selectedKey }) {
             // 原版实例排后面：它们装不了模组

@@ -39,6 +39,7 @@ import io.github.huang404yan.platypus.core.instance.InstanceScanner
 import io.github.huang404yan.platypus.core.instance.LoaderKind
 import io.github.huang404yan.platypus.core.instance.instanceKey
 import io.github.huang404yan.platypus.core.instance.mergeInstances
+import io.github.huang404yan.platypus.core.instance.pruneMissing
 import io.github.huang404yan.platypus.core.mods.ModProject
 import io.github.huang404yan.platypus.core.packs.PackFileOps
 import io.github.huang404yan.platypus.core.packs.PackInstallProgress
@@ -124,7 +125,9 @@ fun PacksPage(
             !scanned.isGameDirectory -> "这里不是游戏目录（缺少 versions/、libraries/ 或 assets/）"
             else -> ""
         }
-        val merged = mergeInstances(registered, scanned?.instances.orEmpty(), scanned?.libraryVersions.orEmpty())
+        // 登记的实例可能早就在资源管理器里被删了，只摘展示、不写盘（理由见 pruneMissing）。
+        val live = pruneMissing(registered, scanned?.versionNames)
+        val merged = mergeInstances(live.kept, scanned?.instances.orEmpty(), scanned?.libraryVersions.orEmpty())
         instances = merged
         if (merged.none { instanceKey(it) == selectedKey }) {
             val focused = focusInstanceKey.takeIf { it.isNotBlank() }?.let { key ->

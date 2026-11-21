@@ -49,6 +49,7 @@ import io.github.huang404yan.platypus.core.instance.SpaceReport
 import io.github.huang404yan.platypus.core.instance.formatBytes
 import io.github.huang404yan.platypus.core.instance.instanceKey
 import io.github.huang404yan.platypus.core.instance.mergeInstances
+import io.github.huang404yan.platypus.core.instance.pruneMissing
 import java.io.File
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -90,8 +91,10 @@ fun ToolboxPage(backend: LauncherBackend? = null, initialGameRoot: String? = nul
             runCatching { backend?.instances?.list() }.getOrNull().orEmpty()
         }
         val scan = withContext(Dispatchers.IO) { runCatching { InstanceScanner.scan(root) }.getOrNull() }
+        // 登记的实例可能早就在资源管理器里被删了，只摘展示、不写盘（理由见 pruneMissing）。
+        val live = pruneMissing(registered, scan?.versionNames)
         val merged = mergeInstances(
-            registered,
+            live.kept,
             scan?.instances.orEmpty(),
             scan?.libraryVersions.orEmpty(),
         )

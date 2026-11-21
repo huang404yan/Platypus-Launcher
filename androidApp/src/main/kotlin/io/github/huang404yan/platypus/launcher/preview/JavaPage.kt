@@ -35,7 +35,21 @@ import io.github.huang404yan.platypus.core.runtime.AndroidJavaInstaller
 import io.github.huang404yan.platypus.core.runtime.AndroidJavaPackage
 import io.github.huang404yan.platypus.core.runtime.AndroidJavaRuntimeService
 import io.github.huang404yan.platypus.core.runtime.JavaRuntime
+import io.github.huang404yan.platypus.core.instance.Instance
+import io.github.huang404yan.platypus.core.instance.InstanceScanner
+import io.github.huang404yan.platypus.core.instance.JsonInstanceRepository
+import io.github.huang404yan.platypus.core.instance.instanceKey
+import io.github.huang404yan.platypus.core.instance.mergeInstances
+import io.github.huang404yan.platypus.core.instance.pruneMissing
+import io.github.huang404yan.platypus.core.runtime.GameJavaRules
+import io.github.huang404yan.platypus.core.runtime.JavaRecommendation
+import io.github.huang404yan.platypus.core.runtime.JavaRecommender
+import io.github.huang404yan.platypus.core.runtime.JavaRuntimeOffer
+import io.github.huang404yan.platypus.core.runtime.JavaVerdict
 import java.io.File
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /**
  * Java 页（手机）。
@@ -75,6 +89,7 @@ internal fun JavaPage() {
     var offers by remember { mutableStateOf<List<AndroidJavaPackage>>(emptyList()) }
     var removing by remember { mutableStateOf<AndroidJavaPackage?>(null) }
     var detected by remember { mutableStateOf<List<JavaRuntime>>(emptyList()) }
+    var instances by remember { mutableStateOf<List<Instance>>(emptyList()) }
 
     val state = JavaInstallRunner.state.collectAsState().value
     val running = state.busy
@@ -94,6 +109,18 @@ internal fun JavaPage() {
     LaunchedEffect(state.doneAt) {
         reload()
         detected = runCatching { service.detect() }.getOrDefault(emptyList())
+        // 光说「装了哪几份」还不够：用户真正要回答的是「我这几个版本够不够跑」。
+        // 实例列表从游戏目录里读，读不到就整块不画，不拿空表冒充「一个版本都没有」。
+        instances = withContext(Dispatchers.IO) {
+            runCatching {
+                val root = File(defaultGameRoot())
+                val registered = JsonInstanceRepository(JsonInstanceRepository.defaultIndexFile(root)).list()
+                val scan = InstanceScanner.scan(root)
+                // 登记的实例可能早就在资源管理器里被删了，只摘展示、不写盘（理由见 pruneMissing）。
+                val live = pruneMissing(registered, scan.versionNames)
+                mergeInstances(live.kept, scan.instances, scan.libraryVersions)
+            }.getOrDefault(emptyList())
+        }
     }
 
     Column(
@@ -119,6 +146,62 @@ internal fun JavaPage() {
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+        }
+
+        // 各版本要的 Java：结论与桌面同一套（core 的 JavaRecommender），只是候选
+        // 从「本机探测到的 java.exe」换成「启动器自己下的这几份 JRE」。
+        //
+        // 清单也要一并给过去，否则推荐分不清「清单里有但还没下」和「这台机器根本没有这一档」：
+        // Java 25 没有 x86 包，只传 detected 的话会一直劝人去下，点了才发现下不了。
+        val catalogOffers = remember(offers) {
+            offers.map { pkg ->
+                JavaRuntimeOffer(
+                    component = AndroidJavaRuntimeService.componentOf(pkg.majorVersion, pkg.abi),
+                    majorVersion = pkg.majorVersion,
+                    versionName = pkg.label + "（" + pkg.abi + "）",
+                    manifestSize = pkg.totalBytes,
+                    installed = pkg.installed,
+                    installedPath = pkg.installedPath,
+                )
+            }
+        }
+        val groups = remember(instances, detected) {
+            instances.groupBy { GameJavaRules.requiredMajor(it.gameVersion) }.entries.sortedBy { it.key }
+        }
+        if (groups.isNotEmpty()) {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+            ) {
+                Column(
+                    modifier = Modifier.fillMaxWidth().padding(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Text(
+                        "各版本要的 Java",
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    Text(
+                        "手机上不用自己去外面找 Java，缺哪个直接在这里下。这里只认主版本完全相等 ——" +
+                            "拿更高版本顶替，1.16.5 那一代带 Forge 的会直接崩。",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    groups.forEach { entry ->
+                        val major = entry.key
+                        JavaNeedRow(
+                            major = major,
+                            owned = entry.value,
+                            recommendation = JavaRecommender.recommend(major, detected, catalogOffers),
+                            busy = running,
+                            onDownload = offers
+                                .firstOrNull { it.majorVersion == major && !it.installed }
+                                ?.let { pkg -> { JavaInstallRunner.start(javaRoot, pkg) } },
+                        )
+                    }
+                }
+            }
         }
 
         if (abi == null) {
@@ -198,6 +281,60 @@ internal fun JavaPage() {
                 ) { Text("删掉") }
             },
             dismissButton = { TextButton(onClick = { removing = null }) { Text("留着") } },
+        )
+    }
+}
+
+/**
+ * 一行一组「哪些版本要这个 Java、现在够不够」。
+ *
+ * 与桌面端同名组件同一套判定（[JavaRecommender]），只是桌面那边会给出「去下载」按钮
+ * 指向 Mojang 清单，手机这边指向启动器自己的 JRE 表 —— 手机装不了桌面那种 JDK。
+ *
+ * 版本名最多点三个，再多的折成「等 N 个」：手机一行放不下四五个版本名，
+ * 而用户在这一行要的是结论，不是完整清单。
+ */
+@Composable
+private fun JavaNeedRow(
+    major: Int,
+    owned: List<Instance>,
+    recommendation: JavaRecommendation,
+    busy: Boolean,
+    onDownload: (() -> Unit)?,
+) {
+    val tint = when (recommendation.verdict) {
+        JavaVerdict.READY -> MaterialTheme.colorScheme.primary
+        JavaVerdict.CAN_DOWNLOAD -> MaterialTheme.colorScheme.onSurface
+        JavaVerdict.NOT_AVAILABLE, JavaVerdict.UNKNOWN_NEED -> MaterialTheme.colorScheme.error
+    }
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                "Java " + major,
+                Modifier.weight(1f),
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.SemiBold,
+                color = tint,
+            )
+            when {
+                recommendation.ready -> Text(
+                    "够用",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+                onDownload != null -> OutlinedButton(onClick = onDownload, enabled = !busy) { Text("下载") }
+            }
+        }
+        Text(
+            owned.take(3).joinToString("、") { it.name.ifBlank { it.gameVersion } } +
+                if (owned.size > 3) " 等 " + owned.size + " 个版本" else "",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Text(
+            JavaRecommender.describe(recommendation),
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
     }
 }

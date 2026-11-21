@@ -12,6 +12,14 @@ import android.provider.Settings
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -49,7 +57,9 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
@@ -74,11 +84,15 @@ import io.github.huang404yan.platypus.core.CreditKind
 import io.github.huang404yan.platypus.core.Credits
 import io.github.huang404yan.platypus.core.instance.GameRoots
 import io.github.huang404yan.platypus.core.instance.Instance
+import io.github.huang404yan.platypus.core.instance.InstanceCatalog
+import io.github.huang404yan.platypus.core.instance.missingNotice
+import io.github.huang404yan.platypus.core.instance.pruneMissing
 import io.github.huang404yan.platypus.core.instance.InstanceScanner
 import io.github.huang404yan.platypus.core.instance.JsonInstanceRepository
 import io.github.huang404yan.platypus.core.instance.LoaderKind
 import io.github.huang404yan.platypus.core.instance.ScanResult
 import io.github.huang404yan.platypus.core.instance.instanceKey
+import io.github.huang404yan.platypus.core.instance.lastPlayedText
 import io.github.huang404yan.platypus.core.instance.mergeInstances
 import io.github.huang404yan.platypus.core.theme.LauncherTheme
 import kotlinx.coroutines.Dispatchers
@@ -171,11 +185,42 @@ private enum class Tab(val label: String) {
 
 @Composable
 private fun AppRoot(theme: LauncherTheme, onThemeChange: (LauncherTheme) -> Unit) {
+    // 「少动一点」：读一次设置，页面代码不必各写分支，与桌面 ui/Motion.kt 同一套。
+    // 读不到时按 false 走 —— 动效是默认状态，读失败就把界面变死板比偶尔多晃一下更让人困惑。
+    var reduceMotion by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) { reduceMotion = readReduceMotion() }
+    CompositionLocalProvider(LocalReduceMotion provides reduceMotion) {
+        AppShell(
+            theme = theme,
+            onThemeChange = onThemeChange,
+            reduceMotion = reduceMotion,
+            // 设置页改完立刻生效：它自己先落盘，再回调这里换值 —— 两边都写一遍会打架。
+            onReduceMotionChange = { reduceMotion = it },
+        )
+    }
+}
+
+/**
+ * 七项侧栏 + 内容框 + 通知浮层。
+ *
+ * 与 [AppRoot] 分开只是为了把「读设置」和「画界面」两件事摆平：
+ * [LocalReduceMotion] 必须包住整棵树，而它的值来自一次 io 读盘。
+ */
+@Composable
+private fun AppShell(
+    theme: LauncherTheme,
+    onThemeChange: (LauncherTheme) -> Unit,
+    reduceMotion: Boolean,
+    onReduceMotionChange: (Boolean) -> Unit,
+) {
     var tab by remember { mutableStateOf(Tab.LAUNCH) }
     // 二级项记在 map 里而不是每个 Tab 一个变量：切走再切回来时还停在上次那一项，
     // 而 "下载 → 模组" 与 "设置 → Java" 互不干扰（桌面 App.kt 用的是同一套写法）。
     val subSelection = remember { mutableStateMapOf<String, String>() }
     val sub = subSelection[tab.name].orEmpty()
+    // 安装任务活在页面之外，装完那一刻用户多半已经切到别的页去了，
+    // 所以提示得画在这一层，而不是让各个页面自己扛。
+    val notices = Notices.items.collectAsState().value
     // 尺寸不写死：手机横屏两千多 px、平板更宽，同一套 dp 在两种屏上观感差很多。
     // 侧栏按屏宽取比例再夹在上下限之间，内容框的留白同理。
     BoxWithConstraints(Modifier.fillMaxSize()) {
@@ -211,7 +256,21 @@ private fun AppRoot(theme: LauncherTheme, onThemeChange: (LauncherTheme) -> Unit
                     .border(1.5.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(12.dp))
                     .padding(horizontal = 20.dp, vertical = 16.dp),
             ) {
-                when (tab) {
+                // 换页给一点位移：没有它的时候整个内容框是一瞬间整体换掉，
+                // 眼睛要靠标题才知道点中了；有了方向感，左栏点第几项都一眼看得出来。
+                // 时长走 motionMillis，「少动一点」勾上时瞬间到位。
+                val pageMillis = motionMillis(Motion.BASE)
+                AnimatedContent(
+                    targetState = tab,
+                    transitionSpec = {
+                        val forward = targetState.ordinal >= initialState.ordinal
+                        val shift = if (forward) 1 else -1
+                        (fadeIn(tween(pageMillis)) + slideInHorizontally(tween(pageMillis)) { shift * it / 20 }) togetherWith
+                            (fadeOut(tween(pageMillis)) + slideOutHorizontally(tween(pageMillis)) { -shift * it / 20 })
+                    },
+                    label = "tab",
+                ) { shown ->
+                when (shown) {
                     // 启动页做到「进游戏之前的全部准备」：挑实例与身份、挑运行时与后端、
                     // 六条自检、拼出应用内 JVM 要的完整参数表。最后那一步是 JNI 起 JVM。
                     Tab.LAUNCH -> LaunchPage()
@@ -222,22 +281,67 @@ private fun AppRoot(theme: LauncherTheme, onThemeChange: (LauncherTheme) -> Unit
                     // 「下载」与「设置」各有四项二级。分类栏长在侧栏里（选中时向下展开），
                     // 不再往页面顶部塞一排按钮：手机上横屏本来就矮，页面顶部那一行会跟
                     // 标题抢位置，而且切页时「我在哪一层」会看不清。
-                    Tab.DOWNLOAD -> when (sub) {
-                        DOWNLOAD_SUB_MODS -> ModsPage()
-                        DOWNLOAD_SUB_PACKS -> PacksPage()
-                        DOWNLOAD_SUB_SERVER -> ServerPage()
-                        else -> DownloadPage()
+                    //
+                    // 二级项之间走 SubContent（只淡入淡出，不位移）：侧栏那几行是竖排的，
+                    // 横向滑会暗示「翻到旁边去了」，跟手指点下去的方向对不上。
+                    Tab.DOWNLOAD -> SubContent(sub) { picked ->
+                        when (picked) {
+                            DOWNLOAD_SUB_MODS -> ModsPage()
+                            DOWNLOAD_SUB_PACKS -> PacksPage()
+                            DOWNLOAD_SUB_SERVER -> ServerPage()
+                            else -> DownloadPage()
+                        }
                     }
-                    Tab.SETTINGS -> when (sub) {
-                        SETTINGS_SUB_ACCOUNT -> AccountPage()
-                        SETTINGS_SUB_JAVA -> JavaPage()
-                        SETTINGS_SUB_DIAGNOSTIC -> DiagnosticPage()
-                        else -> SettingsPage(theme = theme, onThemeChange = onThemeChange)
+                    Tab.SETTINGS -> SubContent(sub) { picked ->
+                        when (picked) {
+                            SETTINGS_SUB_ACCOUNT -> AccountPage()
+                            SETTINGS_SUB_JAVA -> JavaPage()
+                            SETTINGS_SUB_DIAGNOSTIC -> DiagnosticPage()
+                            SETTINGS_SUB_TOOLBOX -> ToolboxPage()
+                            else -> SettingsPage(
+                                theme = theme,
+                                onThemeChange = onThemeChange,
+                                reduceMotion = reduceMotion,
+                                onReduceMotionChange = onReduceMotionChange,
+                            )
+                        }
                     }
+                }
+                }
+            }
+        }
+        // 浮卡画在最外层：它得盖住内容框的圆角与侧栏，否则贴边那几行会被裁掉。
+        if (notices.isNotEmpty()) {
+            NoticeStack(notices) { notice ->
+                Notices.dismiss(notice.id)
+                // 点一下就去那一页。装完东西的人下一步几乎总是「看一眼它在哪 / 去启动它」，
+                // 让他自己回侧栏再点一遍是多余的一步。
+                val tip = notice.goto.split('|')
+                Tab.entries.firstOrNull { it.name == tip[0] }?.let { target ->
+                    val wanted = tip.getOrNull(1).orEmpty()
+                    if (wanted.isBlank()) subSelection.remove(target.name) else subSelection[target.name] = wanted
+                    tab = target
                 }
             }
         }
     }
+}
+
+/**
+ * 同一页里换二级项时的过渡：只淡入淡出，不带位移。
+ *
+ * 桌面 App.kt 里那一层写的是 Crossfade，这里手写 AnimatedContent 是因为
+ * 安卓这份用的是 `targetState` + `when` 分发的形式，两边语义一样：
+ * 过渡期间只画一帧内容，不会出现两份页面同时在屏上抢焦点。
+ */
+@Composable
+private fun SubContent(current: String, content: @Composable (String) -> Unit) {
+    val millis = motionMillis(Motion.BASE)
+    AnimatedContent(
+        targetState = current,
+        transitionSpec = { fadeIn(tween(millis)) togetherWith fadeOut(tween(millis)) },
+        label = "subTab",
+    ) { shown -> content(shown) }
 }
 
 /**
@@ -252,6 +356,7 @@ private const val SETTINGS_SUB_GENERAL = "general"
 private const val SETTINGS_SUB_ACCOUNT = "account"
 private const val SETTINGS_SUB_JAVA = "java"
 private const val SETTINGS_SUB_DIAGNOSTIC = "diagnostic"
+private const val SETTINGS_SUB_TOOLBOX = "toolbox"
 
 /** 这个 Tab 展开之后要画哪几行；空表示它本身就是一个页面，不再分词。 */
 private val Tab.subItems: List<Pair<String, String>>
@@ -267,6 +372,7 @@ private val Tab.subItems: List<Pair<String, String>>
             SETTINGS_SUB_ACCOUNT to "账号",
             SETTINGS_SUB_JAVA to "Java",
             SETTINGS_SUB_DIAGNOSTIC to "诊断",
+            SETTINGS_SUB_TOOLBOX to "百宝箱",
         )
         else -> emptyList()
     }
@@ -313,13 +419,22 @@ private fun SideBar(
         ) {
             Tab.entries.forEach { item ->
                 val selected = item == current
+                // 选中底色走 120ms 淡入而不是瞬间跳变：侧栏七行挨着，瞬变看起来像点了没点上
+                // 又补了一下，而短一点的颜色过渡能让人确认「点的就是这行」。
+                val bg by animateColorAsState(
+                    if (selected) MaterialTheme.colorScheme.primary.copy(alpha = 0.14f) else Color.Transparent,
+                    motionTween(Motion.FAST),
+                    label = "tabBg",
+                )
+                val tint by animateColorAsState(
+                    if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                    motionTween(Motion.FAST),
+                    label = "tabTint",
+                )
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .background(
-                            if (selected) MaterialTheme.colorScheme.primary.copy(alpha = 0.14f) else Color.Transparent,
-                            MaterialTheme.shapes.small,
-                        )
+                        .background(bg, MaterialTheme.shapes.small)
                         // 只切一级，不动二级：subSelection 按 Tab 名分开存，
                         // 「下载 → 服务端」与「设置 → Java」互不影响；从没选过的 Tab
                         // 取不到值，分发时那个 else 分支就已经落到第一项了。
@@ -331,7 +446,7 @@ private fun SideBar(
                         text = item.label,
                         style = MaterialTheme.typography.titleSmall,
                         fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
-                        color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                        color = tint,
                     )
                 }
                 // 二级只在选中时展开：七项里只有两项有子项，全展开会让侧栏长出一倍，
@@ -339,17 +454,15 @@ private fun SideBar(
                 if (selected) {
                     item.subItems.forEach { (key, label) ->
                         val childSelected = key == currentSub
+                        val subBg by animateColorAsState(
+                            if (childSelected) MaterialTheme.colorScheme.primary.copy(alpha = 0.10f) else Color.Transparent,
+                            motionTween(Motion.FAST),
+                            label = "subBg",
+                        )
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .background(
-                                    if (childSelected) {
-                                        MaterialTheme.colorScheme.primary.copy(alpha = 0.10f)
-                                    } else {
-                                        Color.Transparent
-                                    },
-                                    MaterialTheme.shapes.small,
-                                )
+                                .background(subBg, MaterialTheme.shapes.small)
                                 .clickable { onSelectSub(key) }
                                 .padding(start = 25.dp, end = 10.dp, top = 7.dp, bottom = 7.dp),
                             verticalAlignment = Alignment.CenterVertically,
@@ -395,6 +508,9 @@ private fun InstancePage() {
     var result by remember { mutableStateOf<ScanResult?>(null) }
     var scanning by remember { mutableStateOf(false) }
     var selected by remember { mutableStateOf<Instance?>(null) }
+    // 实例一多，列表就得能搜：手机上滚一屏只放得下四五条，
+    // 二十多个版本时靠滑很难找到「前几天刚装的那个」。
+    var query by remember { mutableStateOf("") }
 
     fun scan() {
         val path = root.trim()
@@ -409,7 +525,17 @@ private fun InstancePage() {
                     JsonInstanceRepository(JsonInstanceRepository.defaultIndexFile(dir)).list()
                 }.getOrNull().orEmpty()
                 val scanned = InstanceScanner.scan(dir)
-                scanned.copy(instances = mergeInstances(registered, scanned.instances, scanned.libraryVersions))
+                val merged = mergeInstances(registered, scanned.instances, scanned.libraryVersions)
+                // 登记的实例可能早就在资源管理器里被删掉了：扫描那一半反映磁盘现状，
+                // 登记那一半是 instances.json 里的老数据，不判一次就永远留在列表里，
+                // 点进去是一页空白、点启动要等几秒才报「目录不存在」。
+                // 只摘展示、不写盘 —— 盘可能只是暂时不在（移动硬盘没插、U 盘没挂上），
+                // 真把登记删了，插回来的人要重新配一遍内存与 Java。
+                val pruned = pruneMissing(merged, scanned.versionNames)
+                scanned.copy(
+                    instances = pruned.kept,
+                    warnings = scanned.warnings + listOfNotNull(missingNotice(pruned.missing)),
+                )
             }
             result = r
             scanning = false
@@ -420,6 +546,37 @@ private fun InstancePage() {
 
     LaunchedEffect(granted) {
         if (granted) scan()
+    }
+
+    /**
+     * 收藏 / 取消收藏一个实例。
+     *
+     * 落盘写的是 `instances.json`，不是版本目录下的 ini —— 那个目录可能同时被
+     * 别的启动器用着，往里塞私货是污染（PCL 写在 `PCL/Setup.ini`，我们刻意不跟）。
+     *
+     * 先就地改列表让星立刻填充，再后台写盘：手机上点一下要等 IO 的话，
+     * 会以为没点中。写失败就把原样刷回来，并留一句说明。
+     */
+    fun togglePin(instance: Instance) {
+        val updated = instance.copy(pinned = !instance.pinned, registered = true)
+        result = result?.let { r ->
+            r.copy(instances = r.instances.map { if (instanceKey(it) == instanceKey(updated)) updated else it })
+        }
+        selected = selected?.let { if (instanceKey(it) == instanceKey(updated)) updated else it }
+        scope.launch {
+            val ok = withContext(Dispatchers.IO) {
+                runCatching {
+                    JsonInstanceRepository(JsonInstanceRepository.defaultIndexFile(File(root.trim())))
+                        .save(updated)
+                }.isSuccess
+            }
+            if (!ok) {
+                result = result?.let { r ->
+                    r.copy(instances = r.instances.map { if (instanceKey(it) == instanceKey(instance)) instance else it })
+                }
+            }
+            scan()
+        }
     }
 
     val open = selected
@@ -519,9 +676,34 @@ private fun InstancePage() {
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 } else {
-                    LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        items(current.instances) { instance ->
-                            InstanceCard(instance, onClick = { selected = instance })
+                    // 搜索框只在真有东西可搜时出现：一条实例的目录里，多一个框只是噪音。
+                    if (current.instances.size > 4) {
+                        OutlinedTextField(
+                            value = query,
+                            onValueChange = { query = it },
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true,
+                            label = { Text("搜实例（名字、版本号、加载器、目录）") },
+                        )
+                    }
+                    val shown = InstanceCatalog.search(current.instances, query)
+                    if (shown.isEmpty()) {
+                        Text(
+                            "没有一条对得上「" + query + "」。",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    LazyColumn(
+                        modifier = Modifier.weight(1f),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        items(shown, key = { instanceKey(it) }) { instance ->
+                            InstanceCard(
+                                instance = instance,
+                                onClick = { selected = instance },
+                                onTogglePin = { togglePin(instance) },
+                            )
                         }
                     }
                 }
@@ -531,7 +713,7 @@ private fun InstancePage() {
 }
 
 @Composable
-private fun InstanceCard(instance: Instance, onClick: () -> Unit) {
+private fun InstanceCard(instance: Instance, onClick: () -> Unit, onTogglePin: () -> Unit) {
     Card(
         Modifier.fillMaxWidth().clickable(onClick = onClick),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
@@ -553,8 +735,24 @@ private fun InstanceCard(instance: Instance, onClick: () -> Unit) {
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+                // 玩过几次之后，列表上真正想找的是「上次那个」。没玩过的那些不写这一行，
+                // 免得每张卡都挂一句「还没启动过」把真正有信息的那几行挤淡。
+                if (instance.lastPlayedAt > 0L) {
+                    Text(
+                        "上次玩 " + lastPlayedText(instance.lastPlayedAt),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
             }
-            LoaderBadge(instance.loader)
+            // 星放在徽标上方：星是用户的选择，徽标是机器的事实，两者不该并成一排。
+            Column(
+                horizontalAlignment = Alignment.End,
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                PinStar(pinned = instance.pinned, onClick = onTogglePin)
+                LoaderBadge(instance.loader)
+            }
         }
     }
 }

@@ -51,10 +51,13 @@ import io.github.huang404yan.platypus.core.instance.InstanceScanner
 import io.github.huang404yan.platypus.core.instance.LoaderKind
 import io.github.huang404yan.platypus.core.instance.LocalInstance
 import io.github.huang404yan.platypus.core.instance.MemoryDefaults
+import io.github.huang404yan.platypus.core.instance.PruneResult
 import io.github.huang404yan.platypus.core.instance.ScanResult
 import io.github.huang404yan.platypus.core.instance.formatBytes
 import io.github.huang404yan.platypus.core.instance.instanceKey
 import io.github.huang404yan.platypus.core.instance.mergeInstances
+import io.github.huang404yan.platypus.core.instance.missingNotice
+import io.github.huang404yan.platypus.core.instance.pruneMissing
 import io.github.huang404yan.platypus.core.runtime.GameJavaRules
 import io.github.huang404yan.platypus.core.runtime.JavaRuntime
 import io.github.huang404yan.platypus.core.runtime.findExactMajor
@@ -130,8 +133,22 @@ fun InstancePage(
     var deleting by remember { mutableStateOf(false) }
     /** 实例列表的过滤词；空串 = 不筛。 */
     var query by remember { mutableStateOf("") }
+    /** 「登记的实例目录已经不在了」那一行提示；没有摘掉任何东西就是空串。 */
+    var prunedNotice by remember { mutableStateOf("") }
 
     val scope = rememberCoroutineScope()
+
+    /**
+     * 登记的实例里，磁盘上还在的那些。
+     *
+     * 扫描结果自带 `versions/` 名单，直接拿来当判据，不用逐条 File.exists()（那会是几十次系统调用）。
+     * 没扫到目录（`scan == null` 或它没带上名单）时名单是 null，pruneMissing 原样放过 ——
+     * 目录暂时读不到不该表现成「登记的版本全没了」。
+     *
+     * 纯内存过滤，不需要再切一次 IO 线程。
+     */
+    fun liveRegistered(scan: ScanResult?, saved: List<Instance>): PruneResult =
+        pruneMissing(saved, scan?.versionNames)
 
     suspend fun rescan() {
         val text = rootText.trim()
@@ -146,7 +163,10 @@ fun InstancePage(
             }
         }
         result = scan
-        registered = saved
+        // 登记的实例可能早就在资源管理器里被删掉了，这里只摘展示、不写盘（理由见 pruneMissing）。
+        val live = liveRegistered(scan, saved)
+        registered = live.kept
+        prunedNotice = missingNotice(live.missing).orEmpty()
     }
 
     /** 把「仅扫描到」的实例登记下来：内存用默认值，Java 找主版本精确匹配的那个。 */
@@ -580,6 +600,7 @@ fun InstancePage(
                         fontWeight = FontWeight.SemiBold,
                     )
                     current?.warnings.orEmpty().forEach { WarningLine(it) }
+                    if (prunedNotice.isNotBlank()) Hint(prunedNotice)
                     if (editNotice.isNotBlank()) Hint(editNotice)
                     // 实例是个位数到十几的量级：整段铺开、交给外层滚动，
                     // 比 LazyColumn 再套一层滚动更可预期（滚轮只作用在一个方向上）。

@@ -13,6 +13,7 @@ import io.github.huang404yan.platypus.core.download.DownloadPreference
 import io.github.huang404yan.platypus.core.instance.InstanceLayouts
 import io.github.huang404yan.platypus.core.setup.AndroidSetup
 import io.github.huang404yan.platypus.core.settings.JsonSettingsRepository
+import io.github.huang404yan.platypus.core.settings.LauncherSettings
 import io.github.huang404yan.platypus.core.theme.LauncherTheme
 import io.github.huang404yan.platypus.core.theme.launcherThemeOf
 import io.github.huang404yan.platypus.core.theme.paletteOf
@@ -148,6 +149,25 @@ internal suspend fun androidGuideNeeded(): Boolean {
  * 安卓这边没有全局的「当前游戏目录」状态（每个页面自己算），而设置文件是跟着游戏目录走的，
  * 所以只能这样找。读不到、读坏了、字段认不出来，一律当 [LauncherTheme.AUTO]。
  */
+internal suspend fun readSettingsFile(): LauncherSettings? {
+    val root = runCatching { File(defaultGameRoot()) }.getOrNull() ?: return null
+    val store = JsonSettingsRepository(JsonSettingsRepository.defaultFile(root))
+    val settings = runCatching { store.load() }.getOrNull() ?: return null
+    // 设置文件跟着游戏目录走，而设置里可能又写了另一个游戏目录 —— 与上面两个函数同一套走两跳。
+    val actual = settings.defaultGameRoot.trim()
+    if (actual.isNotEmpty() && actual != root.absolutePath) {
+        runCatching { JsonSettingsRepository(JsonSettingsRepository.defaultFile(File(actual))).load() }
+            .getOrNull()?.let { return it }
+    }
+    return settings
+}
+
+/**
+ * 启动时读一次「少动一点」。读不到一律当没勾 —— 动效是默认状态，
+ * 读失败时把界面变死板比偶尔多晃一下更让人困惑。
+ */
+internal suspend fun readReduceMotion(): Boolean = runCatching { readSettingsFile()?.reduceMotion }.getOrNull() ?: false
+
 internal suspend fun readThemePreference(): LauncherTheme {
     val root = runCatching { File(defaultGameRoot()) }.getOrNull() ?: return LauncherTheme.AUTO
     val store = JsonSettingsRepository(JsonSettingsRepository.defaultFile(root))

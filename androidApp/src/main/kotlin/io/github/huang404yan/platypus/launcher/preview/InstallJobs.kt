@@ -82,6 +82,13 @@ internal object ModInstallRunner {
                 } else {
                     "。还差 " + result.requiredDependencies.size + " 个前置模组，需要自己再装。"
                 }
+                // 切到别的页去了的人不会回来看这条 message，所以再浮一张卡。
+                // 点卡去「下载 → 模组」，正好是他刚才点安装的那一栏。
+                Notices.push(
+                    title = "装好了：" + result.entry.title,
+                    body = "已放进 " + instanceName + "，" + fmtBytes(result.downloadedBytes) + extra,
+                    goto = "DOWNLOAD|mods",
+                )
                 _state.update {
                     it.copy(
                         busySlug = "",
@@ -169,6 +176,11 @@ internal object PackInstallRunner {
                         _state.update { it.copy(progress = p) }
                     }
                 }
+                Notices.push(
+                    title = "装好了：" + result.entry.fileName,
+                    body = "已放进 " + instanceName + "，" + fmtBytes(result.downloadedBytes) + "。",
+                    goto = "DOWNLOAD|packs",
+                )
                 _state.update {
                     it.copy(
                         busySlug = "",
@@ -267,6 +279,11 @@ internal object ServerInstallRunner {
                         _state.update { it.copy(progress = p, message = p.detail.ifBlank { it.message }) }
                     }
                 }
+                Notices.push(
+                    title = "服务端装好了",
+                    body = result.summary,
+                    goto = "DOWNLOAD|server",
+                )
                 _state.update {
                     it.copy(
                         busy = false,

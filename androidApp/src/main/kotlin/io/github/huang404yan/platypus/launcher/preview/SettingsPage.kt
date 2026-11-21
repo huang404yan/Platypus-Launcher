@@ -71,7 +71,12 @@ private val CONNECTION_PRESETS =
     listOf(8, DownloadPreference.DEFAULT_CONNECTIONS, 32, DownloadPreference.MAX_CONNECTIONS)
 
 @Composable
-internal fun SettingsPage(theme: LauncherTheme = LauncherTheme.AUTO, onThemeChange: (LauncherTheme) -> Unit = {}) {
+internal fun SettingsPage(
+    theme: LauncherTheme = LauncherTheme.AUTO,
+    onThemeChange: (LauncherTheme) -> Unit = {},
+    reduceMotion: Boolean = false,
+    onReduceMotionChange: (Boolean) -> Unit = {},
+) {
     val scope = rememberCoroutineScope()
 
     var loaded by remember { mutableStateOf(false) }
@@ -182,6 +187,27 @@ internal fun SettingsPage(theme: LauncherTheme = LauncherTheme.AUTO, onThemeChan
         }
     }
 
+    /**
+     * 「少动一点」：立刻生效 + 立刻落盘，理由同 [pickTheme]。
+     *
+     * 与换配色不同的是这次不需要重读整份设置：唯一的变化就是这个布尔值，
+     * 而且 [base] 是上一次读出来的整份设置，在它上面 copy 不会冲掉别的字段。
+     */
+    fun pickReduceMotion(want: Boolean) {
+        onReduceMotionChange(want)
+        val store = repo ?: return
+        scope.launch {
+            runCatching {
+                withContext(Dispatchers.IO) { store.save(base.copy(reduceMotion = want)) }
+            }.onSuccess {
+                base = it
+                status = if (want) "界面上那些过渡都收起来了。" else "过渡动画回来了。"
+            }.onFailure {
+                status = "这个开关没能存下来：" + (it.message ?: it.javaClass.simpleName)
+            }
+        }
+    }
+
     LaunchedEffect(Unit) { load() }
 
     Column(
@@ -214,6 +240,28 @@ internal fun SettingsPage(theme: LauncherTheme = LauncherTheme.AUTO, onThemeChan
                         onClick = { pickTheme(option) },
                     )
                 }
+            }
+        }
+
+        SettingCard(
+            "动效",
+            "勾上之后，换页、选中这些过渡都瞬间到位，只保留颜色变化，省电也更稳。"
+                + "老机型、开着省电模式、或者单纯看着晃眼，都可以关掉。点一下立刻生效。",
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text("少动一点", style = MaterialTheme.typography.bodyMedium)
+                    Text(
+                        if (reduceMotion) "过渡已经收起来了。" else "现在是正常动效。",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Switch(checked = reduceMotion, onCheckedChange = { pickReduceMotion(it) }, enabled = loaded)
             }
         }
 

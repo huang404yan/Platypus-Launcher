@@ -44,6 +44,7 @@ import io.github.huang404yan.platypus.core.instance.Instance
 import io.github.huang404yan.platypus.core.instance.InstanceScanner
 import io.github.huang404yan.platypus.core.instance.JsonInstanceRepository
 import io.github.huang404yan.platypus.core.instance.mergeInstances
+import io.github.huang404yan.platypus.core.instance.pruneMissing
 import io.github.huang404yan.platypus.core.launch.AndroidGraphicsBundle
 import io.github.huang404yan.platypus.core.launch.AndroidGraphicsCatalog
 import io.github.huang404yan.platypus.core.launch.AndroidGraphicsInstaller
@@ -216,7 +217,9 @@ internal fun LaunchPage() {
                     JsonInstanceRepository(JsonInstanceRepository.defaultIndexFile(dir)).list()
                 }.getOrNull().orEmpty()
                 val scan = InstanceScanner.scan(dir)
-                mergeInstances(registered, scan.instances, scan.libraryVersions)
+                // 登记的实例可能早就在资源管理器里被删了，只摘展示、不写盘（理由见 pruneMissing）。
+                val live = pruneMissing(registered, scan.versionNames)
+                mergeInstances(live.kept, scan.instances, scan.libraryVersions)
             }
             instances = list
             busy = false

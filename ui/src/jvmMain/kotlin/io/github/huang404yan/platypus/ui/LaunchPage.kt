@@ -72,6 +72,7 @@ import io.github.huang404yan.platypus.core.instance.InstanceScanner
 import io.github.huang404yan.platypus.core.instance.ScanResult
 import io.github.huang404yan.platypus.core.instance.instanceKey
 import io.github.huang404yan.platypus.core.instance.mergeInstances
+import io.github.huang404yan.platypus.core.instance.pruneMissing
 import io.github.huang404yan.platypus.core.launch.CrashReport
 import io.github.huang404yan.platypus.core.launch.CrashReports
 import io.github.huang404yan.platypus.core.launch.GameHandle
@@ -296,9 +297,11 @@ fun LaunchPage(
         val scannedResult = result.await()
         val savedList = saved.await()
         scanned = scannedResult
-        registered = savedList
+        // 登记的实例可能早就在资源管理器里被删了：只摘展示、不写盘（理由见 pruneMissing）。
+        val live = pruneMissing(savedList, scannedResult?.versionNames)
+        registered = live.kept
         val merged = mergeInstances(
-            savedList,
+            live.kept,
             scannedResult?.instances.orEmpty(),
             scannedResult?.libraryVersions.orEmpty(),
         )
