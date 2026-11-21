@@ -12,33 +12,34 @@
 >
 > Platypus Launcher is an unofficial third-party Minecraft launcher. This project is not affiliated with, endorsed by, or sponsored by Mojang Studios or Microsoft. Minecraft is a registered trademark of Mojang Studios. Please support the official game by purchasing it.
 
-## 两条通道
+## 版本与发布
 
-| | 正式版 | 孵化版（开源版） |
+三端用同一份源码构建，分两条线。哪一条由版本号判定：带 `-preview` 是孵化版，不带是正式版，判定只有这一条，见 [`Brand.kt`](core/src/main/kotlin/io/github/huang404yan/platypus/core/Brand.kt) 的 `isPreview`。
+
+| | 桌面端（Windows / Linux） | 移动终端（安卓、鸿蒙等） |
 |---|---|---|
-| 中文名 | 鸭嘴兽启动器 | 鸭嘴兽·孵化版 |
-| 英文名 | Platypus Launcher | Platypus Preview |
-| 版本号 | `1.0.0` 起进位 | `0.x-preview.N` |
-| 渠道 | 本项目构建发布 | 任何人可自行构建分发 |
-| 包内容 | 完整：下载、加载器、模组搜索、联机 | 空壳：不含任何下载与搜索服务地址，要自己填镜像根才能联网 |
-| 内置应用 ID | 由本项目注入 | 不注入，需自行申请 |
-| 首次启动 | 需登录正版账号（验证一次） | 不强制，仅弹一次说明；联网功能得先自己填服务地址 |
-| Android applicationId | `io.github.huang404yan.platypus.launcher` | `io.github.huang404yan.platypus.launcher.preview` |
-| 命令行 | `platypus-launcher` | `platypus-launcher-preview` |
+| 正式版 | 鸭嘴兽启动器（Platypus Launcher），`1.0.0` 起进位 | 鸭嘴兽启动器（安卓），随正式版一同发布 |
+| 另一条线 | 孵化版（Platypus Preview），`0.x-preview.N` | 孵化版（Platypus Preview），`0.x-preview.N` |
 
-两者包名不同，可安装在同一台设备上共存。
+两端另一条线是同一份代码、同一个叫法：**孵化版**，它同时也是开源版 —— 源码完全公开，谁都能自己编一份发出去。桌面端与移动端的区别只在于发不发产物：桌面端会发，移动端只公开源码。这两条线怎么用、怎么自己编，介绍稍后更新。
+
+发布页 [Releases](https://github.com/huang404yan/Platypus-Launcher/releases) 上的附件分两类：
+
+| | re 测试版 | re 正式版 |
+|---|---|---|
+| 平台 | 只有桌面端 | 桌面端 + 移动终端 |
+| 包内容 | 空壳：不内置应用 ID，也不带下载与搜索服务地址 | 完整包：内置应用 ID 与服务地址，装完即可联网 |
+| 应用 ID 与地址 | 使用者自己填；填过一次一直记住，覆盖安装与升级都不会冲掉 | 无需填写 |
+| 适用 | 想先试新功能，或自己搭了镜像的人 | 日常使用 |
+| 标记 | 勾选 Pre-release，不标 Latest | 标 Latest |
 
 **正式版**由本项目构建并发布，功能完整、内置应用 ID。第一次打开需要登录正版账号，验证一次后长期有效。正式版不提供离线进游戏的路径：离线启动等同于盗版，本项目的立足点之一就是不做这件事。
 
-**孵化版即开源版，对外发布的那一份是空壳**，主旨是「谁能编，谁就能发」：任何人 fork 本仓库、自行构建并分发，即为其自己的孵化版。
+**空壳**指的是包内不带任何下载与搜索服务地址：版本清单、加载器、模组搜索都得先在「设置 → 下载 → 服务地址」填一个镜像根（BMCLAPI 布局的 `http://` / `https://` 地址）才有内容，填完立刻生效、以后一直用；没填之前界面照旧能浏览、本机已有的实例照旧能改，下载页与模组搜索是空的 —— 那不是坏了。应用 ID 同理，自己申请一个填进「设置 → 账号」即可（免费，约三分钟）。
 
-空壳指包内不带任何下载与搜索服务地址：版本清单、加载器、模组搜索都得先在「设置 → 下载 → 服务地址」填一个镜像根（BMCLAPI 布局的 `http://` / `https://` 地址）才有内容，填完立刻生效、以后一直用；没填之前界面照旧能浏览、本机已有的实例照旧能改，下载页与模组搜索是空的 —— 那不是坏了。
+空壳形态由构建开关 `-Pplatypus.shell=true` 决定，发布出去的 re 测试版一律用它构建。自己编一份带服务地址的同样允许 —— 那等于替使用它的人承担镜像流量，编的人自己决定。开关只影响包里有没有服务地址与 ID，不影响任何功能代码。
 
-这条线不强制正版登录（对公开可改的源码设卡无效），也不由本项目注入应用 ID，要用正版账号时请自行申请一个免费应用 ID 填进「设置 → 账号」。版本号带 `-preview` 即孵化版，不带为正式版，判断依据见 [`Brand.kt`](core/src/main/kotlin/io/github/huang404yan/platypus/core/Brand.kt) 的 `isPreview`。
-
-**空壳形态由构建开关 `-Pplatypus.shell=true` 决定**，本项目发布出去的孵化版一律用它构建。自己编一份带服务地址的孵化版也允许 —— 那等于替使用它的人承担镜像流量，编的人自己决定。开关只影响包里有没有服务地址，不影响任何功能代码。
-
-仓库包含孵化版的全部源码；正式版只发布编译好的安装包。
+仓库包含测试版的全部源码；正式版只发布编译好的安装包。
 
 本项目不是 PCL、HMCL、Prism 的分支，仅在产品形态上参考过这几个项目，未复制任何代码，详见 `CONTRIBUTING.md`。
 
@@ -104,20 +105,20 @@ GitHub 访问不畅时可用 [Gitee 镜像](https://gitee.com/missing-page-404/P
 
 正版登录需要一个由微软分配的应用 ID。任何随安装包一起下发的 ID，都意味着所有下载者共用同一份他人名下的应用注册；一旦遭遇限流、收紧或滥用判定，拿到包的人无法自行处理：
 
-- **正式版**由本项目注入（`-Pplatypus.msClientId=` 或 `PLATYPUS_MS_CLIENT_ID`），下载者无需填写任何内容。
-- **孵化版**不内置。需使用正版账号时请自行申请（免费，约三分钟，操作步骤见界面「设置 → 账号」第一张卡片，字段与取值顺序见 [`ClientIds.kt`](core/src/main/kotlin/io/github/huang404yan/platypus/core/auth/ClientIds.kt)）。
+- **re 正式版**由本项目注入（`-Pplatypus.msClientId=` 或 `PLATYPUS_MS_CLIENT_ID`），下载者无需填写任何内容。
+- **re 测试版**不内置。自己申请一个（免费，约三分钟），连同镜像根地址一起填进设置即可，填过一次一直记住，覆盖安装与升级都不会冲掉。字段与取值顺序见 [`ClientIds.kt`](core/src/main/kotlin/io/github/huang404yan/platypus/core/auth/ClientIds.kt)。
 
 自行构建：
 
 ```bash
-# 孵化版（完整包；凭据与镜像需由你自行注入或另行配置）
+# 带服务地址的包（自己注入应用 ID 与服务地址；不加 shell 开关就是这个形态）
 ./gradlew :app-desktop:createDistributable
 
-# 进一步：移除下载与搜索服务地址的空壳包
+# 空壳包：移除下载与搜索服务地址，应用 ID 也不内置
 ./gradlew :app-desktop:createDistributable -Pplatypus.shell=true
 ```
 
-两种包的边界与构建要求见 `releases/README.md`，实现与设计理由见 [`Endpoints.kt`](core/src/main/kotlin/io/github/huang404yan/platypus/core/Endpoints.kt) 与 [`edition/`](core/src/main/kotlin/io/github/huang404yan/platypus/core/edition)。
+附件命名、目录划分与出包要求见 `releases/README.md`，实现与设计理由见 [`Endpoints.kt`](core/src/main/kotlin/io/github/huang404yan/platypus/core/Endpoints.kt) 与 [`edition/`](core/src/main/kotlin/io/github/huang404yan/platypus/core/edition)。
 
 ## 许可与贡献
 

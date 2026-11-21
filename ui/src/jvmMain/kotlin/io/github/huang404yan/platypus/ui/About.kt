@@ -15,6 +15,7 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
@@ -25,6 +26,7 @@ import io.github.huang404yan.platypus.core.Credit
 import io.github.huang404yan.platypus.core.CreditKind
 import io.github.huang404yan.platypus.core.Credits
 import io.github.huang404yan.platypus.core.Endpoints
+import java.awt.Desktop
 
 /**
  * 关于页。免责声明必须在这里完整出现一次，
@@ -81,6 +83,9 @@ fun AboutPage() {
         InfoRow("仓库", Brand.HOMEPAGE)
 
         Spacer(Modifier.height(4.dp))
+        DownloadGuide()
+
+        Spacer(Modifier.height(4.dp))
         UpdateSection()
 
         Spacer(Modifier.height(4.dp))
@@ -106,6 +111,59 @@ fun AboutPage() {
                 )
             }
         }
+    }
+}
+
+/**
+ * 怎么下载。
+ *
+ * 编译好的包只在发布页，仓库里只有源码 —— 这件事必须写在关于页里，
+ * 因为拿到包的人不一定回过仓库，而「想换个版本 / 想给朋友的电脑装一份」的人一定会来这一页找。
+ *
+ * 两条产品线各讲一句就够，展开讲放在 README 与发布说明里：
+ * 正式版是完整包（内置应用 ID 与服务地址），孵化版发布出去的是空壳（两样都得自己填）。
+ * 安卓的孵化版（开源版）不发产物、只公开源码，所以这里只提一句怎么拿源码，不指向发布页。
+ */
+@Composable
+private fun DownloadGuide() {
+    Card(
+        Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+    ) {
+        Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text("怎么下载", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+            Text(
+                "编译好的包只放在发布页，仓库里只有源码。桌面端（Windows / Linux）与安卓端都在同一页。",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Text(
+                "桌面端分两条线。正式版是完整包，内置应用 ID 与服务地址，装完就能联网。" +
+                    "孵化版发布出去的那一份是空壳，应用 ID 与下载地址都得自己填；" +
+                    "填过一次就一直记住，程序升级不会冲掉。",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Text(
+                "安卓端以正式版为主，另一条线也是孵化版（也就是开源版），只公开源码、不发安装包，想要就自己编一份。",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            OutlinedButton(onClick = { openBrowser(Brand.RELEASES) }) {
+                Text("打开发布页")
+            }
+        }
+    }
+}
+
+/** 用系统默认浏览器打开。打不开就什么都不做 —— 上面「仓库」那一行的地址仍可复制。 */
+private fun openBrowser(url: String) {
+    if (url.isBlank()) return
+    runCatching {
+        if (!Desktop.isDesktopSupported()) return@runCatching
+        val desktop = Desktop.getDesktop()
+        if (!desktop.isSupported(Desktop.Action.BROWSE)) return@runCatching
+        desktop.browse(java.net.URI(url))
     }
 }
 

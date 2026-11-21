@@ -4,40 +4,47 @@
 
 | 目录 | 产品 | 版本号规则 |
 |---|---|---|
-| `stable/` | 鸭嘴兽启动器 / Platypus Launcher | `1.0.0` 起进位 |
-| `preview/` | 鸭嘴兽·孵化版 / Platypus Preview | `0.x-preview.N` |
+| `stable/` | 鸭嘴兽启动器 / Platypus Launcher（re 正式版） | `1.0.0` 起进位 |
+| `preview/` | 鸭嘴兽·孵化版 / Platypus Preview（re 测试版） | `0.x-preview.N` |
 
 两侧各自再按平台分目录：`android/`、`windows/`、`linux/`。
+
+**正式版三端都有**（`windows/`、`linux/`、`android/`）；**测试版只有桌面端**（`windows/`、`linux/`），
+移动终端的孵化版（即开源版）只公开源码、不发安装包。
 
 > **`stable/` 目前应为空。** 2026-11-16 曾按 `1.0.0` 出过一批（msi / zip / apk），
 > 试用后判定问题较多、不足以作为第一个正式版，代码已退回 `0.8.0-preview.21` 继续修复，
 > 该批产物随之作废，可以删除。正式线自修复完成后重新从 `1.0.0` 起算。
 
-## 两条产品线：正式版、孵化版（开源版）
+## 两条产品线：re 正式版、re 测试版
 
 自 1.0.0 起产物分为两条产品线。**发布前须确认本次发布的是哪一种。** 两条线用同一份代码，
-区别只有版本号、是否注入应用 ID、以及孵化版固定用空壳开关构建。
+区别只有版本号、打几个平台、是否注入应用 ID 与服务地址。
 
-### 一、正式版（`stable/`）
+### 一、re 正式版（`stable/`）
 
-- 由本项目构建并发布，功能完整：下载、加载器安装、模组搜索、联机均已包含。
+- 平台：**桌面端 + 移动终端**，三端齐全。
+- 完整包：下载、加载器安装、模组搜索、联机均已包含，自带服务地址，装完即可联网。
 - 内置微软应用 ID（`-Pplatypus.msClientId=` 或 `PLATYPUS_MS_CLIENT_ID`），下载者无需填写任何内容。
 - 首次启动要求登录正版账号，**验证一次后长期有效**（PCL-CE、HMCL 均为同一口径）：
   登录成功后持续记住，之后启动不再询问。允许离线进入游戏等同于为盗版提供明确入口，
   而「该启动器不支持盗版」是此类项目得以立足的前提。
 - 源码不随包分发，但与仓库主干为同一份代码，差别仅在于版本号与是否注入凭据。
-- 所属产品线仅由版本号判定：含 `-preview` 为孵化版，不含则为正式版（见 [`Brand.kt`](../core/src/main/kotlin/io/github/huang404yan/platypus/core/Brand.kt) 的 `isPreview`）。
+- 所属产品线仅由版本号判定：含 `-preview` 为测试版，不含则为正式版（见 [`Brand.kt`](../core/src/main/kotlin/io/github/huang404yan/platypus/core/Brand.kt) 的 `isPreview`）。
 
-### 二、孵化版 / 开源版（`preview/`）
+### 二、re 测试版（`preview/`）
 
-- **对外发布的那一份是空壳**：包内不含任何下载与搜索服务地址（由 `-Pplatypus.shell=true` 构建）。
+- 平台：**只有桌面端**。移动终端的孵化版（即开源版）只公开源码、不发安装包 —— 安卓端本来以正式版为主，
+  且很少有人改动，再发一份安装包只会让人分不清该装哪个。
+- **对外发布的那一份是空壳**：不内置应用 ID，也不含任何下载与搜索服务地址（由 `-Pplatypus.shell=true` 构建）。
   版本清单、加载器、模组搜索得先在「设置 → 下载 → 服务地址」填一个镜像根才有内容，填完立刻生效、以后一直用；
   没填之前界面照旧能浏览、本机已有实例照旧能改，下载页与模组搜索是空的 —— 那不是坏了。
+  应用 ID 同理，自己申请一个填进「设置 → 账号」即可。
+- **填过一次就一直记住**：覆盖安装、换新版本、升级都不回冲掉已填的 ID 与地址，
+  这一点有专门的单测与冒烟守着（`SettingsRepositoryTest` 的 `keepUserFilled` 一组）。
 - **面向其他构建者**：这条线存在的意义是「能编译者即可发布」。任何人 fork 本仓库并按下列
-  命令构建出包，即为其自己的孵化版；自己编一份带服务地址的也允许，那等于替使用它的人承担镜像流量。
-- **不由本项目注入应用 ID**：需使用正版登录时请自行申请并填入「设置 → 账号」。
-  随包分发的任何 ID 都等于让所有下载者共用他人名下的注册，由此产生的后果超出获取安装包者所能处理的范围。
-- 源码完全公开，对可任意修改的代码设置校验并无实际作用：孵化版不强制正版登录，
+  命令构建出包，即为其自己的测试版；自己编一份带服务地址的也允许，那等于替使用它的人承担镜像流量。
+- 源码完全公开，对可任意修改的代码设置校验并无实际作用：测试版不强制正版登录，
   首次启动仅弹出一次说明窗口。
 - 发布时必须勾选 Pre-release，且不标记 Latest。
 
@@ -46,10 +53,11 @@
 ### 出包命令
 
 ```bash
-# 正式版（完整包，注入发行方自身的 client ID）
+# re 正式版（完整包，注入发行方自身的 client ID 与服务地址；三端都出）
 ./gradlew :app-desktop:createDistributable -Pplatypus.msClientId=<你的 ID>
+./gradlew :androidApp:assembleRelease
 
-# 孵化版（空壳，不注入 ID：版本号含 -preview，并加 shell 开关）
+# re 测试版（空壳，不注入 ID：版本号含 -preview，并加 shell 开关；只出桌面端）
 ./gradlew :app-desktop:createDistributable -Pplatypus.shell=true
 ```
 
@@ -59,27 +67,27 @@
 
 ### 禁止放入的内容
 
-**孵化版与空壳包**不得携带私有凭据：任何随安装包分发的 ID，都等于让所有下载者共用
+**re 测试版（空壳）**不得携带私有凭据：任何随安装包分发的 ID，都等于让所有下载者共用
 他人名下的应用注册，由此导致的限流、配额收紧或滥用认定，均超出获取安装包者所能处理的范围。
-仓库中该项恒为空串，取值顺序见 [`ClientIds.kt`](../core/src/main/kotlin/io/github/huang404yan/platypus/core/auth/ClientIds.kt)。正式版恰好相反：必须
+仓库中该项恒为空串，取值顺序见 [`ClientIds.kt`](../core/src/main/kotlin/io/github/huang404yan/platypus/core/auth/ClientIds.kt)。re 正式版恰好相反：必须
 由发行方注入其自行申请的那一份，该 ID 归发行方所有，不随源码分发。
 
-两侧的实现与设计理由见 [`Endpoints.kt`](../core/src/main/kotlin/io/github/huang404yan/platypus/core/Endpoints.kt)（地址的统一出口）与 [`edition/`](../core/src/main/kotlin/io/github/huang404yan/platypus/core/edition)（两条通道的差异）。
+两侧的实现与设计理由见 [`Endpoints.kt`](../core/src/main/kotlin/io/github/huang404yan/platypus/core/Endpoints.kt)（地址的统一出口）与 [`edition/`](../core/src/main/kotlin/io/github/huang404yan/platypus/core/edition)（两条线的差异）。
 
-## 孵化版不占正式版版本号
+## 测试版不占正式版版本号
 
 `0.x-preview.N` 与 `1.0.0` 是两条独立的号段，互不占用：
 
-- 孵化版可发至 `0.9-preview.N`、`0.10-preview.N`，正式版仍从 `1.0.0` 起算。
-- 正式版发布后版本号只向前推进；孵化版继续停留于 `0.x-preview.N`，不会占用正式版号段。
-- 在 GitHub 发布 Release 时，孵化版**必须勾选 Pre-release**，不得标记为 Latest，否则用户易将测试版误当正式版下载。
+- 测试版可发至 `0.9-preview.N`、`0.10-preview.N`，正式版仍从 `1.0.0` 起算。
+- 正式版发布后版本号只向前推进；测试版继续停留于 `0.x-preview.N`，不会占用正式版号段。
+- 在 GitHub 发布 Release 时，测试版**必须勾选 Pre-release**，不得标记为 Latest，否则用户易将测试版误当正式版下载。
 - 同一版本号不得同时出现在 `stable/` 与 `preview/` 下。
 
 ## 每个平台最多保留 5 个
 
 按文件名中的版本号排序，超出 5 个时删除最旧者。删除前须确认新包可安装、可启动：**不得先删后测**。
 
-自己编的带服务地址的孵化版与官方发布的空壳孵化版**文件名必须可区分**（见下节命名规则），否则无法辨别各产物对应的验证对象。
+自己编的带服务地址的测试版与官方发布的空壳测试版**文件名必须可区分**（见下节命名规则），否则无法辨别各产物对应的验证对象。
 
 ## 命名
 
@@ -90,10 +98,10 @@ Platypus-Launcher-<ver>-win-x64.zip
 Platypus-Launcher-<ver>-linux-x64.AppImage
 ```
 
-`<ver>` 为完整版本号，含 preview 后缀时即为孵化版，例如 `0.8.0-preview.1`、`1.0.0`。文件名本身已可区分正式版与孵化版，无需附加其他标记。
+`<ver>` 为完整版本号，含 preview 后缀时即为测试版，例如 `0.8.0-preview.1`、`1.0.0`。文件名本身已可区分正式版与测试版，无需附加其他标记。
 
-**官方发布的产物一律不带附加后缀**：正式版是完整包、孵化版是空壳，版本号本身就分得开。
-自己编一份带服务地址的孵化版（不加 `-Pplatypus.shell=true`）时，文件名加 `-full` 后缀以区分，
+**官方发布的产物一律不带附加后缀**：正式版是完整包、测试版是空壳，版本号本身就分得开。
+自己编一份带服务地址的测试版（不加 `-Pplatypus.shell=true`）时，文件名加 `-full` 后缀以区分，
 例如 `Platypus-Launcher-0.8.0-preview.22-win-x64-full.zip`；不加后缀的按官方口径理解为空壳。
 
 ### Windows 为两种形态，并非二选一
@@ -138,17 +146,17 @@ set PLATYPUS_WIX_DIR=D:\ruanjian\kaifa\wix314                                   
 
 ### 公开分发的包不携带他人凭据，也不携带任何隐私内容
 
-孵化版与空壳包均为公开分发、由他人自行构建的包，以下为硬性约束，出包前须逐条核对：
+测试版（空壳）为公开分发、由他人自行构建的包，以下为硬性约束，出包前须逐条核对：
 
 - **不内置第三方 Client ID**。OAuth 的 `client_id` 并非密钥，但内置他人注册的 ID
-  等于让所有下载者共用同一份配额，并共担该 ID 随时被关闭的风险。孵化版出包时既不得传入
+  等于让所有下载者共用同一份配额，并共担该 ID 随时被关闭的风险。测试版出包时既不得传入
   `-Pplatypus.msClientId`，也不得设置 `PLATYPUS_MS_CLIENT_ID`，`BuildInfo.MS_CLIENT_ID` 与
   `MicrosoftEndpoints.DEFAULT_CLIENT_ID` 均须为空串，正版登录由用户自行注册
   （步骤见界面「设置 → 账号」第一张卡片，取值顺序见 [`ClientIds.kt`](../core/src/main/kotlin/io/github/huang404yan/platypus/core/auth/ClientIds.kt)）。
   **正式版另作处理**：由构建方在本机注册并注入，该 ID 归发行方所有，不随源码分发。
   正式版未注入 ID 时程序不会无法启动（首启弹窗可关闭，正文已写明缺少 ID），但微软登录不可用，
   因此发布正式版前必须确认 ID 确已注入。三条取值路径的优先级见 [`ClientIds.kt`](../core/src/main/kotlin/io/github/huang404yan/platypus/core/auth/ClientIds.kt)。
-- **孵化版还须确认不含服务地址**：以 `-Pplatypus.shell=true` 出包后，
+- **测试版还须确认不含服务地址**：以 `-Pplatypus.shell=true` 出包后，
   `BuildInfo.kt` 中的 `SHELL` 必须为 `true`，且包内不得残留任何内置镜像根。
   正式版相反，`SHELL` 应为 `false`（完整包，自带服务地址）。
 - **不携带任何隐私内容**：真实账号、UUID、refresh_token、本机路径与用户名、
@@ -166,7 +174,7 @@ grep -n "DEFAULT_CLIENT_ID" core/src/main/kotlin/io/github/huang404yan/platypus/
 # 第四条应输出：const val DEFAULT_CLIENT_ID = ""
 ```
 
-孵化版与空壳包还须确认构建产物中该常量为空（上一条仅检查源码常量，注入值经由另一条路径）：
+测试版（空壳）还须确认构建产物中该常量为空（上一条仅检查源码常量，注入值经由另一条路径）：
 
 ```bash
 # 出包后在构建目录中核对，内容应为 const val MS_CLIENT_ID: String = ""
@@ -178,4 +186,4 @@ grep -n "SHELL" core/build/generated/platypus/kotlin/io/github/huang404yan/platy
 ```
 
 若曾为调试在 IDE 或命令行中设置过 `-Pplatypus.msClientId=` 或 `PLATYPUS_MS_CLIENT_ID`，
-出包前必须清除，否则该开发用 ID 会静默进入孵化版包。
+出包前必须清除，否则该开发用 ID 会静默进入测试版包。

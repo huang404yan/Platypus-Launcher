@@ -18,6 +18,9 @@ object Brand {
 
     const val HOMEPAGE: String = "https://github.com/huang404yan/Platypus-Launcher"
 
+    /** 发布页。编译好的包只在这里，仓库里只有源码 —— 界面上的「下载」一律指向这里。 */
+    val RELEASES: String get() = HOMEPAGE + "/releases"
+
     /** 当前构建版本，由 Gradle 在编译期写入 BuildInfo。 */
     val version: String get() = BuildInfo.VERSION
 

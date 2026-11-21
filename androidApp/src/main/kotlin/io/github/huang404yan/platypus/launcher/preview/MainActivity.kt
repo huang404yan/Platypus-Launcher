@@ -44,6 +44,7 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -611,6 +612,10 @@ private fun AboutPage() {
 
         HorizontalDivider()
 
+        DownloadGuide()
+
+        HorizontalDivider()
+
         UpdateSection()
 
         HorizontalDivider()
@@ -629,6 +634,54 @@ private fun AboutPage() {
             Brand.DISCLAIMER_EN,
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
+/**
+ * 怎么下载。
+ *
+ * 手上这台已经装好了，这一页要回答的是另外两件事：桌面端去哪拿、以及「安卓还有一条孵化版」这回事。
+ * 安卓的孵化版不发安装包（只公开源码），所以这里只提一句，不指向发布页给空承诺。
+ *
+ * 跟桌面端 `ui/About.kt` 的 `DownloadGuide` 说同一套话，只是排得紧一点。
+ */
+@Composable
+private fun DownloadGuide() {
+    val context = LocalContext.current
+    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
+        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text("怎么下载", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+            Text(
+                "桌面的 Windows / Linux 版本与安卓版都放在同一个发布页，仓库里只有源码。",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Text(
+                "桌面端分两条线。正式版是完整包，内置应用 ID 与服务地址，装完就能联网。" +
+                    "孵化版发布出去的那一份是空壳，应用 ID 与下载地址都得自己填；" +
+                    "填过一次就一直记住，程序升级不会冲掉。",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Text(
+                "安卓端以正式版为主，另一条线也是孵化版（也就是开源版），只公开源码、不发安装包，想要就自己编一份。",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            OutlinedButton(onClick = { openGuideUrl(context, Brand.RELEASES) }) {
+                Text("打开发布页")
+            }
+        }
+    }
+}
+
+/** 用系统浏览器打开。跟 `UpdateSection.kt` 里那个同名函数各写一份：那边是私有实现，跨文件用不了。 */
+private fun openGuideUrl(context: Context, url: String) {
+    if (url.isBlank()) return
+    runCatching {
+        context.startActivity(
+            Intent(Intent.ACTION_VIEW, Uri.parse(url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
         )
     }
 }
