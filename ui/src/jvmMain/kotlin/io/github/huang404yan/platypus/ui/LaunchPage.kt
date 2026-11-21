@@ -416,7 +416,8 @@ fun LaunchPage(
     }
 
     /**
-     * 启动。孵化版（开源版）仓库里不带 Client ID，没填就登不了正版 —— 默认在这里拦住；
+     * 启动。孵化版（开源版）是空壳：包里既不内置应用 ID，也不带任何下载与搜索服务地址，
+     * 没有 ID 时正版登录这条路走不通 —— 默认在这里拦住；
      * [bypassClientGate] 只有侧栏那个「测试启动」勾选会传 true。
      */
     fun launchGame(bypassClientGate: Boolean = false) {
@@ -425,8 +426,11 @@ fun LaunchPage(
             val issue = ClientIds.missingProblem(clientIdValue)
             if (issue != null) {
                 phase = LaunchPhase.Failed(
-                    "孵化版没有内置 Client ID，正版登录用不了，所以没有启动。" +
-                        "去「设置 → 账号」填一个，或者勾上左栏的「测试启动」只跑这一次。",
+                    "孵化版是开源空壳：包里没有内置的应用 ID，也没有任何下载与搜索服务地址，" +
+                        "正版登录这条路走不通，所以没有启动。" +
+                        "要联网就得自己填：先去「设置 → 下载 → 服务地址」填一个镜像根，" +
+                        "再去「设置 → 账号」填一个自己申请的应用 ID。" +
+                        "只想跑这一次，就勾上左栏的「测试启动」。",
                 )
                 return
             }
@@ -735,8 +739,9 @@ fun LaunchPage(
                 selected == null -> "还没选版本。在右边点一张版本卡片。"
                 // 这条要排在「缺 Java」前面：门禁没过时补 Java 也没用，说了反而误导。
                 !clientGatePassed && !testLaunch ->
-                    "孵化版没有内置 Client ID，正版登录用不了，所以启动被拦下了。" +
-                        "去「设置 → 账号」填一个（说明就在那页），或者勾上上面的「测试启动」只跑这一次。"
+                    "孵化版是开源空壳：没有内置应用 ID，也没有下载与搜索服务地址，正版登录走不通，所以启动被拦下了。" +
+                        "要能联网，先去「设置 → 下载」填服务地址、再去「设置 → 账号」填自己申请的应用 ID；" +
+                        "只想跑这一次就勾上上面的「测试启动」。"
                 selectedJava != null -> ""
                 // 刚进页面时 Java 还在探测、自动挑选还没发生：这时说「缺 Java」是误报，先等等
                 javaPhase is JavaPhase.Detecting || javaPhase is JavaPhase.Idle -> ""

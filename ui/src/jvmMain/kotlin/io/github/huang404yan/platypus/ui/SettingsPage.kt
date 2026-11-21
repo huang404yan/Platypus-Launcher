@@ -255,6 +255,17 @@ fun SettingsPage(
         loadedFrom = (repository as? JsonSettingsRepository)?.path.orEmpty()
     }
 
+    /**
+     * 这一下写盘允不允许把用户手填的凭据三格抹成空。
+     *
+     * 应用 ID、服务地址、CurseForge Key 只能由用户填出来，程序变不出新值，
+     * 所以 [io.github.huang404yan.platypus.core.settings.JsonSettingsRepository]
+     * 默认护住盘上已有的值。只有「用户亲手改过」才放行空值 —— 判断基准是 [base]，
+     * 也就是打开这一页时从盘上读到的那一份。
+     */
+    fun canClearCredentials(id: String, server: String, key: String): Boolean =
+        id != base.microsoftClientId || server != base.serverBase || key != base.curseForgeApiKey
+
     /** 立刻要落盘的那几处（换账号、存 Client ID、换配色、换下载源）用它带上备份三格。 */
     fun backupPolicyNow(): AutoBackupPolicy =
         AutoBackupPolicy.parse(autoBackupEnabled, autoBackupHours, autoBackupKeep)
@@ -308,6 +319,7 @@ fun SettingsPage(
                         curseForgeApiKey = curseForgeKey,
                         serverBase = serverBase,
                     ),
+                    keepUserFilled = !canClearCredentials(microsoftClientId, serverBase, curseForgeKey),
                 )
             }
             result.onSuccess { stored ->
@@ -440,6 +452,7 @@ fun SettingsPage(
                         defaultIsolation = defaultIsolation,
                         gameLanguage = gameLanguage,
                     ),
+                    keepUserFilled = !canClearCredentials(cleaned, serverBase, curseForgeKey),
                 )
             }
             result.onSuccess { stored ->
@@ -687,6 +700,7 @@ fun SettingsPage(
                         defaultIsolation = defaultIsolation,
                         gameLanguage = gameLanguage,
                     ),
+                    keepUserFilled = !canClearCredentials(microsoftClientId, serverBase, cleaned),
                 )
             }.onSuccess {
                 savedAt = it.updatedAt
@@ -738,6 +752,7 @@ fun SettingsPage(
                         defaultIsolation = defaultIsolation,
                         gameLanguage = gameLanguage,
                     ),
+                    keepUserFilled = !canClearCredentials(microsoftClientId, cleaned, curseForgeKey),
                 )
             }.onSuccess {
                 savedAt = it.updatedAt

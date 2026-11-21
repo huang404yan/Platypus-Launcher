@@ -88,6 +88,8 @@ object AccountBootstrap {
         } else {
             list(gameRoot).firstOrNull { matches(it, trimmed) }?.key ?: trimmed
         }
+        // 用默认的 keepUserFilled = true：这里改的是「用哪个账号」，与凭据三格无关。
+        // 万一盘上那份此刻是坏的（load 退回了默认值），保底逻辑还能把 ID 与服务地址捞回来。
         repository.save(current.copy(activeAccountUuid = value))
     }
 
@@ -95,7 +97,8 @@ object AccountBootstrap {
     suspend fun saveClientId(gameRoot: File, raw: String) {
         val repository = JsonSettingsRepository(settingsFile(gameRoot))
         val current = runCatching { repository.load() }.getOrNull() ?: LauncherSettings()
-        repository.save(current.copy(microsoftClientId = raw.trim().trim('"').trim()))
+        // keepUserFilled = false：这一下的目的就是把 ID 改成传入值，包括用户主动清空。
+        repository.save(current.copy(microsoftClientId = raw.trim().trim('"').trim()), keepUserFilled = false)
     }
 
     /**

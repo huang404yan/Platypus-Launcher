@@ -264,4 +264,20 @@ private fun Char.isAsciiLetterOrDigit(): Boolean =
 interface SettingsRepository {
     suspend fun load(): LauncherSettings
     suspend fun save(settings: LauncherSettings): LauncherSettings
+
+    /**
+     * 写设置，并说明「用户手填的那几格」该怎么处置。
+     *
+     * 应用 ID、服务地址、CurseForge Key 只能由用户填出来，程序变不出新值。而写设置的
+     * 地方有一大把（配置页保存、切账号、换配色、换模式、换下载源），任何一处拿着一份
+     * 不完整的设置写盘，这三格就永久变成空串了 —— 用户得重新申请一遍、重新找一遍地址。
+     *
+     * 默认实现退回 [save]（= 不特殊处理），这样只关心读写的实现（测试用的假仓库、
+     * 冒烟脚本）不用跟着改；[JsonSettingsRepository] 覆写它来真正护住那三格。
+     *
+     * @param keepUserFilled true（默认）= 传进来的为空而盘上有值时留盘上的；
+     *   false = 原样写，用于用户在界面上亲手清空的场景。
+     */
+    suspend fun save(settings: LauncherSettings, keepUserFilled: Boolean): LauncherSettings =
+        save(settings)
 }

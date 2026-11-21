@@ -165,4 +165,102 @@ class SettingsRepositoryTest {
             dir.deleteRecursively()
         }
     }
+
+    @Test
+    fun saveKeepsUserFilledCredentialsWhenIncomingIsBlank() = runBlocking {
+        val dir = tempDir()
+        try {
+            val file = JsonSettingsRepository.defaultFile(dir)
+            val repo = JsonSettingsRepository(file)
+            repo.save(
+                LauncherSettings(
+                    microsoftClientId = "12345678-1234-1234-1234-123456789abc",
+                    serverBase = "https://mirror.example.com/bmclapi",
+                    curseForgeApiKey = "cf-key",
+                ),
+            )
+            // 模拟「别的调用点拿着一份新建的设置写盘」：三格都是空串。
+            val saved = repo.save(LauncherSettings(offlineUsername = "Alex"))
+            assertEquals("12345678-1234-1234-1234-123456789abc", saved.microsoftClientId)
+            assertEquals("https://mirror.example.com/bmclapi", saved.serverBase)
+            assertEquals("cf-key", saved.curseForgeApiKey)
+            assertEquals("Alex", saved.offlineUsername)
+
+            val reloaded = JsonSettingsRepository(file).load()
+            assertEquals("12345678-1234-1234-1234-123456789abc", reloaded.microsoftClientId)
+            assertEquals("https://mirror.example.com/bmclapi", reloaded.serverBase)
+            assertEquals("cf-key", reloaded.curseForgeApiKey)
+        } finally {
+            dir.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun saveWithKeepUserFilledFalseReallyClearsThem() = runBlocking {
+        val dir = tempDir()
+        try {
+            val file = JsonSettingsRepository.defaultFile(dir)
+            val repo = JsonSettingsRepository(file)
+            repo.save(
+                LauncherSettings(
+                    microsoftClientId = "12345678-1234-1234-1234-123456789abc",
+                    serverBase = "https://mirror.example.com/bmclapi",
+                    curseForgeApiKey = "cf-key",
+                ),
+            )
+            // 用户在界面上亲手清空：这时候必须真的写成空。
+            val saved = repo.save(LauncherSettings(), keepUserFilled = false)
+            assertEquals("", saved.microsoftClientId)
+            assertEquals("", saved.serverBase)
+            assertEquals("", saved.curseForgeApiKey)
+            assertEquals("", JsonSettingsRepository(file).load().microsoftClientId)
+        } finally {
+            dir.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun saveSalvagesCredentialsFromADamagedFile() = runBlocking {
+        val dir = tempDir()
+        try {
+            val file = JsonSettingsRepository.defaultFile(dir)
+            file.parentFile.mkdirs()
+            // 用户手改坏了一处（这里大括号没闭合），但三格其实都还在。
+            // 注意不能只少一个逗号：解析器是宽松模式，那种程度它照样吃得下。
+            file.writeText(
+                """{"microsoftClientId":"12345678-1234-1234-1234-123456789abc","serverBase":"https://mirror.example.com/bmclapi","curseForgeApiKey":""",
+                Charsets.UTF_8,
+            )
+            val saved = JsonSettingsRepository(file).save(LauncherSettings(offlineUsername = "Alex"))
+            assertEquals("12345678-1234-1234-1234-123456789abc", saved.microsoftClientId)
+            assertEquals("https://mirror.example.com/bmclapi", saved.serverBase)
+            // 损坏原文要留档，用户能手工找回别的字段。
+            val broken = file.parentFile.listFiles().orEmpty().filter { it.name.startsWith("settings.json.broken-") }
+            assertEquals(1, broken.size)
+            assertTrue(broken[0].readText(Charsets.UTF_8).contains("mirror.example.com"))
+        } finally {
+            dir.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun saveKeepsThePreviousVersionAsBak() = runBlocking {
+        val dir = tempDir()
+        try {
+            val file = JsonSettingsRepository.defaultFile(dir)
+            val repo = JsonSettingsRepository(file)
+            repo.save(LauncherSettings(offlineUsername = "Steve"))
+            repo.save(LauncherSettings(offlineUsername = "Alex"))
+            val bak = File(file.absolutePath + ".bak")
+            assertTrue(bak.isFile)
+            assertTrue(bak.readText(Charsets.UTF_8).contains("Steve"))
+
+            // 内容没变的重复落盘不该刷 .bak（updatedAt 变了也不算内容变）。
+            bak.setLastModified(1_000L)
+            repo.save(LauncherSettings(offlineUsername = "Alex"))
+            assertEquals(1_000L, bak.lastModified())
+        } finally {
+            dir.deleteRecursively()
+        }
+    }
 }
