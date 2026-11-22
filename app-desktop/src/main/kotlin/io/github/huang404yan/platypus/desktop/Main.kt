@@ -241,15 +241,23 @@ private fun loadWindowIcon(): BitmapPainter? {
 }
 
 /**
- * 托盘图标的原始字节，取法与窗口图标一致（同样是 adult/baby 两份）。
+ * 托盘图标的原始字节。
+ *
+ * 用的是**专门给托盘做的透明底小图**（32×32 的 tray-baby.png / tray-adult.png），
+ * 不是窗口图标那两张 512×512 的原画。原画是深青绿的整块不透明背景，缩到通知区
+ * 的 16×16 之后只剩一坨暗色方块 —— 用户 2026-11-22 反馈的「图标还是有些问题」
+ * 就是它。tray-*.png 按「棕鸭子 vs 青绿背景」的色差抠掉了背景，主体居中、
+ * 四周留一圈透明边，缩到 16 像素仍看得出鸭嘴与轮廓。
+ *
+ * 窗口图标那边继续用原画（[loadWindowIcon]），不要混。
  *
  * 不复用 [loadWindowIcon]：那条路已经把字节解成了 Compose 的 BitmapPainter，
  * 而 AWT 的 TrayIcon 只吃 java.awt.Image，得自己过一遍 ImageIO。
  * 读不到返回 null，[TrayController.install] 会据此放弃装托盘。
  */
 private fun loadTrayBytes(): ByteArray? {
-    val name = if (Brand.isPreview) "icon/platypus-baby.png" else "icon/platypus-adult.png"
+    val name = if (Brand.isPreview) "icon/tray-baby.png" else "icon/tray-adult.png"
     val loader = Thread.currentThread().contextClassLoader
     return loader?.getResourceAsStream(name)?.use { it.readBytes() }
-        ?: loader?.getResourceAsStream("icon/platypus-adult.png")?.use { it.readBytes() }
+        ?: loader?.getResourceAsStream("icon/tray-adult.png")?.use { it.readBytes() }
 }
