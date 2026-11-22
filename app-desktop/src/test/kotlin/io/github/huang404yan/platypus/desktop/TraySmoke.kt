@@ -105,6 +105,29 @@ fun main() {
         check("菜单项左侧缩进已压掉", leftover in 0..30, "leftover=" + leftover + " itemW=" + first.preferredSize.width + " textW=" + textWidth)
     }
 
+    // ⑤ 提示卡的折行：中文没有空格可断，必须按像素宽度逐字断，
+    //    而且最多两行、放不下的补省略号 —— 否则长正文会顶出卡片右边。
+    val probe = javax.swing.JPanel()
+    val bodyMetrics = probe.getFontMetrics(ToastCard.BODY_FONT)
+    val textArea = ToastCard.CARD_WIDTH - ToastCard.SHADOW - ToastCard.PAD * 2 - ToastCard.ICON_SIZE - ToastCard.ICON_GAP
+    val shortLine = ToastCard.wrap("启动器收到这里了。", bodyMetrics, textArea, 2)
+    check("短正文只占一行", shortLine.size == 1, shortLine.toString())
+    val longLine = ToastCard.wrap(
+        // 故意写到两行装不下：短了的话最后一行正好在文末收住，省略号那条断言就成了空转。
+        "还有 3 个版本在后台跑。单击图标打开启动器，右键图标可以彻底退出。" +
+            "这条本来就很长，长到两行也收不住，再补一截让它一定剩点尾巴下来。",
+        bodyMetrics,
+        textArea,
+        2,
+    )
+    check("长正文最多两行", longLine.size == 2, longLine.size.toString())
+    check(
+        "折出来的每一行都不超过文字区宽度",
+        longLine.all { bodyMetrics.stringWidth(it) <= textArea },
+        longLine.joinToString(" | "),
+    )
+    check("放不下的部分用省略号收尾", longLine.last().endsWith("…"), longLine.last())
+
     if (!java.awt.SystemTray.isSupported()) {
         // 没有通知区的机器（精简系统、部分远程会话）本来就装不上，
         // 产品在那种机器上退回「关窗口就是退出」，这里同样不算失败。
@@ -167,11 +190,34 @@ fun main() {
         }
     }
 
-    // ⑪ 气泡与镜像不该在没图标时炸：dispose 之后这两条要静默返回。
+    // ⑪ 提示卡必须真弹得出来、尺寸正常、能自己收掉。
+    //    这条替代的是原来的 TrayIcon.displayMessage：系统通知在 150% 缩放下会把图标
+    //    切出白缝（JDK 的 1bpp 掩码不按行对齐），停留时长也不归我们管。
+    if (java.awt.GraphicsEnvironment.isHeadless()) {
+        println("SKIP 无头环境，提示卡这两条跳过")
+    } else {
+        val card = controller.toastCard
+        card.show("鸭嘴兽启动器", "启动器收到这里了。单击图标打开，右键图标可以彻底退出。", null, holdMs = 4000)
+        val up = waitFor(3000) { card.showing }
+        check("提示卡能弹出来", up)
+        if (up) {
+            val size = card.cardSize
+            check(
+                "提示卡尺寸正常（不是 0，也没高过四行字）",
+                size != null && size.width > 200 && size.height in 60..140,
+                size.toString(),
+            )
+            // 卡片不抢焦点是硬要求：用户可能正在别的程序里打字。
+            check("提示卡收得掉", runCatching { card.dismiss(); true }.getOrDefault(false))
+            check("收掉之后 showing=false", waitFor(1500) { !card.showing })
+        }
+    }
+
+    // ⑫ 提示卡与镜像不该在没图标时炸：dispose 之后这两条要静默返回。
     controller.dispose()
     controller.hintHidden(1)
     controller.mirror("标题", "正文")
-    check("没有图标时弹气泡不抛异常", true)
+    check("没有图标时弹提示不抛异常", true)
 
     println(if (exit == 0) "TRAY SMOKE OK" else "TRAY SMOKE FAILED")
     exitProcess(exit)

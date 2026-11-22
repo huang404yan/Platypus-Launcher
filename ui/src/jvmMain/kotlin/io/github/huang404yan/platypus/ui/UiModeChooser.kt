@@ -88,8 +88,9 @@ internal fun UiModeChooserGate(
     }
 
     AlertDialog(
-        // 没有「关掉」这条路：点外面、按 Esc 都算选了默认档（见 UiMode.DEFAULT）。
-        onDismissRequest = { pick(UiMode.DEFAULT) },
+        // 点外面、按 Esc 都不算数：给两个档的卡片点一下就选定了，走「随便点一下空白」
+        // 那条路只会让人以为自己选过了（2026-11-22 用户口径）。默认档的按钮在下面。
+        onDismissRequest = {},
         title = { Text("先选一下怎么看") },
         text = {
             Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {

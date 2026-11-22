@@ -122,7 +122,7 @@ internal class TrayController(
 ) {
 
     private var icon: TrayIcon? = null
-    /** 每次收起窗口弹一次气泡就够了；弹多了是骚扰。 */
+    /** 每次收起窗口弹一次提示就够了；弹多了是骚扰。 */
     private var hintShown = false
     /** 菜单每次弹出前重建（见 [applyTightMenuInsets] 里说的外观被换掉的情况）。 */
     private var menu: JPopupMenu? = null
@@ -132,12 +132,22 @@ internal class TrayController(
     private var owner: Frame? = null
     /** 弹菜单之前谁有焦点。菜单关掉之后还回去，免得用户点完托盘焦点凭空没了。 */
     private var focusBefore: Window? = null
+    /** 托盘那张图。提示卡左边也用它，两边是同一只鸭子。 */
+    private var image: Image? = null
+    /**
+     * 自绘提示卡。不用 TrayIcon.displayMessage 的原因见 [ToastCard] 的 KDoc：
+     * 系统的通知在 150% 缩放下会把图标切出白缝，停留时长也不归我们管。
+     */
+    private val toast = ToastCard(onActivate = onOpen)
 
     /** 装上了没有。false 时调用方必须按「没有托盘」处理，不能调 [hintHidden]。 */
     val installed: Boolean get() = icon != null
 
     /** 当前那块菜单。只给 [TraySmoke] 的 GUI 段断言用，产品代码不读它。 */
     internal val currentMenu: JPopupMenu? get() = menu
+
+    /** 右下角那张提示卡。同上，只给冒烟断言用。 */
+    internal val toastCard: ToastCard get() = toast
 
     /**
      * 装托盘图标。返回是否装上。
@@ -158,6 +168,7 @@ internal class TrayController(
                 return false
             }
 
+        this.image = image
         // 两参构造：不把 AWT 菜单交给系统，右键由下面自己弹 Swing 菜单。
         val trayIcon = TrayIcon(image, tooltip)
         // 让系统按通知区实际大小缩放：各家 DPI 不一样，写死尺寸在 150% 缩放下会糊。
@@ -320,7 +331,7 @@ internal class TrayController(
      * 之后每次收起都弹就是噪音了。
      */
     fun hintHidden(gameCount: Int) {
-        val trayIcon = icon ?: return
+        if (icon == null) return
         if (hintShown) return
         hintShown = true
         val body = if (gameCount > 0) {
@@ -328,25 +339,27 @@ internal class TrayController(
         } else {
             "启动器收到这里了。单击图标打开，右键图标可以彻底退出。"
         }
-        runCatching { trayIcon.displayMessage("鸭嘴兽启动器", body, TrayIcon.MessageType.NONE) }
+        toast.show("鸭嘴兽启动器", body, image)
     }
 
     /**
-     * 窗口收起时，把界面上发生的完成提示同步成系统气泡。
+     * 窗口收起时，把界面上发生的完成提示同步成右下角那张提示卡。
      *
      * 窗口藏起来之后界面上那张小卡没人看得见 —— 那正是用户最需要被叫一声的时刻
-     * （装完一关窗口走人，气泡会告诉他可以回来启动）。窗口还在前台时不弹，
-     * 界面上那张卡已经把话说完了，再来一个系统气泡是双重打扰。
+     * （装完一关窗口走人，提示卡会告诉他可以回来启动）。窗口还在前台时不弹，
+     * 界面上那张卡已经把话说完了，再来一个就是双重打扰。
      */
     fun mirror(title: String, body: String) {
-        val trayIcon = icon ?: return
-        runCatching { trayIcon.displayMessage(title, body, TrayIcon.MessageType.NONE) }
+        if (icon == null) return
+        toast.show(title, body, image)
     }
 
     /** 退出前把图标摘掉，否则鼠标划过通知区会留一个幽灵格子。 */
     fun dispose() {
+        toast.dismiss()
         val trayIcon = icon ?: return
         icon = null
+        image = null
         runCatching { SystemTray.getSystemTray().remove(trayIcon) }
         runCatching { invoker?.dispose() }
         invoker = null

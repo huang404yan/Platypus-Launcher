@@ -103,9 +103,10 @@ internal fun FirstRunGate(
     }
 
     AlertDialog(
-        // 正式版没有「关掉」这条路：点外面、按 Esc 都不能把它关了，否则那句「必须登录」
-        // 就成了「看一眼就能跳过」。孵化版可以随手关。
-        onDismissRequest = { if (current.dismissible) finish() },
+        // 只有按钮能关掉这扇门：点外面、按 Esc 一律不生效。曾经孵化版点空白就算「先随便看看」，
+        // 用户手滑一下这页就没了、也不知道自己点了什么（2026-11-22 用户口径：「点击空白可跳过
+        // 应点击按钮才对」）。想跳过的人右下角那个按钮一直摆着，不算刁难。
+        onDismissRequest = {},
         title = { Text(current.title) },
         text = { Text(current.body, style = MaterialTheme.typography.bodyMedium) },
         confirmButton = {
