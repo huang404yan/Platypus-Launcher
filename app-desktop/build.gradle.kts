@@ -509,6 +509,29 @@ tasks.register<JavaExec>("portableSmoke") {
 // 帧时间探针：用 ImageComposeScene 无头渲染整棵界面树，统计每帧耗时。
 // 不起窗口、不需要交互桌面，能进 CI。开发期用，不进发行包。
 // ─────────────────────────────────────────────────────────────────────────────
+// `gradle :app-desktop:windowProbe [-PwindowDir=dist/_mc15 -PwindowRounds=20]`
+//
+// 真窗口探针：开真窗口跑同一棵树，判断无头探针崩掉是环境问题还是产品问题。
+// 要交互桌面；不量帧时间（真窗口里量不准），只回答「会不会崩」。
+// ─────────────────────────────────────────────────────────────────────────────
+tasks.register<JavaExec>("windowProbe") {
+    group = "verification"
+    description = "真窗口探针：开窗口反复切页，只判断会不会崩（开发期用）"
+    dependsOn(tasks.named("testClasses"))
+    mainClass.set("io.github.huang404yan.platypus.desktop.WindowProbeKt")
+    classpath = sourceSets["test"].runtimeClasspath
+    workingDir = rootProject.projectDir
+    jvmArgs("-Dfile.encoding=UTF-8")
+    argumentProviders.add(
+        CommandLineArgumentProvider {
+            val dir = providers.gradleProperty("windowDir").orElse("dist/_mc15").get()
+            val rounds = providers.gradleProperty("windowRounds").orElse("20").get()
+            listOf(rootProject.file(dir).absolutePath, rounds)
+        },
+    )
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 tasks.register<JavaExec>("frameProbe") {
     group = "verification"
     description = "无头录帧：ImageComposeScene 渲染整棵树，统计每帧耗时（开发期用）"
