@@ -23,6 +23,8 @@ kotlin {
         // 建这个源集是为了让「切页保活」「进度怎么显示」这类逻辑有单测盯着。
         jvmTest.dependencies {
             implementation(kotlin("test"))
+            // 回归测试要在真正的界面线程上验证「发命令不堵界面」，需要 Dispatchers.Swing。
+            implementation(libs.kotlinx.coroutines.swing)
         }
     }
 }

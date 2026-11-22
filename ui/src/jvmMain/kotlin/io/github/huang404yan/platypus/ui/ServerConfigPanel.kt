@@ -72,7 +72,7 @@ internal fun ServerConfigPanel(
     running: Boolean,
     onBack: () -> Unit,
     /** 把一条命令发进控制台。服务端没在跑时不会被调用。 */
-    onSendCommand: (String) -> CommandSend,
+    onSendCommand: suspend (String) -> CommandSend,
 ) {
     val scope = rememberCoroutineScope()
     var view by remember(dir.absolutePath) { mutableStateOf<ServerPropertiesView?>(null) }
@@ -105,7 +105,9 @@ internal fun ServerConfigPanel(
         noticeIsError = error
     }
 
-    fun deliver(command: String): String = commandNotice(command, onSendCommand(command))
+    // suspend：命令可能走 RCON，回执要等（最长 8 秒）。这里的三处调用都在 scope.launch 里，
+    // 等的是那个协程，不是界面线程。
+    suspend fun deliver(command: String): String = commandNotice(command, onSendCommand(command))
 
     fun save() {
         val current = view ?: return

@@ -4,6 +4,7 @@ import java.io.File
 import java.net.InetSocketAddress
 import java.net.ServerSocket
 import java.nio.file.Files
+import kotlinx.coroutines.runBlocking
 import kotlin.test.AfterTest
 import kotlin.test.BeforeTest
 import kotlin.test.Test
@@ -74,7 +75,7 @@ class ServerConsoleTest {
             "没读到启动输出，实际日志：" + ServerRuntime.state.value.lines,
         )
 
-        ServerRuntime.send("list")
+        runBlocking { ServerRuntime.send("list") }
         assertTrue(
             waitUntil(8000) { ServerRuntime.state.value.lines.any { it.contains("[ECHO] list") } },
             "命令没有被服务端读到，实际日志：" + ServerRuntime.state.value.lines,

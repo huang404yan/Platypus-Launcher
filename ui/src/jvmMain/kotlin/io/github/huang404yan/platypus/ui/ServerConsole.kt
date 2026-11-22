@@ -21,6 +21,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -284,7 +285,21 @@ internal object ServerRuntime {
         process = null
     }
 
-    fun send(text: String): CommandSend {
+    /**
+     * 把一条命令发出去，等到它有了结果再返回。
+     *
+     * **为什么是 suspend**：RCON 是阻塞 IO，而且回执要等（连接 3 秒 + 回执 5 秒的上限）。
+     * 以前这里用 `runBlocking` 在调用线程上等，而两处「发送」按钮的回调就在 AWT 事件线程上——
+     * 服务端不回包时，界面实测被冻住 4705ms（探针 ZzEdtStallProbe）。现在等待落在调用方的
+     * 协程里，界面线程只负责 `launch`，按下去立刻能响应。
+     *
+     * 整个函数体都跑在 [Dispatchers.IO] 上：写进程标准输入同样是阻塞调用，
+     * 管道写满时一样会卡。
+     */
+    suspend fun send(text: String): CommandSend = withContext(Dispatchers.IO) { sendBlocking(text) }
+
+    /** [send] 的实现体。只在 [Dispatchers.IO] 上调用，不碰界面线程。 */
+    private fun sendBlocking(text: String): CommandSend {
         val command = text.trim()
         if (command.isEmpty()) return CommandSend.Failed("命令是空的，没发出去。")
         append("[本地] " + command)
@@ -292,7 +307,7 @@ internal object ServerRuntime {
         if (channel != null) {
             // RCON 的回执就是命令的输出（不经过 stdout）。原样打出来，
             // 否则用户会发现「发了 list 但屏幕上什么都没有」。
-            val reply = runCatching { withContextBlocking { channel.command(command) } }
+            val reply = runCatching { channel.command(command) }
             val got = reply.getOrNull()
             if (got != null) {
                 if (got.isNotBlank()) {
@@ -319,10 +334,6 @@ internal object ServerRuntime {
         }
         return CommandSend.Stdin
     }
-
-    /** 在 IO 线程上同步跑一段。RCON 是阻塞 IO，不能压在界面线程上。 */
-    private fun <T> withContextBlocking(block: () -> T): T =
-        kotlinx.coroutines.runBlocking(Dispatchers.IO) { block() }
 
     private fun closeRcon() {
         val client = rcon
@@ -394,9 +405,11 @@ internal object ServerRuntime {
 internal fun ServerConsoleCard(
     state: ServerConsoleState,
     onStop: () -> Unit,
-    onSend: (String) -> Unit,
+    /** suspend：命令可能走 RCON，回执最长要等 8 秒。 */
+    onSend: suspend (String) -> Unit,
 ) {
     var input by remember { mutableStateOf("") }
+    val scope = rememberCoroutineScope()
     Card(Modifier.fillMaxWidth()) {
         Column(
             Modifier.fillMaxWidth().padding(12.dp),
@@ -502,8 +515,10 @@ internal fun ServerConsoleCard(
                 )
                 Button(
                     onClick = {
-                        onSend(input)
+                        val command = input
                         input = ""
+                        // 不在事件线程上等回执：拉进协程，按钮按下立刻回弹。
+                        scope.launch { onSend(command) }
                     },
                     enabled = state.running && input.isNotBlank(),
                 ) { Text("发送") }

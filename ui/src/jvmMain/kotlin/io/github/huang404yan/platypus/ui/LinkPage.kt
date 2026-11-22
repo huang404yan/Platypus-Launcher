@@ -419,9 +419,13 @@ private fun ServerColumn(
                 )
                 Button(
                     onClick = {
-                        val result = ServerRuntime.send(commandText)
-                        onNotice(commandNotice(commandText, result))
+                        // send 是 suspend 的：RCON 回执最多要等 8 秒，不能在事件线程上等。
+                        val sent = commandText
                         commandText = " "
+                        scope.launch {
+                            val result = ServerRuntime.send(sent)
+                            onNotice(commandNotice(sent, result))
+                        }
                     },
                     enabled = console.running && commandText.isNotBlank(),
                 ) { Text("发送") }
