@@ -504,6 +504,47 @@ tasks.register<JavaExec>("portableSmoke") {
     )
 }
 
+// `gradle :app-desktop:frameProbe [-PframeDir=dist/_frame-probe]`
+//
+// 帧时间探针：用 ImageComposeScene 无头渲染整棵界面树，统计每帧耗时。
+// 不起窗口、不需要交互桌面，能进 CI。开发期用，不进发行包。
+// ─────────────────────────────────────────────────────────────────────────────
+tasks.register<JavaExec>("frameProbe") {
+    group = "verification"
+    description = "无头录帧：ImageComposeScene 渲染整棵树，统计每帧耗时（开发期用）"
+    dependsOn(tasks.named("testClasses"))
+    mainClass.set("io.github.huang404yan.platypus.desktop.FrameProbeKt")
+    classpath = sourceSets["test"].runtimeClasspath
+    workingDir = rootProject.projectDir
+    jvmArgs("-Dfile.encoding=UTF-8")
+    // -PframePasses=3 连跑三遍：第一遍是真正的冷（类加载 + 首次 JIT），第二遍起
+    // 类已加载完。两者之差就是「等一次就好」的一次性成本，剩下的是每次都要付的。
+    if (project.hasProperty("framePasses")) {
+        jvmArgs("-DframePasses=" + project.property("framePasses").toString())
+    }
+    // -PframeClassLog 把类加载明细记到工作区根：用来确认「第一遍慢五倍」里
+    // 到底有多少是类加载、其中有多少是我们自己的类（能预热）而不是 JDK/Compose 的。
+    if (project.hasProperty("frameClassLog")) {
+        val log = rootProject.file("_cls.log")
+        jvmArgs("-Xlog:class+load=info:file=" + log.absolutePath)
+    }
+    // 怀疑某一帧慢在哪个函数上时，加 -PframeJfr 采一份 JFR 到工作区根，再用
+    // `jfr print --events jdk.ExecutionSample _fp.jfr` 看热点。平时不加，别拖慢探针自己。
+    if (project.hasProperty("frameJfr")) {
+        val jfr = rootProject.file("_fp.jfr")
+        jvmArgs("-XX:StartFlightRecording=filename=" + jfr.absolutePath + ",settings=profile,dumponexit=true")
+        // 录音时才跑「反复切页」那段，平时省十几秒空转。
+        jvmArgs("-DframeFocus=true")
+    }
+
+    argumentProviders.add(
+        CommandLineArgumentProvider {
+            val dir = providers.gradleProperty("frameDir").orElse("dist/_frame-probe").get()
+            listOf(rootProject.file(dir).absolutePath)
+        },
+    )
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // 品牌与打包参数
 //

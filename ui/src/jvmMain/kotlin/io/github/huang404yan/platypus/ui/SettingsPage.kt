@@ -1634,11 +1634,23 @@ private fun InterfaceTab(
                 }
             }
         }
+        // 简洁档本身已经是「不改动效就算不关也关」的性能档（UiPolicy.effectiveReduceMotion），
+        // 所以这一格在简洁档下的说法要换：不然用户点了一圈发现界面毫无变化，会当它坏了。
+        // 勾选框仍然可点、仍然落盘 —— 那是给「切回完整模式之后」用的。
+        val simpleMode = uiMode == UiMode.SIMPLE
         SettingCard(
             "动效",
-            "换页、换二级项、副页面入栈都带一点过渡，用的是同一套时长（见界面上「动效」这一档）。"
-                + "远程桌面、录屏或机器比较慢时勾上这个，全部改成瞬间到位 —— "
-                + "动画只是提示「换了」，关掉不影响任何功能。改完立刻生效并记下来。",
+            // 两段文字各自拼成一句再交给 SettingCard：块里以 + 开头的续行会被 Kotlin
+            // 当成一元运算符（块内语句可以结束），编译期报 unresolved 
+            // reference unaryPlus。放在这里一次拼完，别在候选分支里分多行。
+            if (simpleMode) {
+                "现在是简洁模式，动效已经全部关掉（简洁模式同时当性能档用）。" +
+                    "这里的勾选只影响切回完整模式之后 —— 想现在就开动效，先切到完整模式。"
+            } else {
+                "换页、换二级项、副页面入栈都带一点过渡，用的是同一套时长。" +
+                    "远程桌面、录屏或机器比较慢时勾上这个，全部改成瞬间到位 —— " +
+                    "动画只是提示「换了」，关掉不影响任何功能。改完立刻生效并记下来。"
+            },
         ) {
             Row(
                 Modifier.fillMaxWidth().clickable { onPickReduceMotion(!reduceMotion) },
@@ -1648,7 +1660,11 @@ private fun InterfaceTab(
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                     Text("少动一点", style = MaterialTheme.typography.bodyMedium)
                     Text(
-                        "换页、展开、提示这些改成直接出现，颜色与布局不变。",
+                        if (simpleMode) {
+                            "简洁模式下已经关闭，切回完整模式后才按这里生效。"
+                        } else {
+                            "换页、展开、提示这些改成直接出现，颜色与布局不变。"
+                        },
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )

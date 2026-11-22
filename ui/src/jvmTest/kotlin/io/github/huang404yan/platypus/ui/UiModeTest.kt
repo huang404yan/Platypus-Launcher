@@ -127,4 +127,19 @@ class UiModeTest {
         // 简洁模式里藏掉这个开关，用户就切不回去了
         assertTrue(UiPolicy.showsUiModeSwitch())
     }
+
+    @Test
+    fun `简洁档下动效一律关掉，不看那个勾选框`() {
+        // 2026-11-21 用户口径：简洁模式的语义是「性能档」，不只是少显示几项。
+        // 所以这里钉住的是单向覆盖：简洁档 + 没勾也是关，简洁档 + 勾了还是关。
+        assertTrue(UiPolicy.effectiveReduceMotion(UiMode.SIMPLE, reduceMotion = false))
+        assertTrue(UiPolicy.effectiveReduceMotion(UiMode.SIMPLE, reduceMotion = true))
+    }
+
+    @Test
+    fun `完整档下动效只听那个勾选框`() {
+        // 反过来不能被简洁档的规则牵连：完整档默认是开动效的，勾了才关。
+        assertFalse(UiPolicy.effectiveReduceMotion(UiMode.FULL, reduceMotion = false))
+        assertTrue(UiPolicy.effectiveReduceMotion(UiMode.FULL, reduceMotion = true))
+    }
 }

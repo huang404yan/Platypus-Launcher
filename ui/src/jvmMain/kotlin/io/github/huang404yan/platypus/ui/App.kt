@@ -154,7 +154,10 @@ fun App(
     PlatypusTheme(theme) {
         // 动效开关喂给整棵树：各处动画统一从 motionMillis / motionTween 取时长，
         // 这里一关，它们全部变成瞬间到位，不用逐个页面加判断。
-        CompositionLocalProvider(LocalReduceMotion provides reduceMotion) {
+        //
+        // 简洁档兼作性能档（2026-11-21 用户口径）：不管「少动一点」勾没勾，简洁档下动效
+        // 一律关掉。判断收在 UiPolicy 里，这里只取结果 —— 页面侧仍不需要知道有这一档。
+        CompositionLocalProvider(LocalReduceMotion provides UiPolicy.effectiveReduceMotion(uiMode, reduceMotion)) {
         // 默认落在「启动」：开启动器的第一件事是「今天玩哪个版本、用谁的身份」。
         var page by remember { mutableStateOf(Page.LAUNCH) }
 

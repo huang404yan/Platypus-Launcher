@@ -128,4 +128,20 @@ object UiPolicy {
 
     /** 设置页「界面」里那一块模式选择本身永远显示 —— 否则简洁模式就切不回去了。 */
     fun showsUiModeSwitch(): Boolean = true
+
+    /**
+     * 这一档下动效到底该不该关。
+     *
+     * 简洁档的定位是「性能档」（2026-11-21 用户口径）：它不只少画几个二级项，还要少花时间
+     * 在过渡上。所以简洁档下一律按「少动一点」处理，用户勾没勾那个框都一样；完整档则完全
+     * 听用户自己的 [reduceMotion]。
+     *
+     * 反过来做不到：简洁档下勾「少动一点」不会让完整档的动效也关掉 —— 两个开关是不同的
+     * 意图，这里只做「简洁档 > 用户开关」的单向覆盖。
+     *
+     * 放在 UiPolicy 里而不是在 App.kt 里写一句 `||`：这条规则要能单测，
+     * 而且以后加第三档时只改这里。
+     */
+    fun effectiveReduceMotion(mode: UiMode, reduceMotion: Boolean): Boolean =
+        reduceMotion || mode == UiMode.SIMPLE
 }
