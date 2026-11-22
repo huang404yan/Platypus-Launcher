@@ -149,6 +149,15 @@ fun SettingsPage(
     reduceMotion: Boolean = false,
     /** 用户改了这个开关：上层立刻换，同时写进设置。 */
     onReduceMotionChange: (Boolean) -> Unit = {},
+    /**
+     * 「收进通知区」（托盘）开关。
+     *
+     * 同一套约定：由 [App] 持有并立刻通知宿主去装/卸图标，这一页只负责存下来。
+     * 默认关 —— 关窗口就是真退出，不再出现「以为关了其实还在后台」。
+     */
+    trayEnabled: Boolean = false,
+    /** 用户改了这个开关：上层立刻通知宿主装/卸托盘，同时写进设置。 */
+    onTrayEnabledChange: (Boolean) -> Unit = {},
 ) {
     if (backend == null) {
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -216,6 +225,8 @@ fun SettingsPage(
     var uiModeText by remember { mutableStateOf(UiMode.DEFAULT.id) }
     /** 这一页手上那份动效开关。与 [uiModeText] 同理：上层那份正在生效，这份是要写进文件的。 */
     var motionText by remember { mutableStateOf(false) }
+    /** 这一页手上那份托盘开关。与 [motionText] 同理。 */
+    var trayText by remember { mutableStateOf(false) }
     /** 同时下几个文件；0 = 自适应（交给 [DownloadPreference.effectiveConnections] 换算）。 */
     var downloadConnections by remember { mutableStateOf(0) }
     /**
@@ -253,6 +264,7 @@ fun SettingsPage(
         serverBase = settings.serverBase
         uiModeText = UiMode.of(settings.uiMode).id
         motionText = settings.reduceMotion
+        trayText = settings.trayEnabled
         downloadConnections = DownloadPreference.normalizeConnections(settings.downloadConnections)
         base = settings
         loaded = true
@@ -309,6 +321,7 @@ fun SettingsPage(
                         defaultMemoryAuto = memoryAuto,
                         defaultIsolation = defaultIsolation,
                         gameLanguage = gameLanguage,
+                        trayEnabled = trayText,
                         activeAccountUuid = activeAccountUuid,
                         microsoftClientId = microsoftClientId,
                         theme = theme.id,
@@ -408,6 +421,7 @@ fun SettingsPage(
                         serverBase = serverBase,
                         defaultIsolation = defaultIsolation,
                         gameLanguage = gameLanguage,
+                        trayEnabled = trayText,
                     ),
                 )
             }
@@ -455,6 +469,7 @@ fun SettingsPage(
                         serverBase = serverBase,
                         defaultIsolation = defaultIsolation,
                         gameLanguage = gameLanguage,
+                        trayEnabled = trayText,
                     ),
                     keepUserFilled = !canClearCredentials(cleaned, serverBase, curseForgeKey),
                 )
@@ -498,6 +513,7 @@ fun SettingsPage(
                         serverBase = serverBase,
                         defaultIsolation = defaultIsolation,
                         gameLanguage = gameLanguage,
+                        trayEnabled = trayText,
                     ),
                 )
             }.onSuccess { stored ->
@@ -541,6 +557,7 @@ fun SettingsPage(
                         serverBase = serverBase,
                         defaultIsolation = defaultIsolation,
                         gameLanguage = gameLanguage,
+                        trayEnabled = trayText,
                     ),
                 )
             }.onSuccess { stored ->
@@ -592,6 +609,7 @@ fun SettingsPage(
                         serverBase = serverBase,
                         defaultIsolation = defaultIsolation,
                         gameLanguage = gameLanguage,
+                        trayEnabled = trayText,
                     ),
                 )
             }.onSuccess { stored ->
@@ -638,6 +656,7 @@ fun SettingsPage(
                         serverBase = serverBase,
                         defaultIsolation = defaultIsolation,
                         gameLanguage = gameLanguage,
+                        trayEnabled = trayText,
                     ),
                 )
             }.onSuccess { stored ->
@@ -649,6 +668,59 @@ fun SettingsPage(
                 onReduceMotionChange(previous)
                 noticeIsError = true
                 notice = "动效开关没能存下来：" + (it.message ?: it.javaClass.simpleName)
+            }
+        }
+    }
+
+    /**
+     * 立刻把「收进通知区」写进设置，并让宿主装上或卸掉托盘图标。
+     *
+     * 与动效、界面模式同一套。这里比别处多一层含义：它不只是记一个偏好，还决定了
+     * 「点右上角的 × 之后进程还在不在」。所以写盘失败一定要把开关退回原样 ——
+     * 界面上写着「已关」而实际还留着一个托盘图标，用户下次关窗口又会被收起来，
+     * 那正是这个开关要消灭的困惑。
+     */
+    fun persistTray(picked: Boolean, previous: Boolean) {
+        trayText = picked
+        onTrayEnabledChange(picked)
+        val parsedMemory = memoryText.trim().toIntOrNull() ?: Instance.DEFAULT_MEMORY_MB
+        scope.launch {
+            runCatching {
+                repository.save(
+                    base.copy(
+                        offlineUsername = normalizeOfflineUsername(username),
+                        defaultGameRoot = gameRoot.trim(),
+                        defaultMemoryMb = Instance.clampMemoryMb(parsedMemory),
+                        activeAccountUuid = activeAccountUuid,
+                        microsoftClientId = microsoftClientId,
+                        theme = theme.id,
+                        uiMode = uiModeText,
+                        reduceMotion = motionText,
+                        trayEnabled = picked,
+                        downloadSource = downloadSource,
+                        autoBackupEnabled = autoBackupEnabled,
+                        autoBackupHours = backupPolicyNow().intervalHours,
+                        autoBackupKeep = backupPolicyNow().keep,
+                        curseForgeApiKey = curseForgeKey,
+                        serverBase = serverBase,
+                        defaultIsolation = defaultIsolation,
+                        gameLanguage = gameLanguage,
+                    ),
+                )
+            }.onSuccess { stored ->
+                base = stored
+                savedAt = stored.updatedAt
+                noticeIsError = false
+                notice = if (picked) {
+                    "以后点「×」会收进通知区，游戏与下载照常跑；想彻底退出就在托盘图标上右键选「退出」。"
+                } else {
+                    "以后点「×」就是直接退出，托盘图标已经卸掉。"
+                }
+            }.onFailure {
+                trayText = previous
+                onTrayEnabledChange(previous)
+                noticeIsError = true
+                notice = "托盘开关没能存下来：" + (it.message ?: it.javaClass.simpleName)
             }
         }
     }
@@ -703,6 +775,7 @@ fun SettingsPage(
                         serverBase = serverBase,
                         defaultIsolation = defaultIsolation,
                         gameLanguage = gameLanguage,
+                        trayEnabled = trayText,
                     ),
                     keepUserFilled = !canClearCredentials(microsoftClientId, serverBase, cleaned),
                 )
@@ -755,6 +828,7 @@ fun SettingsPage(
                         curseForgeApiKey = curseForgeKey,
                         defaultIsolation = defaultIsolation,
                         gameLanguage = gameLanguage,
+                        trayEnabled = trayText,
                     ),
                     keepUserFilled = !canClearCredentials(microsoftClientId, cleaned, curseForgeKey),
                 )
@@ -795,6 +869,7 @@ fun SettingsPage(
                         serverBase = serverBase,
                         defaultIsolation = defaultIsolation,
                         gameLanguage = gameLanguage,
+                        trayEnabled = trayText,
                     ),
                 )
             }.onSuccess {
@@ -863,6 +938,8 @@ fun SettingsPage(
                 onPickUiMode = { picked -> persistUiMode(picked, UiMode.of(base.uiMode)) },
                 reduceMotion = motionText,
                 onPickReduceMotion = { picked -> persistMotion(picked, base.reduceMotion) },
+                trayEnabled = trayText,
+                onPickTrayEnabled = { picked -> persistTray(picked, base.trayEnabled) },
             )
             SETTINGS_TAB_OTHER -> OtherTab(
                 loadedFrom = loadedFrom,
@@ -1588,6 +1665,8 @@ private fun InterfaceTab(
     onPickUiMode: (UiMode) -> Unit,
     reduceMotion: Boolean,
     onPickReduceMotion: (Boolean) -> Unit,
+    trayEnabled: Boolean,
+    onPickTrayEnabled: (Boolean) -> Unit,
 ) {
     val effective = theme.resolve(Brand.isPreview)
     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -1664,6 +1743,31 @@ private fun InterfaceTab(
                             "简洁模式下已经关闭，切回完整模式后才按这里生效。"
                         } else {
                             "换页、展开、提示这些改成直接出现，颜色与布局不变。"
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+        }
+        SettingCard(
+            "关窗口时",
+            "默认是「关了就是关了」：点右上角的 ×，进程结束，下载与游戏一并停下。"
+                + "勾上这一格才会装上通知区那个图标，× 变成收起 —— 适合挂机下载或者把游戏留在后台的人。"
+                + "开关本身也立刻落盘，关掉时托盘图标会当场卸掉，不留一个看不见的进程。",
+        ) {
+            Row(
+                Modifier.fillMaxWidth().clickable { onPickTrayEnabled(!trayEnabled) },
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Checkbox(checked = trayEnabled, onCheckedChange = { onPickTrayEnabled(it) })
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text("收进通知区", style = MaterialTheme.typography.bodyMedium)
+                    Text(
+                        if (trayEnabled) {
+                            "已打开：× 只是把窗口收起来。要连进程一起退，在通知区图标上右键选「退出」。"
+                        } else {
+                            "已关闭：× 直接退出，不在通知区留图标。"
                         },
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,

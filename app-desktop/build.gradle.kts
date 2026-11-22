@@ -504,6 +504,22 @@ tasks.register<JavaExec>("portableSmoke") {
     )
 }
 
+// `gradle :app-desktop:traySmoke`
+//
+// 托盘开关的无头验收：装上 / 重复装 / 卸掉 / 再装上四条路，外加菜单字体能不能显示中文。
+// 关掉开关时 dispose 必须真的把图标摘掉 —— 那是「关了就是彻底关闭」的判据。
+// 这台机器没有通知区时退出码 2（跳过），不算失败。
+// ─────────────────────────────────────────────────────────────────────────────
+tasks.register<JavaExec>("traySmoke") {
+    group = "verification"
+    description = "无头验收：托盘能装上、能卸掉，菜单中文不会变方块（开发期用）"
+    dependsOn(tasks.named("testClasses"))
+    mainClass.set("io.github.huang404yan.platypus.desktop.TraySmokeKt")
+    classpath = sourceSets["test"].runtimeClasspath
+    workingDir = rootProject.projectDir
+    jvmArgs("-Dfile.encoding=UTF-8")
+}
+
 // `gradle :app-desktop:frameProbe [-PframeDir=dist/_frame-probe]`
 //
 // 帧时间探针：用 ImageComposeScene 无头渲染整棵界面树，统计每帧耗时。

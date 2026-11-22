@@ -112,6 +112,15 @@ fun App(
      * 传 null 表示没有托盘，界面上那张卡是唯一的出口。
      */
     onSystemNotice: ((title: String, body: String) -> Unit)? = null,
+    /**
+     * 用户改了「收进通知区」这个开关。
+     *
+     * 托盘归宿主装（只有 app-desktop 碰得到 AWT），但开关住在设置页，所以这里只负责
+     * 把「现在要不要托盘」喊出去：宿主据此装上或卸掉图标。关掉之后宿主的 onHideToTray
+     * 与 onSystemNotice 都会变回 null，于是这里的「×」又成了真退出 —— 也就是用户说的
+     * 「关了就是彻底关闭」，不需要第二个开关去表达这件事。
+     */
+    onTrayEnabledChanged: (Boolean) -> Unit = {},
 ) {
     // 配色提到 MaterialTheme 外面：整套 ColorScheme 由它决定，改它等于换一层皮，
     // 页面代码一行都不用知道 —— 全仓库的颜色都走 MaterialTheme.colorScheme。
@@ -126,6 +135,10 @@ fun App(
     // 通知宿主窗口，只在这一棵树里生效。
     var reduceMotion by remember { mutableStateOf(false) }
 
+    // 「收进通知区」。默认关：托盘是「以为关了其实没关」的来源，征得同意才装。
+    // 这一格同样在最外层持有，因为宿主要靠它决定装不装托盘图标。
+    var trayEnabled by remember { mutableStateOf(false) }
+
     // 只在最外层读一次设置。放这里而不是每页各读一次：切页会重建页面，
     // 每页各读会让主题在切换瞬间闪一下，而且同一份文件被反复解析。
     LaunchedEffect(backend) {
@@ -135,6 +148,9 @@ fun App(
         // 没存过（空串）就是默认档（简洁），见 UiMode.of 与 UiMode.DEFAULT。
         uiMode = UiMode.of(settings.uiMode)
         reduceMotion = settings.reduceMotion
+        // 托盘开关要顺手告诉宿主：它得在窗口出来之后才知道该不该装图标。
+        trayEnabled = settings.trayEnabled
+        onTrayEnabledChanged(settings.trayEnabled)
         // 下载源偏好是进程级全局量（见 DownloadPreference 的说明）：这里灌一次，
         // 之后所有新建的下载器都按它排序。设置页改的时候会就地覆写。
         DownloadPreference.source = DownloadSource.of(settings.downloadSource)
@@ -412,6 +428,12 @@ fun App(
                             onUiModeChange = { uiMode = it },
                             reduceMotion = reduceMotion,
                             onReduceMotionChange = { reduceMotion = it },
+                            trayEnabled = trayEnabled,
+                            // 点了就立刻通知宿主：装上或卸掉托盘图标，比等下次开程序直接。
+                            onTrayEnabledChange = {
+                                trayEnabled = it
+                                onTrayEnabledChanged(it)
+                            },
                             // 只改这一层的皮。标题栏由 LaunchedEffect(theme) 回调出去，
                             // 那边会等内容帧提交之后再重画（见 Main.kt 的两个 withFrameNanos），
                             // 所以这里不能提前同步调用，否则标题栏又会抢在内容前面变。

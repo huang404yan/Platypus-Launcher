@@ -1,6 +1,7 @@
 package io.github.huang404yan.platypus.desktop
 
 import java.awt.AWTException
+import java.awt.Font
 import java.awt.Image
 import java.awt.MenuItem
 import java.awt.PopupMenu
@@ -10,6 +11,20 @@ import java.awt.event.MouseAdapter
 import java.awt.event.MouseEvent
 import java.io.ByteArrayInputStream
 import javax.imageio.ImageIO
+
+/**
+ * 托盘菜单用的字体。
+ *
+ * AWT 的弹出菜单默认用系统菜单字体（Windows 上是 Segoe UI），那个字体没有汉字，
+ * 中文会全变成方块 □ —— 用户 2026-11-22 的截图就是这样。改挂 Java 的逻辑字体
+ * Dialog：它由 JRE 按字符去挑能显示的物理字体，本机实测对中文 canDisplayUpTo 返回 -1。
+ *
+ * 不写死「微软雅黑」这类具体字族：没装那套字体的机器上照样回方块，
+ * 而 Dialog 是 JRE 自带的逻辑名，永远存在。
+ *
+ * 提成常量是为了让 [TraySmoke] 能直接对这个字体断言，不再靠肉眼截屏。
+ */
+internal val TRAY_MENU_FONT: Font = Font(Font.DIALOG, Font.PLAIN, 12)
 
 /**
  * 托盘图标：把窗口收起来之后，用户还能找回启动器，游戏也继续跑。
@@ -26,6 +41,10 @@ import javax.imageio.ImageIO
  *
  * 线程：AWT 的托盘事件在事件派发线程（EDT）上回调，所以内部一切操作都在 EDT 上发生；
  * [install] 与 [dispose] 可以从任意线程调，它们自己转一手。
+ *
+ * 装不装由 `LauncherSettings.trayEnabled` 决定，**默认不装**（2026-11-22 用户口径：
+ * 「关了就是彻底关闭」）。这里只在被要求装的时候才装，装不上的两条路径（系统不支持、
+ * 图标读不出）都返回 false，调用方据此把「×」退回真退出。
  */
 internal class TrayController(
     /** 用户点了托盘图标（双击）或菜单里的「打开鸭嘴兽」。 */
@@ -61,11 +80,14 @@ internal class TrayController(
             }
 
         val menu = PopupMenu()
+        menu.font = TRAY_MENU_FONT
         val open = MenuItem("打开鸭嘴兽")
+        open.font = TRAY_MENU_FONT
         open.addActionListener { onOpen() }
         menu.add(open)
         menu.addSeparator()
         val exit = MenuItem("退出")
+        exit.font = TRAY_MENU_FONT
         exit.addActionListener { onExit() }
         menu.add(exit)
 

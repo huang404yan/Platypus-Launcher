@@ -139,6 +139,33 @@ class SettingsRepositoryTest {
         }
     }
 
+    /**
+     * 托盘开关（2026-11-22 加）：默认关，且旧设置文件里没有这一格时读出来也是关。
+     *
+     * 默认关是这个开关的全部意义所在 —— 老版本「装上托盘就一直是托盘」，
+     * 用户点 × 以为退了、进程其实还在。这条测试同时钉住两件事：新字段的默认值，
+     * 以及「老文件缺这一格不抛异常」（照 oldSettingsFileWithoutClientIdStillLoads 的路子）。
+     */
+    @Test
+    fun trayIsOffByDefaultAndOldFileWithoutItStillLoads() = runBlocking {
+        val dir = tempDir()
+        try {
+            val file = JsonSettingsRepository.defaultFile(dir)
+            file.parentFile.mkdirs()
+            // preview.24 之前的文件没有 trayEnabled 这一格。
+            file.writeText("""{"offlineUsername":"Notch","defaultMemoryMb":4096}""", Charsets.UTF_8)
+            val settings = JsonSettingsRepository(file).load()
+            assertEquals(false, settings.trayEnabled)
+
+            // 打开之后能原样往返，不然设置页那个勾选下次开程序就白给了。
+            val saved = JsonSettingsRepository(file).save(settings.copy(trayEnabled = true))
+            assertTrue(saved.trayEnabled)
+            assertTrue(JsonSettingsRepository(file).load().trayEnabled)
+        } finally {
+            dir.deleteRecursively()
+        }
+    }
+
     @Test
     fun `下载连接数存进设置也不会越界`() = runBlocking {
         val dir = tempDir()

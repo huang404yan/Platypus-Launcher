@@ -81,8 +81,15 @@ fun main(args: Array<String>) {
         // （见 App 的 closeSignal）。真正退出的入口只有一个 —— onCloseConfirmed。
         var closeSignal by remember { mutableStateOf(0) }
 
-        // 托盘：系统支持时，关窗口＝收起来，游戏与下载照常跑。
-        // 这里三个状态都要走快照（而不是普通变量）：装没装上、点没点开，都会改变界面上的文案。
+        // 托盘：默认**不装**。设置里那个「收进通知区」打开之后才装，装上了关窗口才是收起来。
+        //
+        // 默认关是 2026-11-22 用户定的口径：「关了就是彻底关闭」。原来只要系统支持就一律装上，
+        // 点 × 之后进程还在后台跑，用户以为退了 —— 那是个 bug，不是个省事。
+        //
+        // trayWanted 是「用户想不想要」（设置里那一格），trayReady 是「实际装上没有」
+        //（系统不支持、图标读不出来时会给 false）。两个分开是因为文案要用后者的真假：
+        // 想要但装不上时，× 仍然得是真退出，界面上不能写「收进托盘」。
+        var trayWanted by remember { mutableStateOf(false) }
         var trayReady by remember { mutableStateOf(false) }
         val windowRef = remember { mutableStateOf<ComposeWindow?>(null) }
         val tray = remember {
@@ -117,11 +124,14 @@ fun main(args: Array<String>) {
                 // 拖到比这还小，侧栏与表单会互相挤，不如直接卡住下限。
                 window.minimumSize = Dimension(1024, 640)
             }
-            LaunchedEffect(Unit) {
+            LaunchedEffect(trayWanted) {
                 windowRef.value = window
                 // 图标读不到（资源缺失）或系统不支持托盘时 install 返回 false，
                 // 之后一切退回「关窗口就是退出」的老行为，不留下一个空白通知区格子。
-                trayReady = tray.install(loadTrayBytes(), title)
+                //
+                // 开关关掉就走 dispose：不光是「以后不装」，已经装着的那个图标也要当场卸掉，
+                // 否则用户关了开关、点了 ×，窗口还是被收起来 —— 那等于开关没生效。
+                trayReady = if (trayWanted) tray.install(loadTrayBytes(), title) else { tray.dispose(); false }
             }
             // 标题栏由系统画，深色主题下那条浅灰白接缝很扎眼，所以这里跟着配色改。
             // 存成一个状态而不是直接在回调里调：窗口刚组合时 peer 可能还没建好，
@@ -171,6 +181,8 @@ fun main(args: Array<String>) {
                 } else {
                     null
                 },
+                // 设置页那一格改了就立刻转过来：装上或卸掉图标，不用等下次开程序。
+                onTrayEnabledChanged = { trayWanted = it },
             )
         }
     }
