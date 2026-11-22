@@ -70,6 +70,13 @@ fun main(args: Array<String>) {
 
     application {
         val windowState = rememberWindowState(width = 1280.dp, height = 820.dp)
+        // 打包时录 AOT 缓存用的开关：环境变量 PLATYPUS_AOT_RECORD_MS 有值时，
+        // 窗口显示后等这么久就自己正常退出（走 exitApplication，= onCloseConfirmed 那条路）。
+        //
+        // 为什么非要有这个环境变量：AOT 缓存只在 JVM 正常退出时写盘，点右上角那个 ×
+        // 在装了托盘的情况下只是收进托盘、进程不退；强杀与 Ctrl-Break 也录不出来（都实测过）。
+        // 发行包里没人设这个变量，它不产生任何行为。
+        val aotRecordMs = System.getenv("PLATYPUS_AOT_RECORD_MS")?.toLongOrNull()
         // 点右上角那个 × 只是「提出关窗」，不直接退：还有游戏在跑的时候要先问一句
         // （见 App 的 closeSignal）。真正退出的入口只有一个 —— onCloseConfirmed。
         var closeSignal by remember { mutableStateOf(0) }
@@ -92,6 +99,13 @@ fun main(args: Array<String>) {
             )
         }
         DisposableEffect(Unit) { onDispose { tray.dispose() } }
+
+        if (aotRecordMs != null) {
+            LaunchedEffect(Unit) {
+                kotlinx.coroutines.delay(aotRecordMs)
+                exitApplication()
+            }
+        }
 
         Window(
             onCloseRequest = { closeSignal++ },

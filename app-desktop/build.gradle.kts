@@ -697,9 +697,149 @@ tasks.matching { it.name == "createDistributable" }.configureEach {
     }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// 冷启动：给 app image 录一份 AOT 缓存
+//
+// 为什么值得做：真实 exe 从双击到窗口出现实测 2.17–2.31 秒（五次），其中一大半是
+// 类加载与 JIT。JDK 25 的 AOT 缓存把启动期加载过的类与编译产物整段存盘，下次直接从
+// 映射好的镜像里取，同一台机器实测降到 0.86–0.93 秒。
+//
+// 录制的两个硬约束（都踩过）：
+//   1. 缓存必须由「产物自带的 runtime」生成 —— 用外部 JDK 生成的那份在加载时会被
+//      拒绝（runtime/lib/modules 的内容与它不匹配），日志是
+//      "This file is not the one used while building the AOT cache"。
+//      所以先把外部 JDK 的 java.exe/javaw.exe 复制进 runtime/bin（jpackage 的裁剪
+//      运行时里没有启动器，只有 dll）。
+//   2. 缓存只在 JVM 正常退出时写盘。启动器装了托盘，"点 ×"只是收进托盘；强杀与
+//      Ctrl-Break 都录不出来。所以走环境变量 PLATYPUS_AOT_RECORD_MS，让它在窗口
+//      显示后等一会儿自己 exitApplication()。
+//
+// 缓存里记的是启动那条路径上加载过的类，与版本强相关：换一版产物（jar 名里的 hash
+// 变了）旧缓存就对不上，JVM 会打一行 "shared class paths mismatch" 然后退回无缓存
+// 启动 —— 是降级，不是崩溃，用户那边只是慢一点。所以每次出包都重新录。
+// ─────────────────────────────────────────────────────────────────────────────
+val aotCache = tasks.register("aotCache") {
+    group = "build"
+    description = "出包后给绿色版录一份 AOT 缓存（先把 jar 的 mtime 统一，缓存才跟得走）"
+    dependsOn(tasks.named("createDistributable"))
+    doLast {
+        val hostOs = System.getProperty("os.name").orEmpty().lowercase()
+        if (!hostOs.contains("win")) {
+            logger.lifecycle("[aot] 只在 Windows 上录：其它平台的 jpackage 产物结构不同，未验证")
+            return@doLast
+        }
+        val appRoot = layout.buildDirectory.dir("compose/binaries/main/app/" + brand.nameEn).get().asFile
+        val appDir = appRoot.resolve("app")
+        val cfg = appDir.resolve(brand.nameEn + ".cfg")
+        if (!cfg.isFile) {
+            logger.warn("[aot] 找不到启动配置 {}，跳过", cfg)
+            return@doLast
+        }
+        // classpath 从启动配置里读，不自己拼：jar 名带 hash，只有产物自己知道。
+        val jars = cfg.readLines(Charsets.UTF_8)
+            .filter { it.startsWith("app.classpath=") }
+            .map { it.removePrefix("app.classpath=").replace("\$APPDIR", appDir.absolutePath) }
+        if (jars.isEmpty()) {
+            logger.warn("[aot] 启动配置里没读到 jar，跳过")
+            return@doLast
+        }
+        val javaHome = File(System.getProperty("java.home"))
+        val javaExe = javaHome.resolve("bin/java.exe")
+        if (!javaExe.isFile) {
+            logger.warn("[aot] 找不到 {}，跳过", javaExe)
+            return@doLast
+        }
+        val runtimeBin = appRoot.resolve("runtime/bin")
+        listOf("java.exe", "javaw.exe").forEach { name ->
+            val src = javaHome.resolve("bin/" + name)
+            if (src.isFile) src.copyTo(runtimeBin.resolve(name), overwrite = true)
+        }
+        // 录之前先把 jar 的修改时间统一成一个固定值，这是缓存能跟着包走的前提。
+        //
+        // 为什么非得这么做：JVM 校验缓存是否还对得上时，除了比 jar 的名字与大小，还比
+        // 文件的修改时间（毫秒级）。实测把 56 个 jar 的 sha256 全部比成一致、只让 mtime
+        // 不同，日志就是 "shared class paths mismatch" + "Unable to map shared spaces"，
+        // 退回 2.2 秒；只把 mtime 用 copystat 对齐，立刻回到 0.9 秒。所以缓存绑定的是
+        // 「名字 + 大小 + mtime」这一组，不是内容 hash。
+        //
+        // 固定值必须是偶数秒：绿色版走 zip，DOS 时间戳只能存偶数秒。打包/解压链路实测
+        // 保留整秒（Compress-Archive + Expand-Archive 后 mtime 一致），但会把毫秒截掉
+        // —— 所以不能留毫秒，否则 -0.628 秒的差就让缓存失配。
+        //
+        // 安装版（msi）这条救不了：jpackage 会把 jar 重新复制到 tmp/packageMsi/libs
+        // 再收进 CAB，复制那一刻的 mtime 就被刻进包，安装到用户机上必然与录制时不同。
+        // 实测解包出来的 msi 树 mtime 比 image 晚 29 秒，因此 msi 固定退回无缓存启动
+        // （降级，不是崩溃）。所以缓存只发给绿色版，msi 里不放，省 15 MB。
+        val fixedMillis = 1_700_000_000_000L
+        (jars.map { File(it) } + appRoot.resolve("runtime/lib/modules")).forEach { file ->
+            if (file.isFile) file.setLastModified(fixedMillis)
+        }
+
+        // 缓存在 build/aot 下录，最后再复制进 app image 的 app/resources/。
+        // 直接录在 app 目录里不行：那份文件会被下一次 createDistributable 整目录重铺给盖掉。
+        val target = layout.buildDirectory.dir("aot").get().asFile.resolve("app.aot")
+        val liveResources = appDir.resolve("resources")
+        target.parentFile.mkdirs()
+        if (target.isFile) target.delete()
+        val command = listOf(
+            runtimeBin.resolve("java.exe").absolutePath,
+            "-XX:AOTCacheOutput=" + target.absolutePath,
+            "-Dcompose.application.resources.dir=" + appDir.resolve("resources").absolutePath,
+            "-Dcompose.application.configure.swing.globals=true",
+            "-Dskiko.library.path=" + appDir.absolutePath,
+            "-cp", jars.joinToString(";"),
+            "io.github.huang404yan.platypus.desktop.MainKt",
+        )
+        logger.lifecycle("[aot] 录制中，约 20 秒……")
+        val started = System.currentTimeMillis()
+        val process = ProcessBuilder(command)
+            .directory(appDir)
+            .redirectErrorStream(true)
+            .apply { environment()["PLATYPUS_AOT_RECORD_MS"] = "12000" }
+            .start()
+        val output = process.inputStream.bufferedReader().use { it.readText() }
+        val code = process.waitFor()
+        val seconds = (System.currentTimeMillis() - started) / 1000.0
+        if (code != 0 || !target.isFile) {
+            // 录制失败不影响出包：缓存只是加速层，没有它用户照样能用，只是慢一点。
+            logger.warn("[aot] 录制失败（exit={}，{} 秒），产物不带缓存", code, seconds)
+            output.lines().filter { it.contains("AOT") || it.contains("aot") }
+                .take(10).forEach { logger.warn("[aot]   {}", it) }
+            return@doLast
+        }
+        logger.lifecycle("[aot] 缓存 {} 字节，用了 {} 秒", target.length(), seconds)
+        // 缓存只放进已经铺好的 app image（app/resources/），也就是绿色版那一份。
+        //
+        // 为什么不再往 appResourcesRootDir 里放、让 msi 也带上：见上面 mtime 那段 ——
+        // 经过 jpackage 收进 CAB 再安装，jar 的 mtime 必然变，缓存必然失配，等于白塞
+        // 15 MB 还多一个让用户困惑的 2.2 秒。msi 那份 cfg 里照样带着 -XX:AOTCache 参数，
+        // 但文件不存在时 JVM 只打一行 warning 就退回常规启动，不影响使用。
+        val dir = liveResources
+        dir.mkdirs()
+        target.copyTo(dir.resolve("app.aot"), overwrite = true)
+        logger.lifecycle("[aot] app.aot 已放进 {}（绿色版会带上，安装版不带）", dir)
+    }
+}
+
 compose.desktop {
     application {
         mainClass = "io.github.huang404yan.platypus.desktop.MainKt"
+
+        // 启动时加载 AOT 缓存（内容由 aotCache 任务录进 app/resources/，只有绿色版带）。
+        // 写成 $APPDIR 而不是绝对路径：jpackage 的启动器会把 $APPDIR 展开到 app 目录，
+        // 所以整包搬到别的路径、甚至别的盘，缓存仍然命中（已实测）。
+        // 这里声明而不是事后改 cfg，是因为 cfg 由 jpackage 现生成，改 app image 里
+        // 那份不会传播到安装包里。
+        // 安装版不带缓存（原因见 aotCache 里 mtime 那段），那条路径下 JVM 只打一行
+        // warning 然后退回常规启动 —— 是降级不是崩溃，所以这条参数对两种形态都带上。
+        //
+        // 分隔符用正斜杠，不能写反斜杠：jpackage 写 .cfg 时会解释反斜杠转义，
+        // 写成 $APPDIR\resources\app.aot 会让 \r 变成回车、\a 变成响铃，
+        // 那一行在 cfg 里被拆成两截（实测出来的坏行是
+        // "java-options=-XX:AOTCache=$APPDIR" + "java-options=esourcesapp.aot"），
+        // JVM 于是拿到一个不存在的路径，缓存静默失效、退回 2.2 秒。
+        // 正斜杠在 Windows 上一样能解析，jpackage 也不会碰它。
+        jvmArgs("-XX:AOTCache=\$APPDIR/resources/app.aot")
 
         // 原生包用 jpackage 打。产物在 app-desktop/build/compose/binaries/main/ 下。
         nativeDistributions {
