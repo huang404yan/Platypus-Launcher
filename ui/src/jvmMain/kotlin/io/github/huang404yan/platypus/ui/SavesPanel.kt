@@ -34,10 +34,8 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.painter.BitmapPainter
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.res.loadImageBitmap
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -492,13 +490,8 @@ private fun WorldRow(
 @Composable
 private fun WorldIcon(world: WorldEntry) {
     val file = world.iconFile
-    val bitmap: ImageBitmap? = remember(file?.absolutePath, world.lastModified) {
-        if (file == null) {
-            null
-        } else {
-            runCatching { file.inputStream().use { loadImageBitmap(it) } }.getOrNull()
-        }
-    }
+    // world.lastModified 当时间戳：世界里截了新图，缓存要跟着换。
+    val bitmap = rememberIconBitmap(file, world.lastModified)
     val shape = RoundedCornerShape(6.dp)
     Box(
         modifier = Modifier.size(44.dp, 44.dp).background(MaterialTheme.colorScheme.surface, shape),

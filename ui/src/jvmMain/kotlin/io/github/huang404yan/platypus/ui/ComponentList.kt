@@ -35,10 +35,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.painter.BitmapPainter
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.res.loadImageBitmap
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.Dp
@@ -245,9 +243,7 @@ private fun componentIconCacheDir(): File =
 
 @Composable
 private fun ComponentIconBox(file: File?, title: String, size: Dp) {
-    val bitmap: ImageBitmap? = remember(file?.absolutePath, file?.length()) {
-        file?.let { runCatching { it.inputStream().use { stream -> loadImageBitmap(stream) } }.getOrNull() }
-    }
+    val bitmap = rememberIconBitmap(file)
     Box(
         modifier = Modifier.size(size).clip(RoundedCornerShape(8.dp))
             .background(MaterialTheme.colorScheme.surfaceVariant),

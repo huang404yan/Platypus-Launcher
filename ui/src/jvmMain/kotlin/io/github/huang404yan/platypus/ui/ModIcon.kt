@@ -11,14 +11,11 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.produceState
-import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.painter.BitmapPainter
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.res.loadImageBitmap
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import io.github.huang404yan.platypus.core.mods.ModEntry
@@ -68,9 +65,8 @@ internal fun ModIcon(entry: ModEntry, size: Dp = 40.dp) {
 
 @Composable
 private fun IconBox(file: File?, title: String, size: Dp) {
-    val bitmap: ImageBitmap? = remember(file?.absolutePath, file?.length()) {
-        file?.let { runCatching { it.inputStream().use { stream -> loadImageBitmap(stream) } }.getOrNull() }
-    }
+    // 解码在 IO 线程（见 rememberIconBitmap）：先画首字母，图到了再换。
+    val bitmap = rememberIconBitmap(file)
     val shape = RoundedCornerShape(8.dp)
     Box(
         modifier = Modifier.size(size).clip(shape).background(MaterialTheme.colorScheme.surfaceVariant),

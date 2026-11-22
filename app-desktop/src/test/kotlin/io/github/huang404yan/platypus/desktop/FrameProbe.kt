@@ -28,6 +28,8 @@ import kotlin.system.exitProcess
  *  热进页 —— 页已经进过了，再切过去只付页面本身的重组与布局代价。
  * 优化要盯着热的那个数：冷的那个靠预建与预热抹平，改代码用处不大。
  *
+ * -DframePrebuild=true 先把每页走一遍再量冷进页：用来验证「启动时预建」值不值得。
+ *
  * -DframePasses=N 连跑 N 遍（每遍新建一个场景），用来判断「冷进页那一百多毫秒
  * 是一次性成本（类加载 / 首次 JIT）还是每次都要付。第一遍是真正的冷，第二遍起
  * 类已经加载完，两者之差就是一次性成本。
@@ -88,6 +90,23 @@ private fun measurePass(dir: File, services: DesktopServices) {
     // 空跑几帧让它稳定下来再切，不改变「第一次进这一页」这个语义。
     repeat(STABILIZE_FRAMES) { frame() }
 
+    // ①.5 预建（-DframePrebuild=true 才跑）：先把每页走一遍再量「冷进页」。
+    //     量出来的 cold 列就从「本次运行第一次进这一页」变成「预建之后第一次进」，
+    //     两次运行一减，就是预建能省下的那部分 —— 这是判断「值不值得在启动时
+    //     偷偷把页面组一遍」的唯一依据，靠猜没意义。
+    if (System.getProperty("framePrebuild") == "true") {
+        val t0 = System.nanoTime()
+        for ((key, _) in pages) {
+            press(kfm, canvas, key)
+            repeat(3) { frame() }
+        }
+        for ((key, _) in pages) {
+            press(kfm, canvas, awayFrom(key))
+            repeat(3) { frame() }
+        }
+        println("prebuild " + ms((System.nanoTime() - t0) / 1000L) + " (walked all pages once)")
+    }
+
     // ② 冷进页：本次运行第一次切到每页。每页只量一次，量完就离开。
     val coldFirst = LinkedHashMap<String, Long>()
     for ((key, name) in pages) {
@@ -122,7 +141,10 @@ private fun measurePass(dir: File, services: DesktopServices) {
         repeat(ROUNDS) { round ->
             // 先离开目标页，保证下一轮的「切过去」是真的从别的页切回来。
             press(kfm, canvas, awayFrom(key))
-            repeat(2) { frame() }
+            // 离开之后多给几帧：实例一多，旧页拆掉整棵子树要走的节点也多，切太快时
+            // Compose 1.12.2 的 RectManager 会偶发 "LayoutNode N not found in RectList"
+            // （只在 15 个实例的目录上复现过，1 个实例时没崩过）。
+            repeat(AWAY_FRAMES) { frame() }
             press(kfm, canvas, key)
             firsts[round] = frame()
             seconds[round] = frame()
@@ -172,6 +194,9 @@ private const val WARMUP_FRAMES = 60
 
 /** 冷启动之后先空跑几帧再开始切页，避开首屏刚组合完时的布局竞态。 */
 private const val STABILIZE_FRAMES = 10
+
+/** 每次「先离开目标页」之后空跑几帧，等旧页拆完再切过去（见热进页那段注释）。 */
+private const val AWAY_FRAMES = 6
 private const val ROUNDS = 9
 /** 切页动画最长 Motion.BASE=180ms，按 60Hz 走 12 帧足够；多留一些余量。 */
 private const val SETTLE_FRAMES = 20

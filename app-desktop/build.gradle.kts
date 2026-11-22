@@ -522,6 +522,11 @@ tasks.register<JavaExec>("frameProbe") {
     if (project.hasProperty("framePasses")) {
         jvmArgs("-DframePasses=" + project.property("framePasses").toString())
     }
+    // -PframePrebuild 先把每页走一遍再量冷进页：与不加时对比，差多少就是「启动时
+    // 预建」能省下的那部分，用来决定这个优化值不值得做。
+    if (project.hasProperty("framePrebuild")) {
+        jvmArgs("-DframePrebuild=true")
+    }
     // -PframeClassLog 把类加载明细记到工作区根：用来确认「第一遍慢五倍」里
     // 到底有多少是类加载、其中有多少是我们自己的类（能预热）而不是 JDK/Compose 的。
     if (project.hasProperty("frameClassLog")) {
