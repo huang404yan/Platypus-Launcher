@@ -31,17 +31,22 @@ kotlin {
     }
 }
 
-// `gradle :ui:scrollProbe [-PscrollDir=dist/_scrollmc/versions/1.20.1-test]`
+// `gradlew :ui:scrollProbe`                      —— 自造 60 个模组当负载，跑完删掉
+// `gradlew :ui:scrollProbe -PscrollDir=<实例目录>` —— 用真目录量真实解码开销
 //
 // 滚动负载探针：在无窗口环境里把一屏几十个模组滚一遍，逐帧计耗时。用来回答
 // 「滚动时主线程有没有被图标解码之类的事占住」。开发期用，不进发行包。
 // 放在 ui 模块内，是因为要量的 [ComponentRow] 是 internal，跨模块够不着。
+//
+// 不传 -PscrollDir 时自己造负载并断言阈值（跑完打印 PASS/FAIL 与退出码），
+// 所以它可以当回归用：改过列表 / 图标相关的代码后跑一次，红了就是结构退化了。
+// 想量真数字就指一个真实例目录，那时候阈值仍会打印但只作参考。
 // ─────────────────────────────────────────────────────────────────────────────
 val scrollProbeCompilation = kotlin.jvm().compilations.getByName("test")
 
 tasks.register<JavaExec>("scrollProbe") {
     group = "verification"
-    description = "无头滚动探针：ImageComposeScene 渲染模组列表并滚动，统计每帧耗时（开发期用）"
+    description = "无头滚动探针：ImageComposeScene 渲染模组列表并滚动，统计每帧耗时并断言阈值（开发期用）"
     dependsOn(scrollProbeCompilation.compileTaskProvider)
     mainClass.set("io.github.huang404yan.platypus.ui.ScrollProbeKt")
     classpath = files(
@@ -52,8 +57,18 @@ tasks.register<JavaExec>("scrollProbe") {
     jvmArgs("-Dfile.encoding=UTF-8")
     argumentProviders.add(
         CommandLineArgumentProvider {
-            val dir = providers.gradleProperty("scrollDir").orElse("dist/_scrollmc/versions/1.20.1-test").get()
-            listOf(rootProject.file(dir).absolutePath)
+            // 不传就一个参数都不给，探针自己造负载 —— 常规回归不该依赖本机某份素材。
+            val dir = providers.gradleProperty("scrollDir").orNull
+            if (dir.isNullOrBlank()) emptyList() else listOf(rootProject.file(dir).absolutePath)
         },
     )
 }
+
+// 「改完界面该跑的」一个口子：单测 + 滚动探针。故意不挂进 check —— 探针要起
+// ImageComposeScene，比单测重，挂上去会让每次构建都多等十几秒，最后大家学会绕过它。
+tasks.register("verifyUi") {
+    group = "verification"
+    description = "界面相关的常规验证：:ui:jvmTest + :ui:scrollProbe"
+    dependsOn(tasks.named("jvmTest"), tasks.named("scrollProbe"))
+}
+
