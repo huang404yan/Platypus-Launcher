@@ -257,6 +257,13 @@ internal class TrayController(
             holder.setLocation(where)
             holder.isVisible = true
             popup.show(holder, 0, 0)
+            // 显式把焦点按到锚点上。setVisible 之后焦点不一定马上落到这个 1×1 的
+            // 小窗口（实测连跑三次有两次没落上，表现就是菜单开着、按 Esc 关不掉）。
+            // 菜单本身是重型弹层，焦点留在锚点这一侧才收得到按键。
+            if (!holder.isFocused) {
+                holder.toFront()
+                holder.requestFocus()
+            }
         }
     }
 

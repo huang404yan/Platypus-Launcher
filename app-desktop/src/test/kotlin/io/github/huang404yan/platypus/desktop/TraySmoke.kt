@@ -65,6 +65,11 @@ fun main() {
                 img.colorModel.hasAlpha() && img.width == 32 && img.height == 32,
                 "hasAlpha=" + img.colorModel.hasAlpha() + " size=" + img.width + "x" + img.height,
             )
+            // 内部洞：旧版按「红绿差」抠背景时把纯黑的眼睛一起抠掉了，
+            // 洞透出通知区的白底就是用户看到的「这个图标还有白点」。
+            // 判据 = 从四边对 alpha<128 做 flood fill，淹不到的透明像素数必须是 0。
+            val holes = holesInside(img)
+            check(name + " 没有内部透明的洞（否则就是白点）", holes == 0, "holes=" + holes)
         }
     }
 
@@ -148,7 +153,16 @@ fun main() {
         if (shown) {
             val size = menuSize(controller)
             check("弹出后的菜单不是 0 尺寸", size != null && size.width > 40 && size.height > 20, size.toString())
-            val closed = pressEsc() && waitFor(3000) { !menuVisible(controller) }
+            // Robot 发 Esc 是发给当前前台窗口的，而锚点 JDialog 刚 setVisible 时
+            // 焦点偶尔还没落上去（实测三次里两次 Esc 丢），所以重试几次再判失败。
+            var closed = false
+            for (attempt in 1..3) {
+                if (pressEsc() && waitFor(1200) { !menuVisible(controller) }) {
+                    closed = true
+                    break
+                }
+                Thread.sleep(150)
+            }
             check("按 Esc 能收起菜单（锚点必须是有主的 JDialog）", closed)
         }
     }
@@ -193,4 +207,47 @@ private fun waitFor(timeoutMs: Long, cond: () -> Boolean): Boolean {
         Thread.sleep(50)
     }
     return cond()
+}
+
+/**
+ * 数一数图里有多少「与外界不连通的透明像素」。
+ *
+ * 托盘图标必须整块主体实心：眼睛、嘴这些暗部被误判成背景抠掉时，通知区的白底
+ * 就会从洞里透出来，远看是一粒粒白点（用户 2026-11-22 的反馈「这个图标还有白点」）。
+ * 判据用四边 flood fill：从画布四边能走到的透明区算外界，走不到却又是透明的就是洞。
+ * 旧版按「棕 vs 青绿」的红绿差抠图，鸭子的纯黑眼睛 r≈g 正好落进背景区间，
+ * 两只眼睛被挖空（32×32 上量出 7 个洞），这条断言就是钉住那个回归。
+ */
+private fun holesInside(img: java.awt.image.BufferedImage): Int {
+    val w = img.width
+    val h = img.height
+    val trans = Array(h) { y -> BooleanArray(w) { x -> (img.getRGB(x, y) ushr 24) < 128 } }
+    val outside = Array(h) { BooleanArray(w) }
+    val queue = ArrayDeque<Int>()
+    fun push(x: Int, y: Int) {
+        if (x in 0 until w && y in 0 until h && trans[y][x] && !outside[y][x]) {
+            outside[y][x] = true
+            queue.addLast(y * w + x)
+        }
+    }
+    for (x in 0 until w) {
+        push(x, 0)
+        push(x, h - 1)
+    }
+    for (y in 0 until h) {
+        push(0, y)
+        push(w - 1, y)
+    }
+    while (queue.isNotEmpty()) {
+        val id = queue.removeFirst()
+        val x = id % w
+        val y = id / w
+        push(x + 1, y)
+        push(x - 1, y)
+        push(x, y + 1)
+        push(x, y - 1)
+    }
+    var holes = 0
+    for (y in 0 until h) for (x in 0 until w) if (trans[y][x] && !outside[y][x]) holes++
+    return holes
 }
